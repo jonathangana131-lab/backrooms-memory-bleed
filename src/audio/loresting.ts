@@ -38,10 +38,6 @@ export function stageCutoff(stage: number): number {
 interface ToneSpec {
   readonly type: OscillatorType;
   /** frequency in Hz */
-
-
-  readonly type: OscillatorType;
-  /** frequency in Hz */
   readonly freq: number;
   /** start offset from the sting downbeat, seconds */
   readonly at: number;
