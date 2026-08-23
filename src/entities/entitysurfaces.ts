@@ -45,3 +45,52 @@ const DISTRICT_SURFACE: Record<number, 'carpet' | 'tile' | 'metal'> = {
   [DISTRICT_HONEYCOMB]: 'tile',
 
 
+  [DISTRICT_CORRIDOR_GRID]: 'tile',
+  [DISTRICT_STORAGE]: 'metal',
+};
+
+/** Archetype -> footstep playback-rate modifier, computed once and cached. */
+const TYPE_RATE: Record<string, number> = {
+  watcher: 0.85,
+  wanderer: 1.0,
+  believer: 1.05,
+  double: 1.0,
+};
+
+const RATE_CACHE = new Map<string, number>();
+
+/**
+ * Stateless surface lookup for one entity footstep.
+ * @param district district ordinal at the sample point
+ * @param x world x of the stepping foot
+ * @param z world z of the stepping foot
+ * @param puddles registered puddle centers; nearest wins within radius
+ * @returns the surface kind to play, 'splash' overriding near puddles
+ */
+export function surfaceAtPoint(
+  district: number,
+  x: number,
+  z: number,
+  puddles: readonly Point2[] = [],
+): SurfaceKind {
+  for (const p of puddles) {
+    const dx = p.x - x;
+    const dz = p.z - z;
+    if (dx * dx + dz * dz <= PUDDLE_RADIUS * PUDDLE_RADIUS) return 'splash';
+  }
+  return DISTRICT_SURFACE[district] ?? 'carpet';
+}
+
+/**
+ * Playback-rate modifier for an archetype's footsteps.
+ * Unknown archetypes fall back to a plain human gait.
+ * @param type archetype name ('watcher' | 'wanderer' | 'believer' | 'double')
+ */
+export function playbackRateFor(type: string): number {
+  let rate = RATE_CACHE.get(type);
+  if (rate === undefined) {
+    rate = TYPE_RATE[type] ?? 1.0;
+    RATE_CACHE.set(type, rate);
+  }
+  return rate;
+}
