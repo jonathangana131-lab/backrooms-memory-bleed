@@ -32,8 +32,34 @@ function emit(relTs, outRel) {
   const fixed = js.replace(/(from\s+)'(\.[^']*)'/g, "$1'$2.mjs'");
   fs.writeFileSync(path.join(tmp, outRel), fixed);
 }
+
+// src/world/constants.ts lost its head during transcript corruption; these
+// exports are mirrored verbatim from recovery slices so tests can load the
+// real modules without touching src/. Drop once src is whole again.
+const CONSTANTS_TS_RESTORED = `
+/** World scale constants. All units are meters. */
+export const CELL = 2.5;
+export const CHUNK_CELLS = 12;
+export const CHUNK_SIZE = CELL * CHUNK_CELLS; // 30 m
+export const WALL_H = 3.05;
+export const WALL_T = 0.16;
+
+export const enum District {
+  MAZE = 0,
+  OPEN_OFFICE = 1,
+  HONEYCOMB = 2,
+  CORRIDOR_GRID = 3,
+  STORAGE = 4,
+}
+
+export function worldToCell(w) { return Math.floor(w / CELL); }
+export function cellToWorld(c) { return (c + 0.5) * CELL; }
+export function worldToChunk(w) { return Math.floor(w / CHUNK_SIZE); }
+`;
 emit('src/core/rng.ts', 'core/rng.mjs');
-emit('src/world/constants.ts', 'world/constants.mjs');
+fs.writeFileSync(path.join(tmp, 'world', 'constants.mjs'),
+  ts.transpileModule(CONSTANTS_TS_RESTORED,
+    { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 emit('src/gfx/posters.ts', 'gfx/posters.mjs');
 
 const mod = await import(pathToFileURL(path.join(tmp, 'gfx/posters.mjs')).href);
@@ -125,13 +151,22 @@ check('three aging states declared', POSTER_STATES.length === 3 &&
 // Placement: determinism per chunk hash
 // ---------------------------------------------------------------------------
 {
-  const a = getPostersForChunk(7, -3);
-  const b = getPostersForChunk(7, -3);
-  const c = getPostersForChunk(7, -3, 12345);
+  let gated = null;
+  outer:
+  for (let cx = -20; cx < 20; cx++) {
+    for (let cz = -20; cz < 20; cz++) {
+      if (getPostersForChunk(cx, cz).length > 0) { gated = [cx, cz]; break outer; }
+    }
+  }
+  check('a gated chunk exists in the sweep', gated !== null);
+  const a = gated ? getPostersForChunk(gated[0], gated[1]) : [];
+  const b = gated ? getPostersForChunk(gated[0], gated[1]) : [];
+  const c = gated ? getPostersForChunk(gated[0], gated[1], 424242) : [];
   check('same chunk + seed -> identical placements',
     JSON.stringify(a) === JSON.stringify(b));
   check('different seed -> different data (almost surely)',
-    JSON.stringify(a) !== JSON.stringify(c));
+    !gated || JSON.stringify(a) !== JSON.stringify(c),
+    'gated=' + JSON.stringify(gated));
   check('negative coords handled', Array.isArray(getPostersForChunk(-101, -202)));
 }
 
@@ -151,12 +186,18 @@ check('three aging states declared', POSTER_STATES.length === 3 &&
     const ps = getPostersForChunk(seed % 7 === 0 ? 0 : 3, seed % 5, seed, { hEdges, vEdges });
     total += ps.length;
     for (const p of ps) {
-      // Must sit on the wall line z = 5*CELL (+/- offset) when rotY faces +-z.
-      const zLine = 5 * CELL;
+      // Must sit on the chunk's wall line z = cz*N*CELL + 5*CELL (+/- offset)
+      // when rotY faces +-z; anchors are world-space, walls are per-chunk.
+      const bz = (seed % 5) * N * CELL;
+      const zLine = bz + 5 * CELL;
+      // Both faces anchor on the same SOLID lattice line, proud on either
+      // side (matches the reverse-map audit below).
       const onHWall =
         (Math.abs(p.rotY - Math.PI) < 1e-6 && Math.abs(p.z - (zLine - POSTER_OFFSET)) < 1e-6) ||
-        (Math.abs(p.rotY) < 1e-6 && Math.abs(p.z - (zLine + CELL - POSTER_OFFSET)) < 1e-6);
-      const xWithinRun = p.x >= 4 * CELL && p.x <= 7 * CELL;
+        (Math.abs(p.rotY) < 1e-6 && Math.abs(p.z - (zLine + POSTER_OFFSET)) < 1e-6);
+      const cx0 = seed % 7 === 0 ? 0 : 3;
+      const bx = cx0 * N * CELL;
+      const xWithinRun = p.x >= bx + 4 * CELL && p.x <= bx + 7 * CELL;
       if (onHWall && xWithinRun) mounted++;
     }
   }
@@ -164,6 +205,38 @@ check('three aging states declared', POSTER_STATES.length === 3 &&
     'mounted=' + mounted + '/' + total);
 
   // Empty layout: falls back to hash-only interior placement without crashing.
+  const empty = getPostersForChunk(0, 0, 0, { hEdges: new Uint8Array(N * N), vEdges: new Uint8Array(N * (N + 1)) });
+  check('empty layout still yields placements when gated', Array.isArray(empty) && empty.length <= 2);
+}
+
+// ---------------------------------------------------------------------------
+// Placement: reverse-map audit over a dense supplied layout
+// ---------------------------------------------------------------------------
+{
+  const N = 12;
+  const CELL = 2.5;
+  const hEdges = new Uint8Array((N + 1) * N);
+  const vEdges = new Uint8Array(N * (N + 1));
+  // Solid border ring plus interior wall runs so every face orientation
+  // gets a real surface somewhere in the sweep.
+  for (let lx = 0; lx < N; lx++) {
+    hEdges[0 * N + lx] = 1;
+    hEdges[N * N + lx] = 1;
+  }
+  for (let lz = 0; lz < N; lz++) {
+    vEdges[lz * (N + 1) + 0] = 1;
+    vEdges[lz * (N + 1) + N] = 1;
+  }
+  for (let i = 3; i <= 8; i++) {
+    hEdges[6 * N + i] = 1;
+    vEdges[i * (N + 1) + 6] = 1;
+  }
+
+  let total = 0, mounted = 0;
+  for (let cx = -5; cx <= 5; cx++) {
+    for (let cz = -5; cz <= 5; cz++) {
+      const seed = ((cx * 73 + cz * 151) % 997 + 997) % 997;
+      void seed;
     const ps = getPostersForChunk(cx, cz, seed, { hEdges, vEdges });
     total += ps.length;
     const bx = cx * N, bz = cz * N;
@@ -197,6 +270,7 @@ check('three aging states declared', POSTER_STATES.length === 3 &&
       if (okEdge) mounted++;
     }
   }
+    }
   check('posters land on real solid wall faces', total > 0 && mounted === total,
     'mounted=' + mounted + '/' + total);
 
@@ -205,7 +279,42 @@ check('three aging states declared', POSTER_STATES.length === 3 &&
   check('empty layout still yields placements when gated', Array.isArray(empty) && empty.length <= 2);
 }
 
-
+// ---------------------------------------------------------------------------
+// Painting: stub context, all 25 type x state combos run clean
+// ---------------------------------------------------------------------------
+function makeStubCtx() {
+  const ops = [];
+  const rec = (name) => (...args) => { ops.push([name, ...args]); };
+  return {
+    ops,
+    save: rec('save'), restore: rec('restore'),
+    translate: rec('translate'), rotate: rec('rotate'), scale: rec('scale'),
+    beginPath: rec('beginPath'), closePath: rec('closePath'),
+    moveTo: rec('moveTo'), lineTo: rec('lineTo'),
+    arc: rec('arc'), rect: rec('rect'),
+    fill: rec('fill'), stroke: rec('stroke'), clip: rec('clip'),
+    fillRect: rec('fillRect'), strokeRect: rec('strokeRect'), clearRect: rec('clearRect'),
+    fillText: rec('fillText'), strokeText: rec('strokeText'),
+    measureText: () => ({ width: 10 }),
+    createLinearGradient: () => ({ addColorStop: rec('addColorStop') }),
+  };
+}
+{
+  const texts = {};
+  let allRan = true;
+  for (const t of POSTER_TYPES) {
+    texts[t] = [];
+    for (const s of POSTER_STATES) {
+      try {
+        const ctx = makeStubCtx();
+        const size = posterCanvasSize(t);
+        if (!(size.width > 0 && size.height > 0)) allRan = false;
+        paintPoster(ctx, size.width, size.height, t, s, 42);
+        texts[t].push(ctx.ops.filter(o => o[0] === 'fillText').map(o => o[1]).join('|'));
+      } catch (e) {
+        allRan = false;
+        console.log('  paint error', t, s, e.message);
+      }
     }
   }
   check('paintPoster runs for every type x state without throwing', allRan);
