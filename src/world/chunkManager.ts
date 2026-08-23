@@ -15,7 +15,7 @@ import { getLayoutPool } from '../workers/layoutPool';
 import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
 import type { GraffitiInstance, PropInstance } from './architect';
-import { hash2i } from '../core/rng';
+import { hash2i, RNG } from '../core/rng';
 import type { MaterialSet } from '../gfx/materials';
 import type { MemoryField } from '../memory/field';
 
@@ -58,8 +58,6 @@ export class ChunkManager {
   constructor(private scene: Scene, private mats: MaterialSet, public seed: number) {}
 
   key(cx: number, cz: number): string {
-
-
     return cx + ',' + cz;
   }
 
@@ -111,18 +109,18 @@ export class ChunkManager {
     if (this.useWorker) {
       getLayoutPool().requestLayout(this.seed, cx, cz).then((l) => {
         if (!this.chunks.has(cx + ':' + cz)) return;
-        this.buildFromLayout(cx, cz, l);
+        void this.buildFromLayout(cx, cz, l);
       }).catch(() => {
         const l2 = generateLayout(this.seed, cx, cz, this.mem ?? undefined);
-        if (this.chunks.has(cx + ':' + cz)) this.buildFromLayout(cx, cz, l2);
+        if (this.chunks.has(cx + ':' + cz)) void this.buildFromLayout(cx, cz, l2);
       });
       return;
     }
     const layout = generateLayout(this.seed, cx, cz, this.mem ?? undefined);
-    this.buildFromLayout(cx, cz, layout);
+    void this.buildFromLayout(cx, cz, layout);
   }
 
-  private buildFromLayout(cx: number, cz: number, layout: ChunkLayout): void {
+  private async buildFromLayout(cx: number, cz: number, layout: ChunkLayout): Promise<void> {
     if (this.consumedBatteries && this.consumedBatteries.size) {
       // coordinate-stable keys survive index shifts between builds
       layout.props = layout.props.filter((p, i) =>
@@ -150,12 +148,15 @@ export class ChunkManager {
     // revisited landmarks: the space rearranged the room since you left
     if (layout.landmark && this.discoveredLandmarks?.has(layout.landmark)) {
       const movable = new Set(['desk', 'chair', 'bench', 'crate', 'stacked_chairs', 'gurney']);
+      // deterministic rearrangement: seeded from chunk coords + world seed so
+      // a rebuilt chunk always shows the same rearrangement (no hidden state)
+      const rr = new RNG(hash2i(cx, cz, this.seed ^ 0x3e6d));
       let shifted = 0;
       for (const p of layout.props) {
         if (!movable.has(p.kind) || shifted >= 4) continue;
-        if (Math.random() < 0.5) continue;
-        p.x += (Math.random() - 0.5) * 0.9;
-        p.z += (Math.random() - 0.5) * 0.9;
+        if (rr.chance(0.5)) continue;
+        p.x += (rr.next() - 0.5) * 0.9;
+        p.z += (rr.next() - 0.5) * 0.9;
         shifted++;
       }
       if (shifted > 0) console.log('[lm] rearranged', shifted, 'props in', layout.landmark);
@@ -169,8 +170,8 @@ export class ChunkManager {
         if (seen === layout.landmark) continue;
         const propKind = kindMap[seen];
         if (!propKind) continue;
-        const ang = Math.random() * Math.PI * 2;
-        const dist2 = 3 + Math.random() * 3;
+        const ang = rr.next() * Math.PI * 2;
+        const dist2 = 3 + rr.next() * 3;
         const centerX = (cx * CHUNK_CELLS + N_HALF) * CELL;
         const centerZ = (cz * CHUNK_CELLS + N_HALF) * CELL;
         layout.props.push({
@@ -178,18 +179,16 @@ export class ChunkManager {
           x: centerX + Math.cos(ang) * dist2,
           z: centerZ + Math.sin(ang) * dist2,
           rot: 0,
-          variant: Math.floor(Math.random() * 4),
+          variant: rr.int(0, 4),
         });
         break; // one foreign item per revisit is enough
       }
     }
-    const geo = buildChunkGeometry(layout);
-    // district temperature tint: subtle per-region hue shifts
-    const TINTS: [number, number, number][] = [
-      [0.96, 0.94, 0.88],  // maze: warm-dim
-      [1.04, 1.02, 0.95],  // open office: brighter
-
-
+    // contact shadows: soft dark blobs under furniture (torch-lit realism)
+    try {
+      const { ShadowMesherPass } = await import('../gfx/shadowmesher');
+      const pass = new ShadowMesherPass();
+      layout.shadowQuads = pass.generate(layout.props);
     } catch (e) { console.warn('[bmb] contact shadows unavailable', e); }
     const geo = buildChunkGeometry(layout);
     // district temperature tint: subtle per-region hue shifts
@@ -198,8 +197,12 @@ export class ChunkManager {
       [1.04, 1.02, 0.95],  // open office: brighter
       [1.00, 0.97, 0.90],  // honeycomb
       [0.92, 0.95, 1.00],  // corridor grid: cool
-
-
+      [0.88, 0.86, 0.80],  // storage: dusty dim
+    ];
+    const tint = TINTS[layout.district as number] ?? [1, 1, 1];
+    for (const grp of [geo.floor, geo.ceiling, geo.walls, geo.debris]) {
+      applyTint(grp, tint[0], tint[1], tint[2]);
+    }
 
     const meshes: Mesh[] = [];
     const make = (arrs: typeof geo.floor, name: string, mat: keyof MaterialSet): void => {
@@ -363,8 +366,6 @@ export class ChunkManager {
     let bd = Infinity;
     for (const c of this.chunks.values()) {
       for (const n of c.layout.notes) {
-
-
         const d = Math.hypot(n.x - x, n.z - z);
         if (d < 1.7 && d < bd) { bd = d; best = n; }
       }
@@ -420,12 +421,6 @@ export class ChunkManager {
         if (d < 1.6 && d < bd) { bd = d; best = p; }
       }
     }
-      for (const p of c.layout.props) {
-        if (p.kind !== 'battery') continue;
-        const d = Math.hypot(p.x - x, p.z - z);
-        if (d < 1.6 && d < bd) { bd = d; best = p; }
-      }
-    }
     return best;
   }
 
@@ -460,8 +455,12 @@ export class ChunkManager {
     for (const c of this.chunks.values()) {
       for (const l of c.layout.lights) {
         if (!l.alive) continue;
-
-
+        const d = (l.x - x) ** 2 + (l.z - z) ** 2;
+        if (d < bd) { bd = d; bx = l.x; bz = l.z; }
+      }
+    }
+    if (!isFinite(bd)) return { d: Infinity, pan: 0 };
+    const dx = bx - x, dz = bz - z;
     const len = Math.hypot(dx, dz) || 1;
     // camera-right vector for Babylon yaw is (cos, -sin)
     const pan = Math.max(-1, Math.min(1, (dx * Math.cos(yaw) + dz * -Math.sin(yaw)) / len));
@@ -491,5 +490,3 @@ export class ChunkManager {
 
   static CELLS = CHUNK_CELLS;
 }
-
-
