@@ -13,7 +13,39 @@
  * mutating.
  */
 import type { ChunkLayout } from '../world/architect';
-import type { LayoutRequest, LayoutResponse, LayoutErrorResponse } from './layout.worker';
+/**
+ * Worker postMessage protocol of src/workers/layout.worker.ts. The worker
+ * module itself is bundled separately (Vite / esbuild) and is not imported
+ * here, so its message types are declared on the pool side.
+ */
+
+/** Main -> worker request: generate one chunk layout. */
+export interface LayoutRequest {
+  /** Correlation id, unique per worker slot. */
+  id: number;
+  /** World seed driving generation. */
+  seed: number;
+  /** Chunk X coordinate. */
+  cx: number;
+  /** Chunk Z coordinate. */
+  cz: number;
+}
+
+/** Worker -> main success reply. */
+export interface LayoutResponse {
+  /** Correlation id echoed from the request. */
+  id: number;
+  /** The generated layout. */
+  layout: ChunkLayout;
+}
+
+/** Worker -> main failure reply. */
+export interface LayoutErrorResponse {
+  /** Correlation id echoed from the request. */
+  id: number;
+  /** Human-readable failure reason. */
+  error: string;
+}
 
 export const WORKER_COUNT = 2;
 
