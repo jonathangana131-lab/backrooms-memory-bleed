@@ -148,5 +148,138 @@ export class HorrorDirector {
   /**
    * PHENOMENON — Breathing Walls.
    * During peak phase the registered walls subtly expand/contract:
+   * each node oscillates a few percent around its captured base scale.
+   * When the peak ends, every node is snapped back to base exactly once.
+   */
+  private breathingWalls(): void {
+    const peak = this.phase === 'peak';
+    let stillDeformed = false;
+    for (const n of this.breathingNodes) {
+      const base = this.breathingBase.get(n);
+      if (!base) continue;
+      if (peak) {
+        const s = 1 + Math.sin(this.breathClock * 1.7) * 0.03;
+        n.scaling.x = base.x * s;
+        n.scaling.y = base.y * (2 - s); // rough volume compensation
+        n.scaling.z = base.z * s;
+        stillDeformed = true;
+      } else if (this.breathApplied) {
+        n.scaling.x = base.x;
+        n.scaling.y = base.y;
+        n.scaling.z = base.z;
+      }
+    }
+    this.breathApplied = stillDeformed;
+  }
+
+  /**
+   * PHENOMENON — Cold Spot.
+   * Samples the player position ~4x/sec into a short trail; while any
+   * trail point sits within coldSpotRadius of the player the overlay
+   * strength rises toward 1, and it decays back to 0 once they leave.
+   * The host tint hook is optional; intensity is always published on
+   * coldSpotIntensity for debug readouts.
+   */
+  private coldSpot(dt: number): void {
+    const now = this.host.elapsed();
+    const pos = this.host.playerPosition();
+    this.coldSampleAcc += dt;
+    if (this.coldSampleAcc >= 0.25) {
+      this.coldSampleAcc = 0;
+      this.coldTrail.push({ t: now, x: pos.x, z: pos.z });
+    }
+    while (this.coldTrail.length > 0 && now - this.coldTrail[0].t > this.coldSpotTrailSec) {
+      this.coldTrail.shift();
+    }
+    let target = 0;
+    for (const pt of this.coldTrail) {
+      const d = Math.hypot(pt.x - pos.x, pt.z - pos.z);
+      if (d < this.coldSpotRadius) target = Math.max(target, 1 - d / this.coldSpotRadius);
+    }
+    // ease toward the target so the tint never pops between samples
+    this.coldSpotIntensity += (target - this.coldSpotIntensity) * Math.min(1, dt * 3);
+    if (this.coldSpotIntensity < 0.005) this.coldSpotIntensity = 0;
+    this.host.setColdSpotTint?.(this.coldSpotIntensity);
+  }
+
+  /**
+   * Record one of the player's own footsteps for later echo replay
+   * (see echoFootsteps). Keeps a short rolling log only.
+   */
+  noteFootstep(running: boolean): void {
+    this.footstepLog.push({ running, t: this.host.elapsed() });
+    if (this.footstepLog.length > 32) this.footstepLog.shift();
+  }
+
+  /**
+   * PHENOMENON — Footstep Echo.
+   * A few seconds into release after a peak, occasionally replays a burst
+   * of the player's recent steps as if someone just behind were walking:
+   * playFootstepEcho receives a unit direction and a per-step volume.
+   * All draws come from seed-derived RNG instances so replays of the same
+   * timeline echo identically.
+   */
+  private echoFootsteps(dt: number): void {
+    const now = this.host.elapsed();
+    // Fire any due queued echoes; each step gets its own direction draw.
+    while (this.echoQueue.length > 0 && this.echoQueue[0].at <= now) {
+      const step = this.echoQueue.shift()!;
+      if (!this.host.playFootstepEcho) continue;
+      const rng = new RNG((this.seed ^ Math.floor(step.at * 1000)) >>> 0);
+      const a = rng.next() * Math.PI * 2;
+      this.host.playFootstepEcho({ x: Math.cos(a), z: Math.sin(a) }, step.running ? 0.5 : 0.35);
+    }
+    // Arm an echo occasionally while unwinding after a peak.
+    if (this.echoQueue.length === 0 && this.echoCountdown <= 0) {
+      if (this.phase !== 'release' || this.peaksUsed === 0 || this.footstepLog.length < 4) return;
+      const rng = new RNG((this.seed ^ Math.floor(now * 131)) >>> 0);
+      if (rng.chance(dt * 0.05)) this.echoCountdown = 3 + rng.next() * 5;
+      return;
+    }
+    if (this.echoCountdown > 0) {
+      this.echoCountdown -= dt;
+      if (this.echoCountdown > 0) return;
+      const rng = new RNG((this.seed ^ Math.floor(now * 977)) >>> 0);
+      const count = Math.min(this.footstepLog.length, 5 + rng.int(0, 4));
+      let at = now + 0.8; // slight delay before the first borrowed step
+      for (let i = 0; i < count; i++) {
+        at += this.footstepLog[i].running ? 0.32 : 0.45;
+        this.echoQueue.push({ at, running: this.footstepLog[i].running });
+      }
+    }
+  }
+
+  /**
+   * PHENOMENON — False Dawn.
+   * When a peak's blackout lifts (falseDawnPendingAt reached), light comes
+   * back too warm for falseDawnDuration seconds. Warmth ramps in over the
+   * first second and eases out across the rest of the window; setLightWarmth
+   * drives the host's color grading and lightWarmth mirrors it for saves/UI.
+   */
+  private falseDawnUpdate(): void {
+    const now = this.host.elapsed();
+    if (this.falseDawnUntil < 0 && this.falseDawnPendingAt >= 0 && now >= this.falseDawnPendingAt) {
+      this.falseDawnPendingAt = -1;
+      this.falseDawnUntil = now + this.falseDawnDuration;
+    }
+    if (this.falseDawnUntil < 0) return;
+    const remain = this.falseDawnUntil - now;
+    if (remain <= 0) {
+      this.falseDawnUntil = -1;
+      this.lightWarmth = 0;
+      this.host.setLightWarmth?.(0);
+      return;
+    }
+    const gone = this.falseDawnDuration - remain;
+    const attack = Math.min(1, gone);
+    const release = Math.min(1, remain / (this.falseDawnDuration * 0.6));
+    this.lightWarmth = attack * release;
+    this.host.setLightWarmth?.(this.lightWarmth);
+  }
+
+  describe(): string {
+    return this.phase + ' t=' + this.tension.toFixed(2);
+  }
+}
 
 
