@@ -79,6 +79,7 @@ export class CrowdAmbience {
   swell: GainNode | null = null;      // density-wave stage the LFO breathes
   lowpass: BiquadFilterNode | null = null;  // the "behind a wall" tilt
   lfo: OscillatorNode | null = null;  // slow swell source
+  private lfoDepth: GainNode | null = null; // LFO level into the swell param
   private readonly voices: Voice[] = [];
   private noiseSrc: AudioBufferSourceNode | null = null;
   private built = false;
@@ -118,5 +119,164 @@ export class CrowdAmbience {
 
   /** Silence everything and release nodes; the instance will not restart. */
   stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    const t = this.ctx.currentTime;
+    if (this.out) this.out.gain.setTargetAtTime(0, t, 0.15);
+    for (const v of this.voices) {
+      try { v.osc.stop(); } catch { /* already stopped */ }
+    }
+    if (this.lfo) { try { this.lfo.stop(); } catch { /* already stopped */ } }
+    if (this.noiseSrc) { try { this.noiseSrc.stop(); } catch { /* already stopped */ } }
+  }
 
+  // ---------------------------------------------------------------------------
+  // Lazy graph construction
+  // ---------------------------------------------------------------------------
 
+  private build(): void {
+    const ctx = this.ctx;
+    this.built = true;
+
+    // master gate -> destination
+    this.out = ctx.createGain();
+    this.out.gain.value = 0;
+    this.out.connect(this.destination);
+
+    // "behind a wall" tilt shared by every voice and the air bed
+    this.lowpass = ctx.createBiquadFilter();
+    this.lowpass.type = 'lowpass';
+    this.lowpass.frequency.value = 750;
+    this.lowpass.Q.value = 0.4;
+    this.lowpass.connect(this.out);
+
+    // density-wave stage the LFO breathes
+    this.swell = ctx.createGain();
+    this.swell.gain.value = 0.8;
+    this.swell.connect(this.lowpass);
+
+    // slow swell LFO: 20-40 s period, breathing the swell bus through a
+    // small depth stage so the wave stays a gentle density modulation
+    this.lfo = ctx.createOscillator();
+    this.lfo.type = 'sine';
+    this.lfo.frequency.value = 1 / (20 + Math.random() * 20); // 0.025-0.05 Hz
+    this.lfoDepth = ctx.createGain();
+    this.lfoDepth.gain.value = 0.22;
+    this.lfo.connect(this.lfoDepth);
+    this.lfoDepth.connect(this.swell.gain);
+    this.lfo.start();
+
+    // faint bandpassed air/shuffle bed underneath the voices
+    this.noiseSrc = ctx.createBufferSource();
+    this.noiseSrc.buffer = this.noiseBuffer();
+    this.noiseSrc.loop = true;
+    const airFilter = ctx.createBiquadFilter();
+    airFilter.type = 'bandpass';
+    airFilter.frequency.value = 420; // sits inside the vowel band, reads as room
+    airFilter.Q.value = 0.6;
+    const airGain = ctx.createGain();
+    airGain.gain.value = AIR_LEVEL;
+    this.noiseSrc.connect(airFilter);
+    airFilter.connect(airGain);
+    airGain.connect(this.lowpass);
+    this.noiseSrc.start();
+
+    // the babblers themselves
+    for (let i = 0; i < VOICE_COUNT; i++) this.voices.push(this.buildVoice(i));
+    // park cursors just ahead so the first audible frame speaks immediately
+    const t = ctx.currentTime;
+    for (const v of this.voices) v.nextAt = t + 0.05 + Math.random() * 0.3;
+  }
+
+  /** One glottal sawtooth through three parallel formants into a panned env. */
+  private buildVoice(index: number): Voice {
+    const ctx = this.ctx;
+    const rnd = mulberry32(0xc40d ^ (index * 0x9e37 + 1));
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 70 + rnd() * 70; // low glottal source, 70-140 Hz
+
+    // three parallel bandpass formant filters (vowel targets)
+    const formants: BiquadFilterNode[] = [];
+    for (let f = 0; f < 3; f++) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      const vowel = VOWELS[Math.floor(rnd() * VOWELS.length)];
+      bp.frequency.value = [vowel.f1, vowel.f2, vowel.f3][f];
+      bp.Q.value = 6 + rnd() * 5;
+      formants.push(bp);
+    }
+
+    const env = ctx.createGain();   // syllable envelope (automated in update)
+    env.gain.value = 0;
+
+    const pan = ctx.createStereoPannerNode ? undefined as never : (undefined as never);
+    void pan;
+    const panner = (ctx as AudioContext & { createStereoPanner(): StereoPannerNode }).createStereoPanner();
+    panner.pan.value = (rnd() * 1.6 - 0.8); // stereo spread
+
+    for (const bp of formants) { osc.connect(bp); bp.connect(env); }
+    env.connect(panner);
+    panner.connect(this.swell!);
+    osc.start();
+
+    return {
+      osc,
+      pan: panner,
+      env,
+      formants,
+      rnd,
+      rate: 0.55 + rnd() * 0.5,   // slower than radio chatter
+      scale: 0.85 + rnd() * 0.3,  // vocal-tract variety
+      nextAt: 0,
+    };
+  }
+
+  /** Shared two-second white-noise buffer for the air bed. */
+  private noiseBuffer(): AudioBuffer {
+    const len = Math.floor(this.ctx.sampleRate * 2);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  /**
+   * Lookahead syllable scheduling for one voice: short quiet envelopes with
+   * long phrase gaps, plus occasional formant drift between vowel targets.
+   * Called only while the room is audible.
+   */
+  private scheduleVoice(v: Voice, now: number): void {
+    if (v.nextAt < now - 0.5) v.nextAt = now; // resync after long silence
+    const horizon = now + 0.35;
+    while (v.nextAt < horizon) {
+      const syl = (0.18 + v.rnd() * 0.14) / v.rate;   // ~180-320 ms cadence
+      const peak = 0.02 + v.rnd() * 0.04;             // peaks near the noise floor
+      v.env.gain.setTargetAtTime(peak, v.nextAt, 0.03);
+      v.env.gain.setTargetAtTime(0.0001, v.nextAt + syl, 0.07);
+
+      // drift one formant toward a new vowel target now and then
+      if (v.rnd() < 0.6) {
+        const which = Math.floor(v.rnd() * 3);
+        const target = VOWELS[Math.floor(v.rnd() * VOWELS.length)];
+        const hz = [target.f1, target.f2, target.f3][which] * v.scale;
+        v.formants[which].frequency.setTargetAtTime(hz, v.nextAt, 0.22);
+      }
+
+      // phrase gap: nobody enunciates continuously across a room
+      if (v.rnd() < 0.18) v.nextAt += syl + 0.8 + v.rnd() * 1.6;
+      else v.nextAt += syl + 0.05 + v.rnd() * 0.12;
+    }
+  }
+
+  /**
+   * Tension gate: full below CALM_FULL, silent from CALM_END up, linear
+   * between — calm/build keeps the murmur, escalation empties the room.
+   */
+  private tensionGate(tension: number): number {
+    if (tension <= CALM_FULL) return 1;
+    if (tension >= CALM_END) return 0;
+    return 1 - (tension - CALM_FULL) / (CALM_END - CALM_FULL);
+  }
+}
