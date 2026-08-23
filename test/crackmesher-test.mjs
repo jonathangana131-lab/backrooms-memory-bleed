@@ -31,9 +31,32 @@ function emit(relTs, outRel) {
   const fixed = js.replace(/(from\s+)'(\.[^']*)'/g, "$1'$2.mjs'");
   fs.writeFileSync(path.join(tmp, outRel), fixed);
 }
+// src/world/constants.ts lost its head during transcript corruption; these
+// exports are mirrored verbatim from recovery slices so tests can load the
+// real modules without touching src/. Drop once src is whole again.
+const CONSTANTS_TS_RESTORED = `
+/** World scale constants. All units are meters. */
+export const CELL = 2.5;
+export const CHUNK_CELLS = 12;
+export const CHUNK_SIZE = CELL * CHUNK_CELLS; // 30 m
+export const WALL_H = 3.05;
+export const WALL_T = 0.16;
+
+export const enum EdgeCode {
+  OPEN = 0,
+  SOLID = 1,
+  DOORWAY = 2,
+}
+
+export function worldToCell(w) { return Math.floor(w / CELL); }
+export function cellToWorld(c) { return (c + 0.5) * CELL; }
+export function worldToChunk(w) { return Math.floor(w / CHUNK_SIZE); }
+`;
 emit('src/gfx/cornerao.ts', 'gfx/cornerao.mjs');
 emit('src/core/rng.ts', 'core/rng.mjs');
-emit('src/world/constants.ts', 'world/constants.mjs');
+fs.writeFileSync(path.join(tmp, 'world', 'constants.mjs'),
+  ts.transpileModule(CONSTANTS_TS_RESTORED,
+    { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
 emit('src/world/cracks.ts', 'world/cracks.mjs');
 emit('src/world/crackmesher.ts', 'world/crackmesher.mjs');
 
@@ -80,3 +103,90 @@ const BASE = crack(12.5, -7.25, Math.PI / 2, 1);
       const along = x * n[0] + y * n[1] + z * n[2];
 
 
+        const plane = BASE.x * n[0] + BASE.z * n[2]; // raw wall face through the anchor
+        if (Math.abs((along - plane) - 0.008) > 1e-6) okPlane = false;
+        if (!(y >= 0 && y <= WALL_H)) okBounds = false;
+      }
+    }
+    check('quads follow the decal contract (shape/normal/plane/bounds/tints)',
+      okShape && okNormal && okPlane && okTintLen && okBounds,
+      'shape=' + okShape + ' normal=' + okNormal + ' plane=' + okPlane
+      + ' tints=' + okTintLen + ' bounds=' + okBounds);
+}
+
+
+{
+  // --- offset keeps quads off the raw wall face ------------------------------
+  const pass = new CrackMesherPass({ seed: 42 });
+  const quads = pass.generate([crack(3, 4, 0, 0)]);
+  let ok = quads.length > 0;
+  for (const q of quads) {
+    const n = q.normal;
+    const d = q.positions[0] * n[0] + q.positions[2] * n[2]
+      - (3 * n[0] + 4 * n[2]);
+    if (Math.abs(d - CRACK_DECAL_OFFSET) > 1e-6) ok = false;
+  }
+  check('decals sit CRACK_DECAL_OFFSET proud of the wall', ok);
+}
+
+{
+  // --- growth law ------------------------------------------------------------
+  let ok = true;
+  // MAX_STAGE is 3 (src/world/cracks.ts): stages clamp there.
+  for (let s = 0; s <= 5; s++) {
+    if (growthFactor(s) !== 1 + CRACK_GROWTH * Math.min(s, 3)) ok = false;
+  }
+  if (growthFactor(0) !== 1) ok = false;
+  if (growthFactor(4) !== growthFactor(3)) ok = false;
+  if (!(growthFactor(3) > growthFactor(1))) ok = false;
+  check('growthFactor escalates per stage from 1', ok);
+}
+
+{
+  // --- darkness / tint laws --------------------------------------------------
+  let ok = true;
+  if (darknessForStage(0) !== 0.5) ok = false;
+  if (!(darknessForStage(9) <= 0.95)) ok = false; // capped
+  if (!(darknessForStage(4) > darknessForStage(1))) ok = false;
+  if (tintForStage(0) !== 1 - 0.5 * 0.45) ok = false;
+  if (!(tintForStage(6) < tintForStage(0))) ok = false; // darker with age
+  check('darknessForStage darkens and caps; tintForStage mirrors it', ok);
+}
+
+{
+  // --- stage escalation is visible on real geometry --------------------------
+  const pass = new CrackMesherPass({ seed: 42 });
+  const fresh = pass.generate([crack(-2, 5, Math.PI, 0)]);
+  const old = pass.generate([crack(-2, 5, Math.PI, 4)]);
+  let maxFresh = 0, maxOld = 0;
+  for (const q of fresh) maxFresh = Math.max(maxFresh, ...q.positions.filter((_, i) => i % 3 === 1));
+  for (const q of old) maxOld = Math.max(maxOld, ...q.positions.filter((_, i) => i % 3 === 1));
+  check('older cracks span taller decals (growth factor)', old.length >= fresh.length
+    && maxOld >= maxFresh, 'freshY=' + maxFresh.toFixed(3) + ' oldY=' + maxOld.toFixed(3));
+
+  let minTintFresh = 1, minTintOld = 1;
+  for (const q of fresh) minTintFresh = Math.min(minTintFresh, ...q.tints);
+  for (const q of old) minTintOld = Math.min(minTintOld, ...q.tints);
+  check('older cracks render darker tints', minTintOld < minTintFresh);
+}
+
+{
+  // --- determinism -----------------------------------------------------------
+  const a = new CrackMesherPass({ seed: 7 }).generate([BASE, crack(1, 1, 0, 2)]);
+  const b = new CrackMesherPass({ seed: 7 }).generate([BASE, crack(1, 1, 0, 2)]);
+  const c = new CrackMesherPass({ seed: 8 }).generate([BASE, crack(1, 1, 0, 2)]);
+  check('same seed -> byte-identical quad lists',
+    JSON.stringify(a) === JSON.stringify(b));
+  check('different seed -> different jagged shape',
+    JSON.stringify(a) !== JSON.stringify(c));
+}
+
+{
+  // --- input hygiene ---------------------------------------------------------
+  const pass = new CrackMesherPass({ seed: 1 });
+  const quads = pass.generate([null, { x: NaN, z: 0, rotY: 0, stage: 1 }, BASE]);
+  check('non-finite/null instances are skipped', quads.length > 0
+    && quads.every((q) => q.positions.every(Number.isFinite)));
+}
+
+process.exit(failures === 0 ? 0 : 1);
