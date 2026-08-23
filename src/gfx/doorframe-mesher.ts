@@ -68,7 +68,27 @@
  * Pure logic - no engine dependencies, deterministic, allocation-light.
  */
 import { WALL_T } from '../world/constants';
-import type { BoxSpec, Orientation, Tint } from './doorstyles';
+/** Wall-run orientation for a doorway: 0 = along X, 1 = along Z. */
+export type Orientation = 0 | 1;
+
+/** RGB tint multiplier triple applied through vertex colors. */
+export type Tint = [number, number, number];
+
+/** One frame box emitted by DoorStyles.generateForDoorway(), doorway-centered. */
+export interface BoxSpec {
+  /** Center column X in meters. */
+  x: number;
+  /** Center column Z in meters. */
+  z: number;
+  /** FULL along-wall extent in meters. */
+  w: number;
+  /** Vertical span in meters, starting at {@link BoxSpec.y}. */
+  h: number;
+  /** Bottom height above the floor; defaults to 0. */
+  y?: number;
+  /** Per-box RGB multipliers for the vertex-color pass. */
+  tint: Tint;
+}
 
 /** Deepest jambOut in the doorstyles family tables (storage angle-iron). */
 export const MAX_JAMB_OUT = 0.08;
