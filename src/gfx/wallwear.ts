@@ -128,6 +128,11 @@ function edgeTraffic(wx: number, wz: number, horizontal: boolean): number {
   return a || b ? 1 : 0.25;
 }
 
+/** Either flanking carpet cell of an edge sees any corridor traffic. */
+function cellNearTraffic(wx: number, wz: number): boolean {
+  return edgeTraffic(wx, wz, true) > 0.25 || edgeTraffic(wx, wz, false) > 0.25;
+}
+
 /**
  * Generates wall-wear decals for one chunk. Deterministic: identical
  * layouts produce identical instance lists.
@@ -200,3 +205,77 @@ export class WallWear {
         const alphaJit = ((hash2i(wx - i, wz + i * 29, SALT_FACE) % 100) / 100) * 0.06;
 
 
+        const alpha = Math.min(this.maxAlpha, alphaBase + alphaJit);
+        out.push({
+          wallX,
+          wallZ,
+          y: WEAR_Y[type] + yJit,
+          rotY,
+          type,
+          alpha,
+        });
+      }
+    };
+
+    /** Door proximity: 1 when an adjacent parallel edge is a doorway. */
+    const doorProximityFor = (
+      wx: number, wz: number, horizontal: boolean,
+    ): number => {
+      if (horizontal) {
+      const lx = wx - bx;
+      const lz = wz - bz;
+        const left = lx > 0 ? layout.hEdges[lz * N + lx - 1] : EdgeCode.OPEN;
+        const right = lx < N - 1 ? layout.hEdges[lz * N + lx + 1] : EdgeCode.OPEN;
+        return left === EdgeCode.DOORWAY || right === EdgeCode.DOORWAY ? 1 : 0;
+      }
+      const lx = wx - bx;
+      const lz = wz - bz;
+      const up = lz > 0 ? layout.vEdges[(lz - 1) * (N + 1) + lx] : EdgeCode.OPEN;
+      const down = lz < N - 1 ? layout.vEdges[(lz + 1) * (N + 1) + lx] : EdgeCode.OPEN;
+      return up === EdgeCode.DOORWAY || down === EdgeCode.DOORWAY ? 1 : 0;
+    };
+
+    // Walk every wall edge exactly like mesher.addWalls: horizontal runs
+    // from hEdges, vertical runs from vEdges, lattice coords derived from
+    // the same baseX/baseZ walk so hashing matches the architect's picture
+    // of the chunk. Doorway edges are openings, not wall planes; their
+    // neighbours carry the jamb clusters instead. Both faces of each wall
+    // see traffic.
+    for (let lz = 0; lz <= N; lz++) {
+      for (let lx = 0; lx < N; lx++) {
+        const code = layout.hEdges[lz * N + lx];
+        if (code !== EdgeCode.SOLID) continue;
+        const wx = bx + lx;
+        const wz = bz + lz;
+        const prox = doorProximityFor(wx, wz, true);
+        if (prox <= 0 && !cellNearTraffic(wx, wz)) continue;
+        for (const faceSign of [1, -1] as const) {
+          emitEdge(wx, wz, true, wx * CELL, (wx + 1) * CELL, faceSign, prox);
+        }
+      }
+    }
+    for (let lz = 0; lz < N; lz++) {
+      for (let lx = 0; lx <= N; lx++) {
+        const code = layout.vEdges[lz * (N + 1) + lx];
+        if (code !== EdgeCode.SOLID) continue;
+        const wx = bx + lx;
+        const wz = bz + lz;
+        const prox = doorProximityFor(wx, wz, false);
+        if (prox <= 0 && !cellNearTraffic(wx, wz)) continue;
+        for (const faceSign of [1, -1] as const) {
+          emitEdge(wx, wz, false, wz * CELL, (wz + 1) * CELL, faceSign, prox);
+        }
+      }
+    }
+
+    return out;
+  }
+}
+
+/**
+ * Convenience wrapper: one-shot generation with default subtlety. Hot
+ * paths should hold a WallWear instance instead.
+ */
+export function generateWallWear(layout: ChunkLayout): WearInstance[] {
+  return new WallWear().generateForChunk(layout);
+}
