@@ -141,8 +141,7 @@ if (failures > 0) {
 ${failures} failure(s)`);
   process.exit(1);
 } else {
-  console.log('
-All avoidance tests passed.');
+  console.log('\nAll avoidance tests passed.');
 }
 
 
