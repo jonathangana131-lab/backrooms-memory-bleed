@@ -40,3 +40,122 @@ interface ToneSpec {
   /** frequency in Hz */
 
 
+  readonly type: OscillatorType;
+  /** frequency in Hz */
+  readonly freq: number;
+  /** start offset from the sting downbeat, seconds */
+  readonly at: number;
+  /** note length, seconds */
+  readonly dur: number;
+  /** envelope peak (linear gain) */
+  readonly peak: number;
+}
+
+/** Shared voice specs for each motif (A4=440, C5=523.25, E5=659.25, A5=880). */
+const NOTE_READ: readonly ToneSpec[] = [
+  { type: 'sine', freq: 440.0, at: 0, dur: 0.2, peak: 0.06 },
+  { type: 'sine', freq: 523.25, at: 0.18, dur: 0.22, peak: 0.05 },
+];
+const CLUSTER_COMPLETE: readonly ToneSpec[] = [
+  { type: 'sine', freq: 440.0, at: 0, dur: 0.18, peak: 0.06 },
+  { type: 'sine', freq: 523.25, at: 0.14, dur: 0.18, peak: 0.06 },
+  { type: 'sine', freq: 659.25, at: 0.28, dur: 0.2, peak: 0.06 },
+  { type: 'sine', freq: 880.0, at: 0.42, dur: 0.34, peak: 0.07 },
+];
+
+/**
+ * Lore discovery stingers. One shared instance rides the audio bus; each
+ * motif schedules its voices through a per-sting lowpass that closes as
+ * the story stage rises (stageCutoff), so late-game discoveries sound
+ * muffled and heavy.
+ */
+export class LoreStings {
+  private readonly ctx: AudioContext;
+  private readonly out: AudioNode;
+
+  /** Story stage for darkening; updated by setStage(). */
+  private stage = 0;
+  private stopped = false;
+
+  constructor(ctx: AudioContext, destination: AudioNode) {
+    this.ctx = ctx;
+    this.out = destination;
+  }
+
+  /**
+   * Update the story stage used by the darkening curve.
+   * @param stage story stage 0..MAX_STAGE
+   */
+  setStage(stage: number): void {
+    this.stage = stage;
+  }
+
+  /** Soft two-note motif played when a note or document is read. */
+  noteRead(stage = this.stage): void {
+    this.render(NOTE_READ, stage);
+  }
+
+  /** Resolved A-minor phrase when a memory cluster completes. */
+  clusterComplete(stage = this.stage): void {
+    this.render(CLUSTER_COMPLETE, stage);
+  }
+
+  /** Warm triangle glissando when a beacon radio locks. */
+  radioLock(stage = this.stage): void {
+    if (this.stopped) return;
+    try {
+      const t = this.ctx.currentTime;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = stageCutoff(stage);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      const osc = this.ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(300, t);
+      osc.frequency.exponentialRampToValueAtTime(600, t + 0.25);
+      osc.connect(lp);
+      lp.connect(g);
+      g.connect(this.out);
+      osc.start(t);
+      osc.stop(t + 0.32);
+    } catch (err) {
+      console.warn('[bmb] radio lock sting failed', err);
+    }
+  }
+
+  /** Silence everything; later stings become no-ops. */
+  stop(): void {
+    this.stopped = true;
+  }
+
+  /** Schedule one motif through its darkened lowpass. */
+  private render(specs: readonly ToneSpec[], stage: number): void {
+    if (this.stopped) return;
+    try {
+      const t = this.ctx.currentTime;
+      const cutoff = stageCutoff(stage);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = cutoff;
+      lp.connect(this.out);
+      for (const s of specs) {
+        const osc = this.ctx.createOscillator();
+        osc.type = s.type;
+        osc.frequency.value = s.freq;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0, t + s.at);
+        g.gain.linearRampToValueAtTime(s.peak, t + s.at + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + s.at + s.dur);
+        osc.connect(g);
+        g.connect(lp);
+        osc.start(t + s.at);
+        osc.stop(t + s.at + s.dur + 0.02);
+      }
+    } catch (err) {
+      console.warn('[bmb] lore sting failed', err);
+    }
+  }
+}
