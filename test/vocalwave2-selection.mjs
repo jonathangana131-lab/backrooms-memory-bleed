@@ -1,3 +1,55 @@
+/*
+ * Vocal wave 2 selection tests -- pure data + pure selectors, no engine.
+ * Run: node test/vocalwave2-selection.mjs
+ */
+import {
+  HELPER_COMFORTS,
+  INCOMPLETE_BASE_PHRASES,
+  WATCHER_BROADCASTS,
+  garblePhrase,
+  pickHelperComfort,
+  pickIncompleteGarble,
+  pickWatcherBroadcast,
+} from '../src/entities/vocalwave2.ts';
+
+let failures = 0;
+function ok(cond, msg) {
+  if (cond) { console.log('  ok  ' + msg); }
+  else { failures++; console.log('  FAIL ' + msg); }
+}
+
+const behaviour = async () => {
+  // ---- pools are well formed ----------------------------------------------
+  ok(WATCHER_BROADCASTS.length >= 4 && WATCHER_BROADCASTS.every((b) =>
+      typeof b.text === 'string' && b.text.length > 0 && Number.isInteger(b.syllables) && b.syllables > 0),
+    'watcher broadcasts carry words with honest syllable counts');
+  ok(HELPER_COMFORTS.length >= 3 && HELPER_COMFORTS.every((c) =>
+      typeof c.text === 'string' && c.text.length >= 5),
+    'helper comforts are full quiet-dread sentences');
+  ok(INCOMPLETE_BASE_PHRASES.length >= 8
+      && INCOMPLETE_BASE_PHRASES.every((p) => /^[a-z A-Z,']+$/.test(p)),
+    'incomplete base phrases are plain domestic sentences');
+
+  // ---- watcher broadcast selection ----------------------------------------
+  const w1 = pickWatcherBroadcast(101);
+  ok(w1 !== null && WATCHER_BROADCASTS.includes(w1), 'broadcast picks trace to the pool');
+  let wRepeat = false;
+  let prev = w1;
+  for (let s = 102; s < 140; s++) {
+    const w = pickWatcherBroadcast(s, [prev]);
+    if (w === prev) wRepeat = true;
+    prev = w;
+  }
+  ok(!wRepeat, 'back-to-back broadcast repeats are skipped when history says no');
+
+  // ---- helper comfort gate --------------------------------------------------
+  ok(pickHelperComfort(7, 1.0) === null, 'steady world: helpers stay silent');
+  ok(pickHelperComfort(7, 0.5) === null, 'above the threshold nobody wastes kindness');
+  ok(pickHelperComfort(7, 0.39) !== null, 'just under the threshold a fragment appears');
+  ok(pickHelperComfort(9, -2) !== null, 'deeply negative stability still comforts');
+  ok(pickHelperComfort(11, 0.2) !== null && HELPER_COMFORTS.includes(pickHelperComfort(11, 0.2)),
+    'unlocked fragments trace to the pool');
+  ok(pickHelperComfort(7, 1.0) === null,
     'gate holds at extremes (1.0 null, negative low yields fragment)');
   ok(garblePhrase('', 5).text === '...', 'empty phrase garbles to bare ellipsis');
 
@@ -35,7 +87,7 @@
   let grewLonger = false;
   for (let s = 0; s < 100; s++) {
     const g = garblePhrase('we regret to inform you', s);
-    if (g.text.split('\s+').length > 4) grewLonger = true;
+    if (g.text.split(/\s+/).length > 'we regret to inform you'.split(/\s+/).length) grewLonger = true;
   }
   ok(!grewLonger, 'garbled word count never exceeds the source phrase');
 
@@ -63,4 +115,9 @@ try {
   console.error('  FAIL behavioural section could not run:', err && err.stack || err);
   failures++;
 
-
+}
+if (failures > 0) {
+  console.error(failures + ' failure(s)');
+  process.exit(1);
+}
+console.log('ALL VOCALWAVE2 SELECTION TESTS PASSED');
