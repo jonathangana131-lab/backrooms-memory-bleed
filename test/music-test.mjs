@@ -80,3 +80,71 @@ try {
   await page.waitForTimeout(3400);
 
 
+  results.calmRms = calmZone1;
+
+  // 2. zone switch crossfades to a different key with no click spike
+  const switchSpike = await evalStable(async () => {
+    const t = window.__scoreTest;
+    t.score.setState(3, 0); // different pentatonic root
+    let p = 0;
+    const t0 = performance.now();
+    while (performance.now() - t0 < 150) {
+      t.analyser.getFloatTimeDomainData(t.buf);
+      for (let i = 0; i < t.buf.length; i++) { const v = Math.abs(t.buf[i]); if (v > p) p = v; }
+    }
+    return p;
+  });
+  check('crossfade click-free', switchSpike < 0.35, 'peak150ms=' + switchSpike.toFixed(4));
+  await page.waitForTimeout(3200);
+  const zone3 = await rms(700);
+  check('zone3 drone audible after crossfade', zone3 > 0.004, 'rms=' + zone3.toFixed(5));
+
+  // 3. tension cluster swells the bed
+  await evalStable(() => { window.__scoreTest.score.setState(3, 0); });
+  await page.waitForTimeout(2600);
+  const baseline = await rms(800);
+  await evalStable(() => { window.__scoreTest.score.setState(3, 1); });
+  await page.waitForTimeout(3200); // tau 1.2 s -> mostly settled
+  const tense = await rms(800);
+  check('tension cluster swells', tense > baseline * 1.12,
+  const tense = await rms(800);
+  check('tension cluster swells', tense > baseline * 1.12,
+    'calm=' + baseline.toFixed(5) + ' tense=' + tense.toFixed(5));
+
+  // 4. melody pacing at peak tension: at least one pluck transient in 8 s
+  const plucks = await evalStable(async () => {
+    const t = window.__scoreTest;
+    const peaks = [];
+    const t0 = performance.now();
+    while (performance.now() - t0 < 8000) {
+      t.analyser.getFloatTimeDomainData(t.buf);
+      let p = 0;
+      for (let i = 0; i < t.buf.length; i++) { const v = Math.abs(t.buf[i]); if (v > p) p = v; }
+      peaks.push(p);
+      await new Promise((r2) => setTimeout(r2, 25));
+    }
+    const sorted = [...peaks].sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)] || 0;
+    return peaks.filter((p2) => p2 > Math.max(med * 1.8, 0.035)).length;
+  });
+  check('melody pluck heard at peak tension', transientLanded(plucks), 'transient-frames=' + plucks);
+
+  // 5. stop() fades everything to silence
+  await evalStable(() => { window.__scoreTest.score.stop(); window.__scoreTest.stopped = true; });
+  await page.waitForTimeout(2600);
+
+
+} catch (e) {
+  console.log('FAIL  harness error: ' + String(e).slice(0, 300));
+  fail++;
+}
+if (errors.length) {
+  console.log('console/page errors: ' + errors.slice(0, 5).join(' | '));
+  fail += errors.length;
+}
+console.log(fail === 0 ? 'ALL PASS' : fail + ' FAILURES');
+process.exitCode = fail === 0 ? 0 : 1;
+await browser.close();
+
+
+

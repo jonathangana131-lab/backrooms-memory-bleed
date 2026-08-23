@@ -60,3 +60,96 @@ try {
     }
 
 
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+  check('reset clears visit tracking', dm.visitsAt(10, 10) === 0 && dm.totalMarks === 0);
+
+  // ---------- 7. Variety system surface contract (source audit) ----------
+  check('TextureVariety exposes carpetVariants', /carpetVariants: StandardMaterial\[\];/.test(src));
+  check('TextureVariety exposes markDirty(x, z, radius?)', /markDirty\(x: number, z: number, radius\?: number\): void;/.test(src));
+  check('createMaterials publishes variants + markDirty + dirtMap on the singleton',
+    /textureVariety\.carpetVariants = carpetVariants;/.test(src)
+    && /textureVariety\.markDirty = markDirty;/.test(src)
+    && /textureVariety\.dirtMap = dirtMap;/.test(src));
+  check('MaterialSet keeps its legacy material-only shape',
+    /markDirty|dirtMap|carpetVariants/.test(s.slice(s.indexOf('export interface MaterialSet'), s.indexOf('// Carpet variant selection'))) === false);
+
+} finally {
+  await server.close();
+}
+
+
+
+if (failures) {
+  console.error('\n' + failures + ' failure(s)');
+  process.exit(1);
+}
+
+

@@ -158,6 +158,8 @@ function buildQuad(
   const ux = Math.cos(yaw);
   const uz = Math.sin(yaw);
   const nx = -uz;
+
+
   const nz = ux;
   const hw = width / 2;
   // push the quad off the wall plane along its normal so it never z-fights
@@ -217,5 +219,59 @@ export function createWallMoisture(
         }
         dirty = true;
       }
+
+
+      flush();
+    },
+
+    getSheensForChunk(cx: number, cz: number): SheenQuad[] {
+      const x0 = cx * CHUNK_SIZE;
+      const z0 = cz * CHUNK_SIZE;
+      const reach = SHEEN_RANGE + MAX_RADIUS;
+      const out: SheenQuad[] = [];
+
+      // sorted so output order never depends on registration order
+      for (const k of Object.keys(state.stages).sort()) {
+        const leak = parseLeakKey(k);
+        // cheap AABB reject before any hashing
+        if (leak.x < x0 - reach || leak.x > x0 + CHUNK_SIZE + reach) continue;
+        if (leak.z < z0 - reach || leak.z > z0 + CHUNK_SIZE + reach) continue;
+
+        const radius = radiusForStage(state.stages[k]);
+        const rng = new RNG(hash2i(Math.round(leak.x * 64), Math.round(leak.z * 64), MOISTURE_SALT));
+
+        for (let i = 0; i < QUADS_PER_LEAK; i++) {
+          // deterministic pseudo-wall placement around the leak: each panel
+          // sits on its own bearing at a hashed fraction of the wet radius,
+          // simulating the nearest wall faces without needing layout data
+          const yawBase = rng.next() * Math.PI * 2;
+          const yawJitter = rng.range(-0.35, 0.35);
+          const dist = radius * (0.55 + 0.45 * rng.next());
+          const px = leak.x + Math.cos(yawBase) * dist;
+          const pz = leak.z + Math.sin(yawBase) * dist;
+          // only keep panels whose centre actually falls inside the chunk
+          if (px < x0 || px >= x0 + CHUNK_SIZE || pz < z0 || pz >= z0 + CHUNK_SIZE) continue;
+
+          const width = radius * (0.9 + 0.4 * rng.next());
+          // proximity falloff: nearer the leak, the damper (brighter) the film
+          const prox = clamp01(1 - dist / SHEEN_RANGE);
+          const lift = SHEEN_LIFT * (0.35 + 0.65 * prox);
+          out.push(buildQuad(
+            px, pz,
+            yawBase + yawJitter + Math.PI / 2, // panel runs tangent to the ring
+            width,
+            0.12, 0.12 + SHEEN_HEIGHT, // lower wall half
+            lift, lift * 0.35,
+          ));
+        }
+      }
+      flush();
+      return out;
+    },
+  };
+}
+
+/** Default instance backed by the real localStorage and clock. */
+export const wallMoisture: WallMoisture = createWallMoisture();
 
 

@@ -3,44 +3,44 @@
 Slices harvested from 213 session transcripts.
 
 
-## Fully reconstructed (280 files)
+## Fully reconstructed (279 files)
 
 - `.gitignore` — 4 lines, from 2 slices
 - `README.md` — 167 lines, from 7 slices
-- `docs/DESIGN.md` — 5 lines, from 23 slices
+- `docs/DESIGN.md` — 335 lines, from 23 slices
 - `docs/integration-plan.md` — 208 lines, from 3 slices
-- `docs/integration-status.md` — 6 lines, from 2 slices
+- `docs/integration-status.md` — 178 lines, from 2 slices
 - `index.html` — 19 lines, from 3 slices
 - `node_modules/@babylonjs/core/package.json` — 46 lines, from 1 slices
 - `package.json` — 22 lines, from 47 slices
 - `shots/wavebc-report.json` — 116 lines, from 3 slices
-- `src/audio/approach.ts` — 40 lines, from 2 slices
+- `src/audio/approach.ts` — 307 lines, from 2 slices
 - `src/audio/audio.ts` — 912 lines, from 43 slices
 - `src/audio/batterycue.ts` — 40 lines, from 1 slices
 - `src/audio/boundaries.ts` — 40 lines, from 1 slices
 - `src/audio/creakvariety.ts` — 10 lines, from 1 slices
 - `src/audio/crowd.ts` — 120 lines, from 3 slices
 - `src/audio/doors.ts` — 175 lines, from 9 slices
-- `src/audio/echoes.ts` — 40 lines, from 2 slices
+- `src/audio/echoes.ts` — 90 lines, from 2 slices
 - `src/audio/emzones.ts` — 45 lines, from 1 slices
-- `src/audio/exterior.ts` — 40 lines, from 4 slices
+- `src/audio/exterior.ts` — 412 lines, from 4 slices
 - `src/audio/fanaudio.ts` — 80 lines, from 4 slices
 - `src/audio/groans.ts` — 187 lines, from 11 slices
-- `src/audio/humharmonics.ts` — 40 lines, from 2 slices
+- `src/audio/humharmonics.ts` — 120 lines, from 2 slices
 - `src/audio/landmarkbreath.ts` — 50 lines, from 1 slices
 - `src/audio/loresting.ts` — 40 lines, from 1 slices
-- `src/audio/music.ts` — 40 lines, from 6 slices
+- `src/audio/music.ts` — 226 lines, from 6 slices
 - `src/audio/pairvocals.ts` — 20 lines, from 1 slices
 - `src/audio/positional.ts` — 187 lines, from 4 slices
 - `src/audio/radio.ts` — 338 lines, from 12 slices
 - `src/audio/surface-wiring.ts` — 158 lines, from 4 slices
-- `src/audio/surfaces.ts` — 40 lines, from 7 slices
+- `src/audio/surfaces.ts` — 162 lines, from 7 slices
 - `src/content/morenotes.ts` — 31 lines, from 2 slices
 - `src/content/notewave3.ts` — 31 lines, from 1 slices
 - `src/core/events.ts` — 24 lines, from 5 slices
 - `src/core/input.ts` — 47 lines, from 3 slices
 - `src/core/perfmarks.ts` — 210 lines, from 2 slices
-- `src/core/rng.ts` — 40 lines, from 36 slices
+- `src/core/rng.ts` — 103 lines, from 36 slices
 - `src/director/director.ts` — 150 lines, from 6 slices
 - `src/director/erosion.ts` — 42 lines, from 1 slices
 - `src/entities/avoidance.ts` — 40 lines, from 1 slices
@@ -49,58 +49,58 @@ Slices harvested from 213 session transcripts.
 - `src/entities/faunawiring.ts` — 91 lines, from 1 slices
 - `src/entities/fidgets.ts` — 193 lines, from 2 slices
 - `src/entities/gaze-wiring.ts` — 64 lines, from 4 slices
-- `src/entities/gaze.ts` — 124 lines, from 5 slices
+- `src/entities/gaze.ts` — 222 lines, from 5 slices
 - `src/entities/graceful.ts` — 40 lines, from 2 slices
 - `src/entities/humans.ts` — 314 lines, from 28 slices
 - `src/entities/manager.ts` — 297 lines, from 16 slices
 - `src/entities/schedules.ts` — 174 lines, from 5 slices
 - `src/entities/sitting.ts` — 40 lines, from 1 slices
-- `src/entities/spawneffects.ts` — 40 lines, from 13 slices
 - `src/entities/vocalcontent.ts` — 184 lines, from 3 slices
-- `src/entities/vocals.ts` — 120 lines, from 3 slices
+- `src/entities/vocals.ts` — 446 lines, from 3 slices
 - `src/entities/vocalwave2.ts` — 244 lines, from 2 slices
-- `src/gfx/carpetatlas.ts` — 525 lines, from 3 slices
+- `src/gfx/carpetatlas.ts` — 111 lines, from 3 slices
 - `src/gfx/ceilingfan.ts` — 255 lines, from 7 slices
 - `src/gfx/contactshadow.ts` — 251 lines, from 1 slices
-- `src/gfx/cornerao.ts` — 130 lines, from 11 slices
+- `src/gfx/cornerao.ts` — 184 lines, from 11 slices
 - `src/gfx/crossfade.ts` — 174 lines, from 2 slices
 - `src/gfx/daycycle.ts` — 181 lines, from 3 slices
 - `src/gfx/doorframe-mesher.ts` — 120 lines, from 1 slices
-- `src/gfx/doorstyles.ts` — 222 lines, from 5 slices
-- `src/gfx/drips.ts` — 285 lines, from 8 slices
+- `src/gfx/doorstyles.ts` — 77 lines, from 5 slices
+- `src/gfx/drips.ts` — 166 lines, from 8 slices
 - `src/gfx/dust.ts` — 75 lines, from 9 slices
 - `src/gfx/emergency-wiring.ts` — 102 lines, from 2 slices
 - `src/gfx/emergencylights.ts` — 138 lines, from 5 slices
 - `src/gfx/fandust.ts` — 254 lines, from 1 slices
 - `src/gfx/fanmeshvar.ts` — 55 lines, from 2 slices
-- `src/gfx/fanplacement.ts` — 144 lines, from 3 slices
+- `src/gfx/fanplacement.ts` — 57 lines, from 3 slices
 - `src/gfx/fanwiring.ts` — 113 lines, from 4 slices
-- `src/gfx/flickevents.ts` — 190 lines, from 2 slices
+- `src/gfx/flickevents.ts` — 101 lines, from 2 slices
 - `src/gfx/floorcracks.ts` — 338 lines, from 3 slices
 - `src/gfx/floormirror.ts` — 10 lines, from 1 slices
 - `src/gfx/fogvariation.ts` — 45 lines, from 2 slices
 - `src/gfx/footprints.ts` — 293 lines, from 3 slices
 - `src/gfx/heatshimmer.ts` — 220 lines, from 3 slices
-- `src/gfx/lighting.ts` — 120 lines, from 23 slices
+- `src/gfx/lighting.ts` — 362 lines, from 23 slices
 - `src/gfx/lightpools.ts` — 130 lines, from 2 slices
 - `src/gfx/materials.ts` — 532 lines, from 11 slices
-- `src/gfx/moisture.ts` — 219 lines, from 9 slices
+- `src/gfx/moisture.ts` — 271 lines, from 9 slices
 - `src/gfx/notepaper-mesher.ts` — 177 lines, from 4 slices
 - `src/gfx/notepaper.ts` — 374 lines, from 1 slices
 - `src/gfx/paperflutter.ts` — 175 lines, from 2 slices
 - `src/gfx/posters-mesher.ts` — 235 lines, from 1 slices
 - `src/gfx/posters.ts` — 613 lines, from 10 slices
 - `src/gfx/postfx.ts` — 267 lines, from 2 slices
-- `src/gfx/projections.ts` — 222 lines, from 3 slices
+- `src/gfx/projections.ts` — 73 lines, from 3 slices
 - `src/gfx/radiodial-mesh.ts` — 97 lines, from 2 slices
 - `src/gfx/radiodial.ts` — 407 lines, from 2 slices
 - `src/gfx/reflections.ts` — 274 lines, from 3 slices
-- `src/gfx/shadows.ts` — 80 lines, from 2 slices
+- `src/gfx/shadows.ts` — 176 lines, from 2 slices
 - `src/gfx/sway.ts` — 90 lines, from 1 slices
+- `src/gfx/tiledebris.ts` — 201 lines, from 3 slices
 - `src/gfx/tiledisplace.ts` — 231 lines, from 2 slices
 - `src/gfx/wallwear.ts` — 200 lines, from 1 slices
 - `src/main.ts` — 36 lines, from 11 slices
-- `src/memory/field.ts` — 30 lines, from 8 slices
+- `src/memory/field.ts` — 194 lines, from 8 slices
 - `src/memory/weather.ts` — 369 lines, from 11 slices
 - `src/player/controller.ts` — 249 lines, from 13 slices
 - `src/player/flashlight.ts` — 125 lines, from 10 slices
@@ -114,11 +114,12 @@ Slices harvested from 213 session transcripts.
 - `src/story/journal-feed.ts` — 147 lines, from 3 slices
 - `src/story/journal-wiring.ts` — 51 lines, from 1 slices
 - `src/story/reread.ts` — 428 lines, from 3 slices
-- `src/story/story.ts` — 120 lines, from 9 slices
+- `src/story/story.ts` — 225 lines, from 9 slices
 - `src/story/watcherintro.ts` — 254 lines, from 1 slices
 - `src/style.css` — 76 lines, from 5 slices
 - `src/ui/accessibility.ts` — 463 lines, from 8 slices
 - `src/ui/compass.ts` — 272 lines, from 7 slices
+- `src/ui/credits.ts` — 10 lines, from 2 slices
 - `src/ui/endcapture.ts` — 305 lines, from 9 slices
 - `src/ui/endstats.ts` — 428 lines, from 12 slices
 - `src/ui/endstatsext.ts` — 221 lines, from 1 slices
@@ -126,7 +127,7 @@ Slices harvested from 213 session transcripts.
 - `src/ui/highlight.ts` — 534 lines, from 1 slices
 - `src/ui/hints.ts` — 295 lines, from 6 slices
 - `src/ui/journal.ts` — 615 lines, from 4 slices
-- `src/ui/minimap.ts` — 30 lines, from 10 slices
+- `src/ui/minimap.ts` — 139 lines, from 10 slices
 - `src/ui/photomode.ts` — 80 lines, from 1 slices
 - `src/ui/radiotune.ts` — 738 lines, from 4 slices
 - `src/ui/saveio.ts` — 302 lines, from 1 slices
@@ -137,21 +138,25 @@ Slices harvested from 213 session transcripts.
 - `src/ui/tracker.ts` — 373 lines, from 10 slices
 - `src/ui/ui.ts` — 601 lines, from 23 slices
 - `src/ui/weatherui.ts` — 281 lines, from 9 slices
-- `src/ui/whispercue.ts` — 160 lines, from 3 slices
+- `src/ui/whispercue.ts` — 332 lines, from 3 slices
+- `src/workers/layoutCache.ts` — 10 lines, from 2 slices
 - `src/workers/layoutPool.ts` — 117 lines, from 1 slices
+- `src/world/architect.ts` — 951 lines, from 109 slices
 - `src/world/ceiling-details.ts` — 296 lines, from 4 slices
+- `src/world/chunkManager.ts` — 483 lines, from 44 slices
 - `src/world/collision.ts` — 146 lines, from 5 slices
-- `src/world/constants.ts` — 48 lines, from 32 slices
+- `src/world/constants.ts` — 9 lines, from 32 slices
 - `src/world/crackmesher.ts` — 179 lines, from 3 slices
 - `src/world/cracks.ts` — 306 lines, from 10 slices
 - `src/world/graffiti-evolution.ts` — 166 lines, from 5 slices
-- `src/world/neonsign.ts` — 40 lines, from 5 slices
+- `src/world/mesher.ts` — 101 lines, from 63 slices
+- `src/world/neonsign.ts` — 293 lines, from 5 slices
 - `src/world/placement-expansion.ts` — 34 lines, from 3 slices
 - `src/world/radiogeometry.ts` — 182 lines, from 4 slices
 - `src/world/radioprops.ts` — 191 lines, from 5 slices
 - `src/world/staindrips.ts` — 127 lines, from 1 slices
 - `src/world/stains-growth.ts` — 180 lines, from 5 slices
-- `src/world/vignettes.ts` — 40 lines, from 5 slices
+- `src/world/vignettes.ts` — 345 lines, from 5 slices
 - `test/.ckpt-debug.mjs` — 15 lines, from 1 slices
 - `test/.emlights-babylon-stub.gen.mjs` — 13 lines, from 1 slices
 - `test/_nullengine-probe.mjs` — 27 lines, from 3 slices
@@ -162,19 +167,18 @@ Slices harvested from 213 session transcripts.
 - `test/audio-occlusion.mjs` — 192 lines, from 4 slices
 - `test/avoidance-test.mjs` — 146 lines, from 1 slices
 - `test/cabinetcreak-test.mjs` — 30 lines, from 1 slices
-- `test/ceilingfan-test.mjs` — 40 lines, from 2 slices
+- `test/ceilingfan-test.mjs` — 80 lines, from 2 slices
 - `test/checkpoints-test.mjs` — 60 lines, from 1 slices
 - `test/cluster-test.mjs` — 26 lines, from 1 slices
-- `test/compass-test.mjs` — 60 lines, from 3 slices
+- `test/compass-test.mjs` — 108 lines, from 3 slices
 - `test/console-audit.mjs` — 39 lines, from 1 slices
 - `test/contactshadow-test.mjs` — 80 lines, from 1 slices
 - `test/controller-feel.mjs` — 60 lines, from 1 slices
-- `test/cornerao-test.mjs` — 120 lines, from 6 slices
+- `test/cornerao-test.mjs` — 242 lines, from 6 slices
 - `test/crackmesher-test.mjs` — 80 lines, from 1 slices
-- `test/crackmesher-wiring-test.mjs` — 60 lines, from 2 slices
-- `test/cracks-test.mjs` — 50 lines, from 6 slices
+- `test/cracks-test.mjs` — 189 lines, from 6 slices
 - `test/creakvariety-test.mjs` — 197 lines, from 1 slices
-- `test/crossfade-test.mjs` — 120 lines, from 2 slices
+- `test/crossfade-test.mjs` — 218 lines, from 2 slices
 - `test/crowd-test.mjs` — 175 lines, from 1 slices
 - `test/doors-test.mjs` — 175 lines, from 4 slices
 - `test/doorstyles-test.mjs` — 164 lines, from 2 slices
@@ -182,53 +186,51 @@ Slices harvested from 213 session transcripts.
 - `test/drips-test.mjs` — 317 lines, from 7 slices
 - `test/echoes-test.mjs` — 152 lines, from 2 slices
 - `test/emergency-game-test.mjs` — 70 lines, from 3 slices
-- `test/emergency-wiring-test.mjs` — 90 lines, from 3 slices
+- `test/emergency-wiring-test.mjs` — 194 lines, from 3 slices
 - `test/emergencylights-test.mjs` — 194 lines, from 2 slices
 - `test/endstats-test.mjs` — 120 lines, from 2 slices
-- `test/entity-behavior.mjs` — 149 lines, from 4 slices
+- `test/entity-behavior.mjs` — 283 lines, from 4 slices
 - `test/fanaudio-test.mjs` — 215 lines, from 2 slices
 - `test/fandust-test.mjs` — 219 lines, from 1 slices
 - `test/fanplacement-test.mjs` — 80 lines, from 1 slices
 - `test/fanwiring-test.mjs` — 173 lines, from 2 slices
 - `test/fauna-test.mjs` — 50 lines, from 1 slices
 - `test/flashlight-test.mjs` — 46 lines, from 1 slices
-- `test/floorcracks-test.mjs` — 80 lines, from 4 slices
+- `test/floorcracks-test.mjs` — 224 lines, from 4 slices
 - `test/fogvariation-test.mjs` — 184 lines, from 2 slices
 - `test/footprints-test.mjs` — 219 lines, from 3 slices
 - `test/full-persist-test.mjs` — 76 lines, from 2 slices
 - `test/gamepad-test.mjs` — 207 lines, from 6 slices
-- `test/gaze-test.mjs` — 60 lines, from 3 slices
 - `test/gaze-wiring-test.mjs` — 106 lines, from 1 slices
 - `test/graffiti-evo-test.mjs` — 139 lines, from 4 slices
 - `test/groans-test.mjs` — 206 lines, from 10 slices
-- `test/hints-test.mjs` — 231 lines, from 2 slices
-- `test/humharmonics-test.mjs` — 40 lines, from 5 slices
+- `test/hints-test.mjs` — 172 lines, from 2 slices
+- `test/humharmonics-test.mjs` — 223 lines, from 5 slices
 - `test/integration-check.mjs` — 88 lines, from 1 slices
 - `test/interaction-matrix.mjs` — 583 lines, from 17 slices
 - `test/journal-feed-test.mjs` — 20 lines, from 1 slices
-- `test/journal-test.mjs` — 30 lines, from 4 slices
+- `test/journal-test.mjs` — 189 lines, from 4 slices
 - `test/landmarkbreath-test.mjs` — 7 lines, from 1 slices
 - `test/lightpools-test.mjs` — 181 lines, from 2 slices
 - `test/lod-test.mjs` — 60 lines, from 1 slices
 - `test/loresting-test.mjs` — 40 lines, from 1 slices
-- `test/mesher-detail.mjs` — 60 lines, from 4 slices
+- `test/mesher-detail.mjs` — 182 lines, from 4 slices
 - `test/minimap-test.mjs` — 60 lines, from 1 slices
 - `test/moisture-test.mjs` — 40 lines, from 1 slices
-- `test/morenotes-test.mjs` — 30 lines, from 2 slices
-- `test/music-test.mjs` — 80 lines, from 3 slices
-- `test/neonsign-test.mjs` — 120 lines, from 3 slices
+- `test/morenotes-test.mjs` — 57 lines, from 2 slices
+- `test/music-test.mjs` — 144 lines, from 3 slices
+- `test/neonsign-test.mjs` — 193 lines, from 3 slices
 - `test/notepaper-mesher-test.mjs` — 120 lines, from 1 slices
 - `test/notepaper-test.mjs` — 216 lines, from 1 slices
 - `test/notewave3-test.mjs` — 25 lines, from 1 slices
 - `test/pairvocals-test.mjs` — 13 lines, from 1 slices
-- `test/paperflutter-test.mjs` — 80 lines, from 4 slices
 - `test/perf-regression.mjs` — 309 lines, from 13 slices
 - `test/perf.mjs` — 131 lines, from 5 slices
 - `test/perfmarks-test.mjs` — 60 lines, from 1 slices
 - `test/playthrough.mjs` — 137 lines, from 18 slices
 - `test/positional-test.mjs` — 145 lines, from 1 slices
-- `test/posters-mesher-test.mjs` — 60 lines, from 4 slices
-- `test/posters-test.mjs` — 80 lines, from 3 slices
+- `test/posters-mesher-test.mjs` — 328 lines, from 4 slices
+- `test/posters-test.mjs` — 243 lines, from 3 slices
 - `test/probe-cull.mjs` — 47 lines, from 1 slices
 - `test/probe-fx.mjs` — 44 lines, from 1 slices
 - `test/probe-pud.mjs` — 49 lines, from 1 slices
@@ -258,21 +260,19 @@ Slices harvested from 213 session transcripts.
 - `test/stainsgrowth-test.mjs` — 163 lines, from 3 slices
 - `test/story-beats.mjs` — 80 lines, from 1 slices
 - `test/stuck-diag2.mjs` — 21 lines, from 1 slices
-- `test/surface-wiring-test.mjs` — 222 lines, from 6 slices
+- `test/surface-wiring-test.mjs` — 143 lines, from 6 slices
 - `test/surfacedetect-test.mjs` — 40 lines, from 2 slices
 - `test/surfaces-test.mjs` — 143 lines, from 5 slices
-- `test/sway-test.mjs` — 50 lines, from 6 slices
-- `test/texture-variety.mjs` — 60 lines, from 3 slices
+- `test/sway-test.mjs` — 253 lines, from 6 slices
 - `test/tiledebris-test.mjs` — 40 lines, from 1 slices
 - `test/torch-visual.mjs` — 33 lines, from 1 slices
 - `test/tracker-test.mjs` — 189 lines, from 3 slices
 - `test/travel.mjs` — 92 lines, from 6 slices
 - `test/ui-polish.mjs` — 60 lines, from 2 slices
 - `test/vignettes-test.mjs` — 258 lines, from 2 slices
-- `test/visual-effects.mjs` — 60 lines, from 2 slices
-- `test/visual-wavebc.mjs` — 384 lines, from 4 slices
+- `test/visual-effects.mjs` — 132 lines, from 2 slices
+- `test/visual-wavebc.mjs` — 85 lines, from 4 slices
 - `test/vocalcontent-test.mjs` — 122 lines, from 3 slices
-- `test/vocals-test.mjs` — 80 lines, from 5 slices
 - `test/vocalwave2-selection.mjs` — 62 lines, from 2 slices
 - `test/vocalwave2-test.mjs` — 158 lines, from 3 slices
 - `test/wave-a-check.mjs` — 119 lines, from 2 slices
@@ -280,26 +280,26 @@ Slices harvested from 213 session transcripts.
 - `test/wave-c-check.mjs` — 187 lines, from 2 slices
 - `test/weather-depth.mjs` — 14 lines, from 1 slices
 - `test/weatherui-test.mjs` — 285 lines, from 3 slices
-- `test/whispercue-test.mjs` — 60 lines, from 5 slices
 - `test/wirebundles-test.mjs` — 34 lines, from 1 slices
 - `test/worker-test.mjs` — 60 lines, from 3 slices
 - `tsconfig.json` — 17 lines, from 82 slices
 - `vite.config.ts` — 17 lines, from 2 slices
 
-## Partially reconstructed (15 files — gaps marked)
+## Partially reconstructed (16 files — gaps marked)
 
-- `src/core/game.ts` — 1714 lines, 1323 unrecovered, from 135 slices
-- `src/gfx/tiledebris.ts` — 290 lines, 59 unrecovered, from 3 slices
-- `src/ui/credits.ts` — 118 lines, 58 unrecovered, from 2 slices
-- `src/workers/layoutCache.ts` — 173 lines, 148 unrecovered, from 2 slices
-- `src/world/architect.ts` — 264 lines, 164 unrecovered, from 109 slices
-- `src/world/chunkManager.ts` — 454 lines, 338 unrecovered, from 44 slices
-- `src/world/mesher.ts` — 960 lines, 609 unrecovered, from 63 slices
-- `test/endcapture-test.mjs` — 121 lines, 79 unrecovered, from 4 slices
+- `src/core/game.ts` — 2159 lines, 647 unrecovered, from 135 slices
+- `src/entities/spawneffects.ts` — 178 lines, 52 unrecovered, from 13 slices
+- `test/crackmesher-wiring-test.mjs` — 207 lines, 87 unrecovered, from 2 slices
+- `test/endcapture-test.mjs` — 121 lines, 69 unrecovered, from 4 slices
 - `test/firstwatcher-test.mjs` — 52 lines, 12 unrecovered, from 2 slices
 - `test/gallery-test.mjs` — 128 lines, 98 unrecovered, from 2 slices
+- `test/gaze-test.mjs` — 139 lines, 39 unrecovered, from 3 slices
 - `test/graceful-test.mjs` — 28 lines, 2 unrecovered, from 3 slices
+- `test/paperflutter-test.mjs` — 145 lines, 15 unrecovered, from 4 slices
 - `test/perfbudget-test.mjs` — 73 lines, 10 unrecovered, from 4 slices
-- `test/postfx-check.mjs` — 112 lines, 19 unrecovered, from 4 slices
-- `test/sitting-test.mjs` — 263 lines, 129 unrecovered, from 3 slices
+- `test/postfx-check.mjs` — 69 lines, 21 unrecovered, from 4 slices
+- `test/sitting-test.mjs` — 174 lines, 65 unrecovered, from 3 slices
 - `test/speedrun-test.mjs` — 143 lines, 96 unrecovered, from 3 slices
+- `test/texture-variety.mjs` — 149 lines, 69 unrecovered, from 3 slices
+- `test/vocals-test.mjs` — 228 lines, 105 unrecovered, from 5 slices
+- `test/whispercue-test.mjs` — 319 lines, 159 unrecovered, from 5 slices

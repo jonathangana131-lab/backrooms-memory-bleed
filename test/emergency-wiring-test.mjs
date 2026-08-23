@@ -90,3 +90,109 @@ check('chunkKeyOf stable and order-sensitive',
 // ---- lazy construction ------------------------------------------------------
 
 
+
+const wiring = new EmergencyWiring();
+check('no scene yet: lights starts null', wiring.lights === null);
+
+const chunkA = gridChunk(0, 42);
+const chunkB = gridChunk(11, 35);
+
+// announce chunks BEFORE any scene exists - must not throw and must not build
+wiring.onChunkFixtures(0, 0, chunkA);
+wiring.onChunkFixtures(1, 0, chunkB);
+check('onChunkFixtures before ensureLights stays lazy', wiring.lights === null);
+
+const fakeScene = {};
+wiring.ensureLights(fakeScene);
+check('ensureLights builds the rig exactly once',
+  wiring.lights instanceof Object && wiring.lights !== null);
+const firstRig = wiring.lights;
+wiring.ensureLights({ someOther: true });
+check('second ensureLights keeps existing rig', wiring.lights === firstRig);
+
+const unitsA = wiring.lights.units.slice(0, Math.ceil(chunkA.length / 7));
+check('pre-scene fixtures applied on first ensureLights',
+  unitsA.length > 0 && unitsA.every((u, i) => u.x === chunkA[i * 7].x && u.z === chunkA[i * 7].z));
+check('combined set spans every announced chunk in arrival order',
+  wiring.lights.units.length === Math.ceil((chunkA.length + chunkB.length) / 7)
+  && wiring.lights.units[unitsA.length].x === chunkB[0].x);
+
+// ---- replacement semantics ---------------------------------------------------
+
+const chunkA2 = gridChunk(99, 21); // same chunk key, different layout
+wiring.onChunkFixtures(0, 0, chunkA2);
+check('re-announced chunk replaces its old fixture list',
+  wiring.lights.units.length === Math.ceil((chunkA2.length + chunkB.length) / 7),
+  'got ' + wiring.lights.units.length);
+check('replaced list drives selection from new coordinates',
+  wiring.lights.units[0].x === chunkA2[0].x && wiring.lights.units[0].z === chunkA2[0].z);
+
+// ---- bounded accumulation -----------------------------------------------------
+
+const w2 = new EmergencyWiring();
+for (let k = 0; k < MAX_TRACKED_CHUNKS + 10; k++) {
+  w2.onChunkFixtures(k, 0, gridChunk(k * 3 + 1, 7));
+}
+w2.ensureLights({});
+check('tracked chunks capped at MAX_TRACKED_CHUNKS',
+  w2.chunks.size === MAX_TRACKED_CHUNKS,
+  'size=' + w2.chunks.size);
+check('eviction drops OLDEST chunks first',
+  !w2.chunks.has(chunkKeyOf(0, 0)) && !w2.chunks.has(chunkKeyOf(9, 0))
+  && w2.chunks.has(chunkKeyOf(MAX_TRACKED_CHUNKS + 9, 0)));
+
+// ---- blackout transitions ------------------------------------------------------
+
+const pool = wiring.lights.pool;
+const litCount = () => pool.filter((l) => l.intensity > 0).length;
+
+wiring.frameUpdate(1 / 60, false);
+check('frameUpdate outside blackout parks everything dark and off-stage',
+  pool.every((l) => l.intensity === 0 && l.position.y === -100));
+
+wiring.frameUpdate(0.25, true); // blackout begins
+check('blackout start lights one pulsing light per unit (pool-capped)',
+  litCount() === Math.min(wiring.lights.units.length, pool.length),
+  'lit=' + litCount() + ' units=' + wiring.lights.units.length + ' pool=' + pool.length);
+const duringBlackout = pool.map((l) => l.intensity);
+
+wiring.frameUpdate(0.5, true); // still dark outside
+const laterBlackout = pool.map((l) => l.intensity);
+check('intensity pulses while blackout continues',
+  pool.some((l, i) => l.intensity > 0 && Math.abs(duringBlackout[i] - laterBlackout[i]) > 0.01));
+
+wiring.frameUpdate(1 / 60, false); // power restored
+check('blackout END kills all output instantly', pool.every((l) => l.intensity === 0));
+check('parked off-stage after power restore', pool.every((l) => l.position.y === -100));
+
+wiring.frameUpdate(0.1, true); // second blackout
+check('SECOND blackout transition relights the units',
+  litCount() === Math.min(wiring.lights.units.length, pool.length));
+
+// ---- pre-rig safety -------------------------------------------------------------
+
+const w3 = new EmergencyWiring();
+let threw = false;
+try { w3.frameUpdate(0.016, true); w3.frameUpdate(0.016, false); } catch { threw = true; }
+check('frameUpdate before ensureLights never throws and builds nothing',
+  !threw && w3.lights === null);
+
+// ---- reset -----------------------------------------------------------------------
+
+wiring.reset();
+check('reset clears accumulated chunks', wiring.chunks.size === 0);
+check('reset hard-offs the rig',
+  pool.every((l) => l.intensity === 0 && l.position.y === -100));
+
+wiring.onChunkFixtures(5, 5, chunkA);
+wiring.frameUpdate(0.25, true);
+check('post-reset announcements re-bind the surviving rig',
+  wiring.lights !== null
+  && wiring.lights.units.length === Math.ceil(chunkA.length / 7)
+  && litCount() === Math.min(wiring.lights.units.length, wiring.lights.pool.length),
+  'lit=' + litCount());
+
+console.log(failures === 0 ? '\nALL PASS' : '\n' + failures + ' FAILURE(S)');
+process.exit(failures === 0 ? 0 : 1);
+
+

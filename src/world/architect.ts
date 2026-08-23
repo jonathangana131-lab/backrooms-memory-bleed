@@ -169,6 +169,8 @@ export const NOTE_TEXTS: string[] = [
   'Inventory: 3 torches, 2 pens, 47m of string, one memory of a beach we all share.',
   'The hospital ward smells right but the plan is mirrored. I keep reaching left for doors.',
   'Day ??: we voted to stop naming rooms. The names kept arriving without us.',
+
+
   'Found a child\u2019s drawing of this exact corridor. Signed with my name, in her hand.',
   'The mall directory lists a store called EVERYTHING WE BROUGHT. It is on every level.',
   'Protocol amendment: if a room feels fully familiar, mark it. Recognition is how it learns.',
@@ -208,6 +210,8 @@ export const NOTE_TEXTS: string[] = [
   'Last personal inventory: name intact, mother\u2019s face intact, the smell of our first car gone. Fair trade. Fair trade.',
   'Ada says the space is not stealing our memories. It is practicing them. I liked it better as a thief.'
 ];
+
+
 
 export interface ChunkLayout {
   cx: number;
@@ -264,5 +268,696 @@ function decideEdge(
   if (spawnSafe) return EdgeCode.OPEN;
   const district = districtAt(seed, wx, wz);
   let pClose = edgeDensity(seed, district, wx, wz);
+
+
+  const lat = 7;
+  const gx = ((wx % lat) + lat) % lat;
+  const gz = ((wz % lat) + lat) % lat;
+  const onCorridorX = gx === 3 || gx === 4;
+  const onCorridorZ = gz === 3 || gz === 4;
+
+  if (district === District.CORRIDOR_GRID) {
+    if (onCorridorX !== onCorridorZ) pClose *= 0.08;
+    else pClose *= 1.25;
+  } else {
+    if (onCorridorX && !onCorridorZ && vertical) pClose *= 0.25;
+    if (onCorridorZ && !onCorridorX && !vertical) pClose *= 0.25;
+  }
+
+  // memory contamination rewrites structure: more partitions, more doors
+  pClose *= 1 + memBoost * 0.5;
+
+  const prevSame = vertical
+    ? rand2(wx, wz - 1, seed ^ SALTS.edgeV)
+    : rand2(wx - 1, wz, seed ^ SALTS.edgeH);
+  if (prevSame < pClose) pClose = Math.min(0.97, pClose * 1.6);
+
+  const r = vertical
+    ? rand2(wx, wz, seed ^ SALTS.edgeV)
+    : rand2(wx, wz, seed ^ SALTS.edgeH);
+
+  if (r >= pClose) return EdgeCode.OPEN;
+
+  const r2 = rand2(wx, wz, seed ^ SALTS.door);
+  let doorChance = district === District.HONEYCOMB ? 0.42 : 0.24;
+  doorChance += memBoost * 0.25;
+  if (r2 < doorChance && pClose < 0.85) return EdgeCode.DOORWAY;
+  return EdgeCode.SOLID;
+}
+
+const SIGN_TEXTS: Record<number, string[]> = {
+  [MemoryKind.OFFICE]: ['SUITE 214', 'CONFERENCE B', 'HR DEPT', 'EXIT ->', 'FAX ROOM', 'Q4 TARGETS', 'MEETING IN PROGRESS', 'RECORDS ANNEX', 'PARKING LEVEL B2', 'OVERTIME TONIGHT'],
+  [MemoryKind.RESIDENCE]: ['KITCHEN', 'MOM IS SLEEPING', 'DO NOT ENTER', 'YOUR ROOM', 'BATH', 'LAUNDRY', 'DINING ROOM', 'THE GOOD CHINA', 'BACKYARD ->', 'WASH YOUR HANDS'],
+  [MemoryKind.HOSPITAL]: ['WARD 3', 'RADIOLOGY', 'QUIET PLEASE', 'VISITING HOURS END', 'MORGUE ->', 'EMERGENCY', 'PHARMACY', 'INTENSIVE CARE', 'CHAPEL', 'NO CELL PHONES'],
+  [MemoryKind.SCHOOL]: ['ROOM 112', 'GYM', 'LOCKERS', 'SCIENCE WING', 'NO RUNNING', 'LIBRARY', 'AUDITORIUM', 'PRINCIPAL', 'BUS LOOP', 'DETENTION'],
+  [MemoryKind.MALL]: ['FOOD COURT', 'SEARS', 'RESTROOMS', 'CLOSED FOR REMODEL', '2ND LEVEL', 'CINEMA 8', 'ELEVATORS', 'LOST & FOUND', 'OPEN TIL 9', 'DIRECTORY'],
+  [MemoryKind.TRANSIT]: ['PLATFORM 2', 'DO NOT BOARD', 'LAST TRAIN 3:33', 'EXIT ONLY', 'WAY OUT', 'STAND BEHIND LINE', 'NO EXIT', 'ARRIVALS', 'MIND THE GAP', 'TICKETS'],
+  [MemoryKind.PERSONAL]: ['YOU WERE HERE', 'YOU AGAIN', 'THIS WAY HOME', 'REMEMBER?', 'YOU LIVE HERE', 'ALMOST HOME', 'STILL YOURS', 'WELCOME BACK', 'NOT YOUR HOUSE', 'YOU FORGOT THIS'],
+};
+
+export function generateLayout(seed: number, cx: number, cz: number, mem?: MemoryField): ChunkLayout {
+  const N = CHUNK_CELLS;
+  const centerX = (cx + 0.5) * N * CELL;
+  const centerZ = (cz + 0.5) * N * CELL;
+
+  // STRUCTURE must be eternal (seed+coords only) so chunk borders agree
+  // across builds; volatile memory dresses props/lights/signs instead.
+  const memStruct = mem ? mem.sampleBaseAt(centerX, centerZ) : { kind: MemoryKind.NONE as MemoryKind, intensity: 0 };
+  const memSample = mem ? mem.sampleAt(centerX, centerZ) : memStruct;
+  void memSample;
+  const layout: ChunkLayout = {
+    cx, cz,
+    hEdges: new Uint8Array((N + 1) * N),
+    vEdges: new Uint8Array(N * (N + 1)),
+    district: districtAt(seed, centerX / CELL, centerZ / CELL),
+    lights: [],
+    props: [],
+    signs: [],
+    notes: [],
+    puddles: [],
+    wires: [],
+    stains: [],
+    graffiti: [],
+    memKind: memSample.kind,
+    memIntensity: memSample.intensity,
+  };
+
+  // strong STRUCTURAL memories bend districts toward enclosed room grammar
+  if (memStruct.intensity > 0.45 && (memStruct.kind === MemoryKind.RESIDENCE || memStruct.kind === MemoryKind.HOSPITAL)) {
+    layout.district = District.HONEYCOMB;
+  }
+  ensureConnectivity(layout);
+  applyLandmark(seed, cx, cz, layout);
+
+  const baseX = cx * N;
+  const baseZ = cz * N;
+  const spawnSafeDist = 2.2;
+  // structural edge-density bias follows the eternal layer only
+  const boost = Math.min(1, memStruct.intensity);
+
+  for (let lz = 0; lz <= N; lz++) {
+    for (let lx = 0; lx < N; lx++) {
+      const wx = baseX + lx;
+      const wz = baseZ + lz;
+      const safe = Math.hypot(wx + 0.5, wz) < spawnSafeDist;
+      layout.hEdges[lz * N + lx] = decideEdge(seed, wx, wz, false, safe, boost);
+    }
+  }
+  for (let lz = 0; lz < N; lz++) {
+    for (let lx = 0; lx <= N; lx++) {
+      const wx = baseX + lx;
+      const wz = baseZ + lz;
+      const safe = Math.hypot(wx, wz + 0.5) < spawnSafeDist;
+      layout.vEdges[lz * (N + 1) + lx] = decideEdge(seed, wx, wz, true, safe, boost);
+    }
+  }
+
+  generateLights(seed, layout);
+  generateProps(seed, layout);
+  generateSigns(seed, layout);
+  generateNotes(seed, layout);
+  generateBatteries(seed, layout);
+  generatePuddles(seed, layout);
+  generateWires(seed, layout);
+  generateCables(seed, layout);
+  generateStains(seed, layout);
+  generateGraffiti(seed, layout);
+  return layout;
+}
+
+function inBlackout(seed: number, wx: number, wz: number): boolean {
+  const n = fbm2(wx * 0.021, wz * 0.021, 2, 2, 0.5, seed ^ SALTS.blackout);
+  return n > 0.76;
+}
+
+/**
+ * Connectivity repair: flood-fill from the chunk centre across non-SOLID
+ * edges; any unreachable interior cell gets one wall carved toward a
+ * reachable neighbour. Guarantees no sealed pockets inside any district.
+ * Only interior edges are touched - boundary edges stay hash-consistent.
+ */
+function ensureConnectivity(layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  const passable = (code: number) => code !== EdgeCode.SOLID;
+  const key = (lz: number, lx: number) => lz * N + lx;
+
+  const reach = new Set<number>([key(N >> 1, N >> 1)]);
+  const queue: Array<[number, number]> = [[N >> 1, N >> 1]];
+  while (queue.length) {
+    const [lz, lx] = queue.shift()!;
+    const visit = (nlz: number, nlx: number): void => {
+      const k = key(nlz, nlx);
+      if (reach.has(k)) return;
+      reach.add(k);
+      queue.push([nlz, nlx]);
+    };
+    if (lz > 0 && passable(layout.hEdges[lz * N + lx])) visit(lz - 1, lx);
+    if (lz < N - 1 && passable(layout.hEdges[(lz + 1) * N + lx])) visit(lz + 1, lx);
+    if (lx > 0 && passable(layout.vEdges[lz * (N + 1) + lx])) visit(lz, lx - 1);
+    if (lx < N - 1 && passable(layout.vEdges[lz * (N + 1) + lx + 1])) visit(lz, lx + 1);
+  }
+
+  // carve interior walls until every interior cell is reachable
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (let lz = 0; lz < N; lz++) {
+      for (let lx = 0; lx < N; lx++) {
+        const k = key(lz, lx);
+        if (reach.has(k)) continue;
+        // candidate carves: interior edges only
+        const candidates: Array<() => void> = [];
+        if (lz > 0 && reach.has(key(lz - 1, lx)) && layout.hEdges[lz * N + lx] !== EdgeCode.OPEN) {
+          candidates.push(() => { layout.hEdges[lz * N + lx] = EdgeCode.OPEN; });
+        }
+        if (lz < N - 1 && reach.has(key(lz + 1, lx)) && layout.hEdges[(lz + 1) * N + lx] !== EdgeCode.OPEN) {
+          candidates.push(() => { layout.hEdges[(lz + 1) * N + lx] = EdgeCode.OPEN; });
+        }
+        if (lx > 0 && reach.has(key(lz, lx - 1)) && layout.vEdges[lz * (N + 1) + lx] !== EdgeCode.OPEN) {
+          candidates.push(() => { layout.vEdges[lz * (N + 1) + lx] = EdgeCode.OPEN; });
+        }
+        if (lx < N - 1 && reach.has(key(lz, lx + 1)) && layout.vEdges[lz * (N + 1) + lx + 1] !== EdgeCode.OPEN) {
+          candidates.push(() => { layout.vEdges[lz * (N + 1) + lx + 1] = EdgeCode.OPEN; });
+        }
+        if (candidates.length) {
+          candidates[0]();
+          reach.add(k);
+          progress = true;
+        }
+      }
+    }
+  }
+}
+
+function generateLights(seed: number, layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  const landmarkLit = !!layout.landmark;
+  const baseX = layout.cx * N;
+  const baseZ = layout.cz * N;
+  const deadBias = layout.memIntensity * 0.35;
+  for (let lz = 0; lz < N; lz++) {
+    for (let lx = 0; lx < N; lx+ice corridor cells clear so canyons stay walkable
+      if (layout.district === District.STORAGE) {
+        const gx2 = ((wx % 7) + 7) % 7;
+        const gz2 = ((wz % 7) + 7) % 7;
+        if (gx2 === 3 || gx2 === 4 || gz2 === 3 || gz2 === 4) continue;
+      }
+      // never block doorways: skip cells touching a doorway edge
+      const touchesDoorway =
+        layout.hEdges[lz * N + lx] === EdgeCode.DOORWAY ||
+        layout.hEdges[(lz + 1) * N + lx] === EdgeCode.DOORWAY ||
+        layout.vEdges[lz * (N + 1) + lx] === EdgeCode.DOORWAY ||
+        layout.vEdges[lz * (N + 1) + lx + 1] === EdgeCode.DOORWAY;
+      if (touchesDoorway) continue;
+      const kind = rng.pick(kinds);
+      layout.props.push({
+        kind,
+        x: (wx + rng.range(0.28, 0.72)) * CELL,
+        z: (wz + rng.range(0.28, 0.72)) * CELL,
+        rot: rng.int(0, 4) as 0 | 1 | 2 | 3,
+        variant: rng.int(0, 3),
+      });
+      // reconsolidation signature: personal memories rebuild the player's
+      // own desk-and-chair somewhere far from where they were formed
+      if (layout.memKind === MemoryKind.PERSONAL && rng.chance(0.4)) {
+        const bx = (wx + rng.range(0.2, 0.8)) * CELL;
+        const bz = (wz + rng.range(0.2, 0.8)) * CELL;
+        layout.props.push({ kind: 'desk', x: bx, z: bz, rot: 0, variant: 2 });
+        layout.props.push({ kind: 'chair', x: bx, z: bz - 0.75, rot: 2, variant: 0 });
+      }
+    }
+  }
+}
+
+/** Water stains on ceilings in wet zones. */
+function generateStains(seed: number, layout: ChunkLayout): void {
+  if (layout.memKind !== MemoryKind.TRANSIT && layout.memKind !== MemoryKind.HOSPITAL) return;
+  const srng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x57a19));
+  const sCount = srng.int(2, 6);
+  const N = CHUNK_CELLS;
+  for (let i = 0; i < sCount; i++) {
+    layout.stains.push({
+      x: (layout.cx * N + srng.range(0.5, N - 0.5)) * CELL,
+      z: (layout.cz * N + srng.range(0.5, N - 0.5)) * CELL,
+      r: srng.range(0.5, 1.6),
+    });
+  }
+}
+
+// ---- LANDMARK ROOMS: rare named set-pieces (~1 per 60 chunks) ----
+const LANDMARK_KINDS = ['EXECUTIVE OFFICE', 'LAUNDRY', 'CHAPEL', 'PLAYROOM', 'CANTEEN', 'ARCHIVE', 'SECURITY STATION', 'MEDICAL BAY'] as const;
+type LandmarkKind = (typeof LANDMARK_KINDS)[number];
+
+export function landmarkFor(cx: number, cz: number, seed: number): LandmarkKind | null {
+  if ((hash2i(cx, cz, seed ^ 0x14bd) % 40) !== 7) return null;
+  return LANDMARK_KINDS[hash2i(cx, cz, seed ^ 0x14be) % LANDMARK_KINDS.length];
+}
+
+/**
+ * Room-specific dressing quads emitted by applyLandmark. Rendered by the
+ * chunk mesher as small flat geometry; `tag` selects texture/behaviour
+ * (e.g. 'static' renders emissive noise, 'flame' flickers) and `rgb` is a
+ * packed 0xRRGGBB tint.
+ * Horizontal decals omit `face`; wall-mounted ones use the SignInstance
+ * convention for `face` (0=-z 1=+z 2=-x 3=+x wall normal).
+ */
+export type LandmarkDetailTag =
+  | 'card' | 'blood' | 'static' | 'paper' | 'chalk' | 'book'
+  | 'plate' | 'cup' | 'photo' | 'pen' | 'lint' | 'dust' | 'flame';
+
+export interface LandmarkDetailInstance {
+  x: number; z: number;
+  /** quad center height above the floor */
+  y: number;
+  /** full width / depth of the quad */
+  w: number; h: number;
+  /** yaw in radians (horizontal decals only) */
+  rot: number;
+  /** wall normal direction for wall-mounted quads; omit for horizontal */
+  face?: 0 | 1 | 2 | 3;
+  /** packed tint 0xRRGGBB */
+  rgb: number;
+  tag: LandmarkDetailTag;
+}
+
+/** Readable prayer-card texts scattered through CHAPEL rooms. */
+const PRAYER_CARDS: string[] = [
+  '[PRAYER CARD] Saint of thresholds, watch whoever walks this corridor next.',
+  '[PRAYER CARD] For the ones the building kept: rest somewhere else, finally.',
+  '[PRAYER CARD] Deliver us from exact copies. Amen.',
+];
+
+function applyLandmark(seed: number, cx: number, cz: number, layout: ChunkLayout): void {
+  const lm = landmarkFor(cx, cz, seed);
+  if (!lm) return;
+  layout.landmark = lm;
+  const N = CHUNK_CELLS;
+  // seal the perimeter, open the interior
+  for (let i = 0; i < N; i++) {
+    layout.hEdges[i] = EdgeCode.SOLID;                 // north boundary row
+    layout.hEdges[N * N + i] = EdgeCode.SOLID;         // south boundary row
+    layout.vEdges[i] = EdgeCode.SOLID;                 // west boundary col
+    layout.vEdges[N * (N + 1) + i] = EdgeCode.SOLID;   // east boundary col
+  }
+  for (let lz = 1; lz < N; lz++) {
+    for (let lx = 0; lx < N; lx++) layout.hEdges[lz * N + lx] = EdgeCode.OPEN;
+  }
+  for (let lz = 0; lz < N; lz++) {
+    for (let lx = 1; lx < N; lx++) layout.vEdges[lz * (N + 1) + lx] = EdgeCode.OPEN;
+  }
+  // two doorways on opposite walls
+  const rng = new RNG(hash2i(cx, cz, seed ^ 0xd00a));
+  const dn = rng.int(2, N - 3);
+  layout.hEdges[dn] = EdgeCode.DOORWAY;                       // north wall
+  const de = rng.int(1, N - 1);
+  layout.vEdges[de * (N + 1) + N] = EdgeCode.DOORWAY;         // east wall
+
+  const bx = cx * N * CELL;
+  const bz = cz * N * CELL;
+
+  // signage naming the room, hung inside near the doorway wall
+  layout.signs.push({
+    x: bx + (dn + 0.5) * CELL,
+    z: bz + CELL,
+    face: 0,
+    y: 1.9,
+    text: lm,
+    kind: MemoryKind.OFFICE,
+  });
+
+  const put = (kind: PropKind, wx: number, wz: number, rot: 0 | 1 | 2 | 3 = 0, variant = 0): void => {
+    layout.props.push({ kind, x: wx, z: wz, rot, variant });
+  };
+
+  // room-specific dressing quads, driven by their own deterministic rng
+  const det = layout.details ?? (layout.details = []);
+  const drng = new RNG(hash2i(cx, cz, seed ^ 0xdeca));
+  const decal = (tag: LandmarkDetailTag, x: number, z: number, y: number,
+    w: number, h: number, rgb: number, rot = 0): void => {
+    det.push({ tag, x, z, y, w, h, rot, rgb });
+  };
+  const wallDecal = (tag: LandmarkDetailTag, face: 0 | 1 | 2 | 3, x: number,
+    z: number, y: number, w: number, h: number, rgb: number): void => {
+    det.push({ tag, x, z, y, w, h, rot: 0, face, rgb });
+  };
+
+  if (lm === 'EXECUTIVE OFFICE') {
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 2; c++) {
+        const dx = bx + (3.5 + c * 3.2) * CELL / 2.5;
+        const dz = bz + (3.5 + r * 2.2) * CELL / 2.5;
+        put('desk', dx, dz, 0, r);
+        put('chair', dx, dz + 0.85, 0, 1);
+      }
+    }
+    put('cooler', bx + CELL, bz + CELL * (N - 1.5));
+    put('cooler', bx + CELL * (N - 1.5), bz + CELL);
+    for (let c = 0; c < 3; c++) put('cabinet', bx + (2 + c * 2.4) * CELL / 2.5 + CELL, bz + CELL * 0.9, 0, 1);
+    // a family photo lies face-down on the corner desk: nobody wants to
+    // look at it, nobody will pick it up
+    const edx = bx + 3.5 * CELL / 2.5;
+    const edz = bz + 3.5 * CELL / 2.5;
+    decal('photo', edx + 0.44, edz - 0.16, 0.765, 0.17, 0.13, 0x2e2620, drng.range(0.2, 0.7));
+    // its pen rolled off the edge and is still on the carpet
+    decal('pen', edx + 0.95, edz + 0.36, 0.012, 0.14, 0.022, 0x191921, drng.range(0.8, 2.4));
+  } else if (lm === 'LAUNDRY') {
+    for (let r = 0; r < 4; r++) {
+      put('cooler', bx + CELL * 1.4, bz + (2 + r * 1.9) * CELL / 2.5, 0, r % 3);
+      put('cooler', bx + CELL * (N - 1.4), bz + (2 + r * 1.9) * CELL / 2.5, 2, (r + 1) % 3);
+    }
+    put('bench', bx + CELL * (N / 2), bz + CELL * (N / 2), 1, 1);
+    // the second washer has been leaking since forever
+    const washz = bz + (2 + 1 * 1.9) * CELL / 2.5;
+    layout.puddles.push({ x: bx + CELL * 1.95, z: washz + 0.35, r: 0.85 });
+    // dryer lint drifted into drifts along the machine row
+    for (let i = 0; i < 9; i++) {
+      decal('lint',
+        bx + CELL * (1.1 + drng.range(0, 2.6)),
+        bz + CELL * (1.6 + drng.range(0, N - 3.4)),
+        0.012, drng.range(0.05, 0.11), drng.range(0.04, 0.09),
+        0xb8b2a2, drng.next() * Math.PI);
+    }
+  } else if (lm === 'CHAPEL') {
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 4; c++) {
+        put('bench', bx + (2.5 + c * 1.9) * CELL / 2.5, bz + (3.5 + r * 1.7) * CELL / 2.5, 0, r % 3);
+      }
+    }
+    put('shelf', bx + CELL * (N / 2), bz + CELL * 1.2, 0, 2);
+    put('shelf', bx + CELL * (N / 2 + 1.2), bz + CELL * 1.2, 0, 1);
+    // one votive candle by the altar shelves: flicker 13 lands in
+    // LightingRig's slow-sine band, so its point light breathes warm
+    const candX = bx + CELL * (N / 2 + 2.1);
+    const candZ = bz + CELL * 1.5;
+    layout.lights.push({ x: candX, z: candZ, flicker: 13, alive: true });
+    decal('flame', candX, candZ, 0.52, 0.07, 0.1, 0xffb042);
+    // prayer cards left open on the pews mid-plea
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 4; c++) {
+        if (hash2i(cx * 4 + c, cz + r, seed ^ 0xca2d) % 3 !== 0) continue;
+        decal('card',
+          bx + (2.5 + c * 1.9) * CELL / 2.5 + drng.range(-0.28, 0.28),
+          bz + (3.5 + r * 1.7) * CELL / 2.5 + drng.range(-0.1, 0.1),
+          0.525, 0.1, 0.14, 0xe8e2cf, drng.range(0, Math.PI));
+      }
+    }
+    // two legible cards dropped in the aisle
+    layout.notes.push({
+      x: bx + CELL * (N / 2 - 2.2), z: bz + CELL * (N / 2 + 0.8),
+      rot: drng.next() * Math.PI,
+      text: PRAYER_CARDS[hash2i(cx, cz, seed ^ 0x6a3d) % PRAYER_CARDS.length],
+    }, {
+      x: bx + CELL * (N / 2 - 1.6), z: bz + CELL * (N / 2 + 1.5),
+      rot: drng.next() * Math.PI,
+      text: PRAYER_CARDS[hash2i(cx, cz, seed ^ 0x6a3e) % PRAYER_CARDS.length],
+    });
+  } else if (lm === 'CANTEEN') {
+    // two long table runs with chairs on both sides
+    for (let r = 0; r < 2; r++) {
+      const tz = bz + (3.5 + r * 3.4) * CELL / 2.5;
+      for (let c = 0; c < 5; c++) {
+        put('desk', bx + (2.2 + c * 1.9) * CELL / 2.5, tz, 0, r);
+        // a few chairs were shoved back carelessly and never straightened
+        const askewN = r === 0 && c === 3;
+        const askewS = r === 1 && c === 1;
+        put('chair', bx + (2.2 + c * 1.9) * CELL / 2.5 + (askewN ? 0.28 : askewS ? -0.24 : 0),
+          tz - 0.85, askewN ? 1 : 2, c % 2);
+        put('chair', bx + (2.2 + c * 1.9) * CELL / 2.5, tz + 0.85 + (askewS ? 0.26 : 0),
+          askewS ? 3 : 0, c % 2);
+      }
+    }
+    // one place still set: plate and cup untouched, waiting for someone
+    const mx = bx + (2.2 + 2 * 1.9) * CELL / 2.5;
+    const mz = bz + 3.5 * CELL / 2.5;
+    decal('plate', mx, mz, 0.772, 0.26, 0.26, 0xdad4c8);
+    decal('cup', mx + 0.24, mz - 0.14, 0.778, 0.075, 0.075, 0xbdb2a0);
+    put('vending', bx + CELL * 1.3, bz + CELL * (N - 1.6), 0, 0);
+    put('vending', bx + CELL * 2.4, bz + CELL * (N - 1.6), 0, 1);
+    put('cooler', bx + CELL * (N - 1.4), bz + CELL * 1.4, 0, 2);
+  } else if (lm === 'PLAYROOM') {
+    // scattered soft shapes
+    for (let i = 0; i < 10; i++) {
+      put('crate', bx + rng.range(CELL * 1.5, CELL * (N - 1.5)), bz + rng.range(CELL * 1.5, CELL * (N - 1.5)), 0, i % 4);
+    }
+    for (let i = 0; i < 4; i++) {
+      put('stacked_chairs', bx + rng.range(CELL * 2, CELL * (N - 2)), bz + rng.range(CELL * 2, CELL * (N - 2)), 0, i % 4);
+    }
+    for (const [px, pz] of [[1.2, 1.2], [N - 1.2, 1.2], [1.2, N - 1.2], [N - 1.2, N - 1.2]]) {
+      put('planter', bx + px * CELL, bz + pz * CELL, 0, 2);
+    }
+    // chalk drawings at child height: bright waxy strokes on the walls,
+    // none of them drawn by any child who was ever here
+    const chalks: number[][] = [
+      [0xe86a9a, 0x7fd84f, 0xf2c53d],   // north wall trio
+      [0x6fa8f2, 0xef8f3e],             // west wall pair
+      [0xc06ad8, 0x8fe05a],             // east wall pair
+    ];
+    chalks[0].forEach((rgb, i) => wallDecal('chalk', 1,
+      bx + CELL * (1.8 + i * 2.3), bz, 0.85, 0.55, 0.42, rgb));
+    chalks[1].forEach((rgb, i) => wallDecal('chalk', 3,
+      bx, bz + CELL * (2.4 + i * 2.4), 0.78, 0.5, 0.38, rgb));
+    chalks[2].forEach((rgb, i) => wallDecal('chalk', 2,
+      bx + N * CELL, bz + CELL * (3.1 + i * 2.5), 0.92, 0.52, 0.4, rgb));
+    // one crate overturned mid-play, its spilling still frozen in place
+    put('crate', bx + CELL * (N / 2 + drng.range(-1, 1)), bz + CELL * (N / 2 + drng.range(-1, 1)), 0, 3);
+  } else if (lm === 'SECURITY STATION') {
+    for (let c = 0; c < 3; c++) put('whiteboard', bx + (2.5 + c * 1.8) * CELL / 2.5, bz + CELL * 1.1, 0, c % 3);
+    // one monitor has given up on footage and shows pure static, mounted
+    // on the board wall facing the duty desk
+    wallDecal('static', 1, bx + (2.5 + 1 * 1.8) * CELL / 2.5, bz + CELL * 1.1, 1.42, 0.66, 0.5, 0xd8d8d8);
+    // shift paperwork nobody filed, drifted across the desk top
+    for (let i = 0; i < 5; i++) {
+      decal('paper',
+        bx + CELL * (N / 2) + drng.range(-0.55, 0.55),
+        bz + CELL * 2.0 + drng.range(-0.28, 0.28),
+        0.772, drng.range(0.16, 0.24), drng.range(0.22, 0.3),
+        0xd9d3c2, drng.next() * Math.PI);
+    }
+    put('desk', bx + CELL * (N / 2), bz + CELL * 2.0, 0, 1);
+    put('chair', bx + CELL * (N / 2), bz + CELL * 2.9, 0, 0);
+    put('cabinet', bx + CELL * (N - 1.6), bz + CELL * (N - 1.6), 0, 1);
+    put('cooler', bx + CELL * 1.3, bz + CELL * (N - 1.4), 0, 1);
+  } else if (lm === 'MEDICAL BAY') {
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 3; c++) {
+        put('gurney', bx + (2.6 + c * 2.3) * CELL / 2.5, bz + (3.2 + r * 2.6) * CELL / 2.5, 0, (r + c) % 3);
+      }
+    }
+    // one gurney tells the whole ward's story: dried blood pooled beneath,
+    // soaked through the pad on top
+    const bgx = bx + (2.6 + 1 * 2.3) * CELL / 2.5;
+    const bgz = bz + 3.2 * CELL / 2.5;
+    decal('blood', bgx + 0.15, bgz + 0.55, 0.006, 1.15, 0.7, 0x4a0d0d, drng.range(0, Math.PI));
+    decal('blood', bgx - 0.5, bgz + 1.05, 0.007, 0.5, 0.35, 0x3c0909, drng.range(0, Math.PI));
+    decal('blood', bgx, bgz - 0.1, 0.905, 0.5, 0.85, 0x571010, 0.3);
+    put('cabinet', bx + CELL * (N - 1.5), bz + CELL * 1.4, 0, 1);
+    // supply cabinet swung ajar: rotated footprint reads as an open door
+    put('cabinet', bx + CELL * (N - 1.5), bz + CELL * (N - 1.5), 1, 2);
+  } else {
+    // ARCHIVE: dense shelf rows with narrow aisles
+    for (let r = 0; r < 3; r++) {
+      const sz = bz + (3 + r * 2.6) * CELL / 2.5;
+      for (let c = 0; c < 4; c++) {
+        put('shelf', bx + (2.2 + c * 1.05) * CELL / 2.5, sz, 0, (r + c) % 3);
+      }
+    }
+    for (let c = 0; c < 3; c++) put('cabinet', bx + (2 + c * 2.6) * CELL / 2.5, bz + CELL * 1.3, 0, 2);
+    // shelving casualties: spines slumped face-down into the aisles
+    const bookCols = [0x6b3f2a, 0x3d5a44, 0x584a6e, 0x803430];
+    for (let i = 0; i < 7; i++) {
+      const r = i % 3;
+      decal('book',
+        bx + (2.2 + drng.range(0, 3.4)) * CELL / 2.5,
+        bz + ((3 + r * 2.6) * CELL / 2.5) + (drng.chance(0.5) ? 0.45 : -0.45),
+        0.009, 0.3, 0.21, bookCols[i % 4], drng.range(0, Math.PI));
+    }
+    // the air in here hangs thick: dense motes suspended over the stacks
+    for (let i = 0; i < 16; i++) {
+      decal('dust',
+        bx + CELL * drng.range(1.5, N - 1.5),
+        bz + CELL * drng.range(1.5, N - 1.5),
+        drng.range(0.4, 2.4), 0.035, 0.035, 0xd8d2c0);
+    }
+  }
+
+  // landmark rooms are fully lit, and hold a torch cell + a field note
+  for (const l of layout.lights) l.alive = true;
+  const crng2 = new RNG(hash2i(cx, cz, seed ^ 0xbe11));
+  const story = CLUSTER_STORIES[hash2i(cx, cz, seed ^ 0x5703) % CLUSTER_STORIES.length];
+  const noteIdx = hash2i(cx, cz, seed ^ 0x5704) % story.length;
+  layout.props.push({ kind: 'battery', x: bx + CELL * (N / 2 + 1.4), z: bz + CELL * (N - 2), rot: 0, variant: 1 });
+  layout.notes.push({
+    x: bx + CELL * (N / 2 - 1.4),
+    z: bz + CELL * (N - 2),
+    rot: crng2.next() * Math.PI,
+    text: '[FIELD NOTE] ' + story[noteIdx],
+  });
+}
+
+function generateNotes(seed: number, layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  // every ~9 chunks: a clustered micro-story (3-4 notes in one room)
+  if ((hash2i(layout.cx, layout.cz, seed ^ 0xc105) % 9) === 0) {
+    const crng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x57a7));
+    const story = CLUSTER_STORIES[hash2i(layout.cx, layout.cz, seed ^ 0x5702) % CLUSTER_STORIES.length];
+    const bx = (layout.cx * N + crng.range(3, N - 3)) * CELL;
+    const bz = (layout.cz * N + crng.range(3, N - 3)) * CELL;
+    for (let i = 0; i < story.length; i++) {
+      layout.notes.push({
+        x: bx + crng.range(-1.6, 1.6),
+        z: bz + crng.range(-1.6, 1.6),
+        rot: crng.next() * Math.PI * 2,
+        text: '[NOTE ' + (i + 1) + '/' + story.length + '] ' + story[i],
+      });
+    }
+    return;
+  }
+  // otherwise: single ambient note ~1 per 4 chunks
+  if ((hash2i(layout.cx, layout.cz, seed ^ 0x0e7e) % 4) !== 0) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x4e07));
+  const lx = rng.int(1, N - 1);
+  const lz = rng.int(1, N - 1);
+  layout.notes.push({
+    x: (layout.cx * N + lx + rng.range(0.3, 0.7)) * CELL,
+    z: (layout.cz * N + lz + rng.range(0.3, 0.7)) * CELL,
+    rot: rng.next() * Math.PI * 2,
+    text: NOTE_TEXTS[hash2i(layout.cx, layout.cz + 91, seed) % NOTE_TEXTS.length],
+  });
+}
+
+/** Damp floors in transit/hospital corridors: reflective puddles. */
+function generatePuddles(seed: number, layout: ChunkLayout): void {
+  const wet = layout.memKind === MemoryKind.TRANSIT || layout.memKind === MemoryKind.HOSPITAL;
+  if (!wet) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x9d61));
+  const count = rng.int(2, 6);
+  const N = CHUNK_CELLS;
+  for (let i = 0; i < count; i++) {
+    const lx = rng.int(0, N);
+    const lz = rng.int(0, N);
+    layout.puddles.push({
+      x: (layout.cx * N + lx + rng.range(0.15, 0.85)) * CELL,
+      z: (layout.cz * N + lz + rng.range(0.15, 0.85)) * CELL,
+      r: rng.range(0.35, 1.1),
+    });
+  }
+}
+
+/** Dangling wire bundles: common where lights have died. */
+/** Ceiling cables and pipes in STORAGE canyon chunks. */
+function generateCables(seed: number, layout: ChunkLayout): void {
+  if (layout.district !== District.STORAGE) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0xca61));
+  const count = rng.int(3, 8);
+  const N = CHUNK_CELLS;
+  for (let i = 0; i < count; i++) {
+    const wx = rng.int(1, N - 1);
+    const wz = rng.int(0, N);
+    layout.wires.push({
+      x: (layout.cx * N + wx + rng.range(0.2, 0.8)) * CELL,
+      z: (layout.cz * N + wz + rng.range(0.2, 0.8)) * CELL,
+      len: rng.range(0.6, 2.2),
+    });
+  }
+}
+
+function generateWires(seed: number, layout: ChunkLayout): void {
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x817e3));
+  void rng;
+  // wires follow dead lights: reuse light data
+  for (const l of layout.lights) {
+    if (l.alive) continue;
+    const r = rand2(Math.floor(l.x * 7), Math.floor(l.z * 13), seed ^ SALTS.flicker);
+    if (r > 0.45) continue;
+    layout.wires.push({ x: l.x + (r - 0.5) * 0.6, z: l.z + (0.5 - r) * 0.5, len: 0.5 + r * 1.4 });
+  }
+}
+
+const GRAFFITI_TEXTS = [
+  'GET OUT', 'IT LEARNS', 'STILL HERE', 'NOT YOUR HOME', 'WAKE UP',
+  'DONT SLEEP', 'I WAS SOMEONE', 'THE WALLS COPIED ME', 'NO EXIT',
+  'WHO REMEMBERS ME', 'COPIED POORLY', 'CHECK YOUR MEMORY',
+  'WE COUNTED WRONG', 'THE HUM KNOWS MY NAME',
+];
+
+const KIND_GRAFFITI: Record<number, string[]> = {
+  [MemoryKind.HOSPITAL]: ['WARD 6 LIES', 'NO ONE DIES HERE', 'CHECKOUT IS FOREVER', 'VISITING HOURS OVER', 'THE MIRRORS WARD BACK'],
+  [MemoryKind.SCHOOL]: ['DETENTION FOREVER', 'THE BELL RANG FOR YOU', 'SHOW YOUR WORK', 'CLASS DISMISSED US', 'RECESS NEVER ENDS'],
+  [MemoryKind.OFFICE]: ['Q4 NEVER ENDS', 'MEETING ROOM INFINITE', 'REPLY ALL', 'CLOCKED OUT FOREVER', 'PERFECT ATTENDANCE'],
+  [MemoryKind.MALL]: ['EVERYTHING MUST GO', 'STOREWIDE CLOSING', 'YOU ARE THE DISPLAY', 'SALE ENDS NEVER', 'DIRECTORY LIES'],
+  [MemoryKind.TRANSIT]: ['MIND THE GAP', 'LAST TRAIN LEFT', 'PLATFORM 0', 'NEXT STOP YOU', 'WRONG PLATFORM AGAIN'],
+};
+
+/** Scrawled marks in strongly-personal or high-contamination chunks. */
+function generateGraffiti(seed: number, layout: ChunkLayout): void {
+  const strong = layout.memKind === MemoryKind.PERSONAL && layout.memIntensity > 0.3;
+  const heavy = layout.memIntensity > 0.62;
+  if (!strong && !heavy) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x6c61));
+  const count = strong ? rng.int(1, 2) : rng.chance(0.5) ? 1 : 0;
+  const N = CHUNK_CELLS;
+  for (let i = 0; i < count; i++) {
+    const lx = rng.int(1, N - 1);
+    const lz = rng.int(1, N - 1);
+    // find a solid wall to scrawl on (horizontal edges preferred)
+        rot: crng.next() * Math.PI * 2,
+        text: '[NOTE ' + (i + 1) + '/' + story.length + '] ' + story[i],
+      });
+    }
+    return;
+  }
+  // otherwise: single ambient note ~1 per 4 chunks
+  if ((hash2i(layout.cx, layout.cz, seed ^ 0x0e7e) % 4) !== 0) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x4e07));
+  const lx = rng.int(1, N - 1);
+  const lz = rng.int(1, N - 1);
+  layout.notes.push({
+    x: (layout.cx * N + lx + rng.range(0.3, 0.7)) * CELL,
+    z: (layout.cz * N + lz + rng.range(0.3, 0.7)) * CELL,
+    rot: rng.next() * Math.PI * 2,
+    text: NOTE_TEXTS[hash2i(layout.cx, layout.cz + 91, seed) % NOTE_TEXTS.length],
+  });
+}
+
+/** Damp floors in transit/hospital corridors: reflective puddles. */
+function generatePuddles(seed: number, layout: ChunkLayout): void {
+  const wet = layout.memKind === MemoryKind.TRANSIT || layout.memKind === MemoryKind.HOSPITAL;
+  if (!wet) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x9d61));
+  const count = rng.int(2, 6);
+  const N = CHUNK_CELLS;
+  for (let i = 0; i < count; i++) {
+    const lx = rng.int(0, N);
+    const lz = rng.int(0, N);
+    layout.puddles.push({
+      x: (layout.cx * N + lx + rng.range(0.15, 0.85)) * CELL,
+      z: (layout.cz * N + lz + rng.range(0.15, 0.85)) * CELL,
+      r: rng.range(0.35, 1.1),
+    });
+  }
+
+
+    const veIdx = lz * (N + 1) + lx;
+    if (layout.hEdges[heIdx] === EdgeCode.SOLID) {
+      layout.signs.push({
+        text: rng.pick(texts),
+        x: (layout.cx * N + lx + 0.5) * CELL,
+        z: layout.cz * N * CELL + lz * CELL,
+        face: rng.chance(0.5) ? 0 : 1,
+        y: rng.range(1.5, 2.2),
+        kind: layout.memKind,
+      });
+    } else if (layout.vEdges[veIdx] === EdgeCode.SOLID) {
+      layout.signs.push({
+        text: rng.pick(texts),
+        x: layout.cx * N * CELL + lx * CELL,
+        z: (layout.cz * N + lz + 0.5) * CELL,
+        face: rng.chance(0.5) ? 2 : 3,
+        y: rng.range(1.5, 2.2),
+        kind: layout.memKind,
+      });
+    }
+  }
+}
 
 

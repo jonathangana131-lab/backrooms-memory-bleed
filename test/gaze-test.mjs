@@ -60,3 +60,84 @@ function settle(g, seconds, px, pz, fx, fz, bodyYaw) {
   const pos = (dist) => [Math.sin(50 * DEG) * dist, Math.cos(50 * DEG) * dist];
 
 
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+  assert.ok(w.state.weight > 0.95, 'watcher stays locked');
+
+  // non-watchers across seeds: first aversion lands within 2-4s of contact
+  for (let seed = 0; seed < 40; seed++) {
+    const g = new GazeController({ seed });
+    let t = 0, firstAvert = NaN;
+    while (t < 20) {
+      g.update(STEP, 0, 3, 0, 0, 0);
+      t += STEP;
+      if (g.state.averting) { firstAvert = t; break; }
+    }
+    assert.ok(!isNaN(firstAvert), 'seed ' + seed + ': non-watcher must glance away');
+    assert.ok(firstAvert >= 2 - 1e-9 && firstAvert <= 4 + 1e-9,
+      'seed ' + seed + ': first aversion at ' + firstAvert.toFixed(2) + 's, want 2-4s');
+    // during aversion the head points well clear of the player
+    assert.ok(Math.abs(g.headYawOffset) > 0.4, 'averted gaze must leave the player');
+  }
+
+  // after looking away it comes back
+  const g = new GazeController({ seed: 3 });
+  let sawAvert = false, cameBack = false;
+  for (let i = 0; i < Math.round(12 / STEP); i++) {
+    g.update(STEP, 0, 3, 0, 0, 0);
+    if (g.state.averting) sawAvert = true;
+    else if (sawAvert) { cameBack = true; break; }
+  }
+  assert.ok(sawAvert && cameBack, 'gaze must return after glancing away');
+  console.log('PASS watcher stare / glance-away');
+}
+
+// --- 5. smooth motion: rate-limited, never snaps ---
+{
+  const g = new GazeController();
+  settle(g, 2, 0, 10, 0, 0, 0);           // settled straight ahead
+  const before = g.headYawOffset;
+  // teleport the player to +80 deg off-axis at 3m
+  const px = Math.sin(80 * DEG) * 3, pz = Math.cos(80 * DEG) * 3;
+  const maxStep = 90 * DEG * STEP;
+  let prev = before, totalMoved = 0;
+  const frames = Math.round(4 / STEP);
+
+

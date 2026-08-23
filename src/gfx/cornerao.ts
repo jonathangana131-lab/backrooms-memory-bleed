@@ -128,5 +128,61 @@ export class CornerAO {
         if (horizontal) {
           out.push(makeQuad(
             [s0, y0, plane, s1, y1, plane, s2, y2, plane, s3, y3, plane],
+            normal, tints4(ta, tb, tc, td)));
+        } else {
+          out.push(makeQuad(
+            [plane, y0, s0, plane, y1, s1, plane, y2, s2, plane, y3, s3],
+            normal, tints4(ta, tb, tc, td)));
+        }
+      };
+      // floor band: dark at (corner, y=0), feathering along the run and up
+      push(anchor, 0, anchor + w, 0, anchor + w, h, anchor, h, dark, 1, 1, 1);
+      // ceiling band: dark at (corner, y=WALL_H), fading downward
+
+
+      push(anchor, WALL_H, anchor + w, WALL_H, anchor + w, WALL_H - h, anchor, WALL_H - h, dark, 1, 1, 1);
+    };
+
+    /** Handle one SOLID edge terminating at grid vertex (gx,gz). */
+    const emitEdgeQuads = (gx: number, gz: number, horizontal: boolean, dir: 1 | -1): void => {
+      if (horizontal) {
+        const zc = gz * CELL;
+        emitFace(gx * CELL, zc - off, dir, true, -1); // north face
+        emitFace(gx * CELL, zc + off, dir, true, 1);  // south face
+      } else {
+        const xc = gx * CELL;
+        emitFace(gz * CELL, xc - off, dir, false, -1); // west face
+        emitFace(gz * CELL, xc + off, dir, false, 1);  // east face
+      }
+    };
+
+    for (let gz = 0; gz <= N; gz++) {
+      for (let gx = 0; gx <= N; gx++) {
+        // The four SOLID edges radiating from this lattice vertex.
+        const sHL = gx > 0 ? layout.hEdges[gz * N + gx - 1] === EdgeCode.SOLID : false;
+        const sHR = gx < N ? layout.hEdges[gz * N + gx] === EdgeCode.SOLID : false;
+        const sVU = gz > 0 ? layout.vEdges[(gz - 1) * (N + 1) + gx] === EdgeCode.SOLID : false;
+        const sVD = gz < N ? layout.vEdges[gz * (N + 1) + gx] === EdgeCode.SOLID : false;
+
+        const hCount = (sHL ? 1 : 0) + (sHR ? 1 : 0);
+        const vCount = (sVU ? 1 : 0) + (sVD ? 1 : 0);
+        const total = hCount + vCount;
+        if (total === 0) continue;
+        // A straight-through continuation of a single wall run is not a
+        // corner: skip collinear-only pairs so mid-wall seams stay clean.
+        if (total === 2 && hCount === 2) continue;
+        if (total === 2 && vCount === 2) continue;
+
+        // Every SOLID edge meeting at a real junction/end gets AO on both
+        // of its faces, anchored at this vertex.
+        if (sHL) emitEdgeQuads(gx, gz, true, -1);
+        if (sHR) emitEdgeQuads(gx, gz, true, 1);
+        if (sVU) emitEdgeQuads(gx, gz, false, -1);
+        if (sVD) emitEdgeQuads(gx, gz, false, 1);
+      }
+    }
+    return out;
+  }
+}
 
 

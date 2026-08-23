@@ -60,3 +60,77 @@ await page.evaluate(() => { const g = (window).__BMB__.game; g.lighting.flashHol
 // for seconds, so rAF-driven polling never evaluates and would false-timeout.
 
 
+  null, { timeout: 20000 },
+);
+await shot('flicker-after.png');
+await page.evaluate(() => {
+  const g = (window).__BMB__.game;
+  g.lighting.flashHoldSec = 0;
+  g.mats.fixtureDead.emissiveColor.set(0, 0, 0);
+  g.blackoutUntil = g.playtimeSec; // lights come back
+});
+console.log('[2] flicker swap shots done');
+
+// ---------------------------------------------------------------------
+// 3. DISTRICT FOG COLOUR BLEND
+// ---------------------------------------------------------------------
+const d0 = await page.evaluate(() => {
+  const g = (window).__BMB__.game;
+  const d = g.chunks.districtAtPos(g.player.body.x, g.player.body.z);
+  // settle the blend fully on the CURRENT district (baseline)
+  for (let i = 0; i < 60; i++) {
+    g.lighting.setDistrictFog(d ?? 0, 1);
+    g.lighting.setWeatherTint([1, 1, 1], 1);
+  }
+  return d ?? 0;
+});
+await page.waitForTimeout(400);
+console.log('[3] baseline district:', d0);
+await shot('fog-maze.png'); // whatever the local district is, fully settled
+
+// cross into STORAGE (dark industrial brown): catch the blend mid-flight...
+await page.evaluate(() => {
+  const g = (window).__BMB__.game;
+  g.lighting.setDistrictFog(4, 0.5); // one boundary-crossing tick
+  g.lighting.setWeatherTint([1, 1, 1], 0.5);
+});
+await shot('fog-blending.png');
+// ...then settle it fully
+await page.evaluate(() => {
+  const g = (window).__BMB__.game;
+  for (let i = 0; i < 60; i++) {
+    g.lighting.setDistrictFog(4, 1);
+    g.lighting.setWeatherTint([1, 1, 1], 1);
+  }
+});
+await page.waitForTimeout(250);
+await shot('fog-storage.png');
+console.log('[3] district fog shots done');
+
+// ---------------------------------------------------------------------
+// 4. SCREEN-SPACE RAIN OVERLAY (CSS)
+// ---------------------------------------------------------------------
+await page.evaluate(() => { const g = (window).__BMB__.game; g.lighting.setWetZone(false); });
+await page.waitForTimeout(300);
+await shot('rain-before.png');
+
+await page.evaluate(() => { const g = (window).__BMB__.game; g.lighting.setWetZone(true); });
+await page.waitForTimeout(500); // let keyframes animate drops into frame
+await shot('rain-on-subtle.png'); // faithful production look (opacity 0.03)
+
+// amplified variant so the geometry of the streaks is inspectable
+await page.evaluate(() => {
+  document.getElementById('bmb-rain-overlay').style.opacity = '0.6';
+});
+await shot('rain-on-visible.png');
+await page.evaluate(() => {
+  const g = (window).__BMB__.game;
+  document.getElementById('bmb-rain-overlay').style.opacity = '0.03';
+  g.lighting.setWetZone(false);
+});
+console.log('[4] rain overlay shots done');
+
+await browser.close();
+console.log('visual-effects: all shots saved to shots/');
+
+

@@ -40,3 +40,147 @@ function easeOut(t: number): number {
  */
 
 
+function materialDisposed(mat: StandardMaterial): boolean {
+  const probe = (mat as unknown as { isDisposed?: () => boolean }).isDisposed;
+  return typeof probe === 'function' ? !!probe.call(mat) : false;
+}
+
+/** engine delta time in seconds, with a sane fallback if the engine lies */
+function frameDelta(scene: Scene): number {
+  const dt = scene.getEngine().getDeltaTime() / 1000;
+  return Number.isFinite(dt) && dt > 0 ? dt : 1 / 60;
+}
+
+/**
+ * Run step() once per frame on the scene's before-render observable until it
+ * returns true, then detach. Null-safe on the observable.
+ */
+function eachFrame(scene: Scene | null | undefined, step: (dtSec: number) => boolean): void {
+  if (!scene || !scene.onBeforeRenderObservable) return;
+  let obs: Observer<Scene> | null = null;
+  obs = scene.onBeforeRenderObservable.add(() => {
+    if (!obs) return;
+    if (step(frameDelta(scene))) {
+      scene.onBeforeRenderObservable.remove(obs);
+    }
+  });
+}
+
+/**
+ * Fade a mesh in from nothing: clones its material, lerps alpha 0 -> original
+ * over durationSec with an ease-out curve, then restores the original material
+ * and disposes the temporary clone. No-ops without a mesh/scene/material.
+
+
+ */
+export function fadeIn(mesh: Mesh | null | undefined, durationSec = 0.8): void {
+  if (!mesh || mesh.isDisposed()) return;
+  const scene = mesh.getScene();
+  const original = mesh.material as Material | null;
+  if (!scene || !original) return;
+
+  const targetAlpha = original.alpha;
+  const temp = original.clone(original.name + '_fadeIn');
+  if (!temp) return;
+  temp.alpha = 0;
+  mesh.material = temp;
+
+  let elapsed = 0;
+  eachFrame(scene, (dt: number) => {
+    // mesh vanished mid-transition: bail out cleanly
+    if (mesh.isDisposed()) {
+      temp.dispose(false, false);
+      return true;
+    }
+    elapsed += dt;
+    const t = Math.min(elapsed / durationSec, 1);
+    temp.alpha = targetAlpha * easeOut(t);
+    if (t >= 1) {
+      mesh.material = original;
+      temp.dispose(false, false);
+      return true;
+    }
+    return false;
+  });
+
+
+  const scene = mesh.getScene();
+  const original = mesh.material as Material | null;
+  if (!scene || !original) return;
+
+  const startY = mesh.position.y;
+  const startAlpha = original.alpha;
+  const temp = original.clone(original.name + '_dissolve');
+  if (!temp) return;
+  mesh.material = temp;
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (!mesh.isDisposed()) mesh.material = original!;
+    onComplete && onComplete();
+    temp.dispose(false, false);
+  };
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (!mesh.isDisposed()) mesh.material = original!;
+    onComplete && onComplete();
+    temp.dispose(false, false);
+  };
+
+  let elapsed = 0;
+  eachFrame(scene, (dt: number) => {
+    if (mesh.isDisposed()) {
+      finish();
+      return true;
+    }
+    elapsed += dt;
+    const t = Math.min(elapsed / DISSOLVE_DURATION, 1);
+    const eased = easeOut(t);
+    temp.alpha = startAlpha * (1 - eased);
+    mesh.position.y = startY + DISSOLVE_DRIFT * eased;
+    if (t >= 1) {
+      finish();
+      return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Briefly sag a fixture's emissive output by DIM_FRACTION for DIM_DURATION
+ * seconds — the power draw of something manifesting nearby — then restore it
+ * exactly. Sag and recovery ramps take 25% of the window each. No-ops safely.
+ */
+export function dimFixture(mat: StandardMaterial | null | undefined): void {
+  if (!mat || materialDisposed(mat)) return;
+  const scene = mat.getScene();
+  if (!scene) return;
+
+  const originalEmissive = mat.emissiveColor.clone();
+  const dimmed = originalEmissive.scale(1 - DIM_FRACTION);
+  const ramp = DIM_DURATION * 0.25;
+
+  let elapsed = 0;
+  eachFrame(scene, (dt: number) => {
+    if (materialDisposed(mat!)) return true;
+    elapsed += dt;
+    if (elapsed <= ramp) {
+      mat.emissiveColor = Color3.Lerp(originalEmissive, dimmed, elapsed / ramp);
+    } else if (elapsed < DIM_DURATION - ramp) {
+      mat.emissiveColor = dimmed;
+    } else if (elapsed < DIM_DURATION) {
+      mat.emissiveColor = Color3.Lerp(dimmed, originalEmissive, (elapsed - (DIM_DURATION - ramp)) / ramp);
+    } else {
+      mat.emissiveColor = originalEmissive;
+      return true;
+    }
+    return false;
+  });
+}
+
+

@@ -14,8 +14,6 @@ import { generateLayout, type Box2, type ChunkLayout, type LightFixture, type Si
 import { getLayoutPool } from '../workers/layoutPool';
 import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
-
-
 import type { GraffitiInstance, PropInstance } from './architect';
 import { hash2i } from '../core/rng';
 import type { MaterialSet } from '../gfx/materials';
@@ -462,5 +460,36 @@ export class ChunkManager {
     for (const c of this.chunks.values()) {
       for (const l of c.layout.lights) {
         if (!l.alive) continue;
+
+
+    const len = Math.hypot(dx, dz) || 1;
+    // camera-right vector for Babylon yaw is (cos, -sin)
+    const pan = Math.max(-1, Math.min(1, (dx * Math.cos(yaw) + dz * -Math.sin(yaw)) / len));
+    return { d: Math.sqrt(bd), pan };
+  }
+
+  get loadedCount(): number { return this.chunks.size; }
+
+  layoutAt(cx: number, cz: number): ChunkLayout | undefined {
+    return this.chunks.get(this.key(cx, cz))?.layout;
+  }
+
+  /** District of the chunk containing a position (if built). */
+  districtAtPos(x: number, z: number): number | null {
+    const c = this.chunks.get(this.key(worldToChunk(x), worldToChunk(z)));
+    return c ? (c.layout.district as number) : null;
+  }
+
+  /** deterministic sparse selection used by story beacon placement */
+  chunkSalt(cx: number, cz: number): number {
+    return hash2i(cx, cz, this.seed ^ BEACON_SALT);
+  }
+
+  cellKey(x: number, z: number): number {
+    return hash2i(Math.floor(x / CELL), Math.floor(z / CELL), this.seed);
+  }
+
+  static CELLS = CHUNK_CELLS;
+}
 
 

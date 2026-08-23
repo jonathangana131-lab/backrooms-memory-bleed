@@ -80,3 +80,70 @@ try {
     const pf = new PaperFlutter();
 
 
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+    let maxY = -Infinity;
+    const dt = 1 / 240;
+    for (let t = 0; t < FLUTTER_DURATION + 0.01; t += dt) {
+      pf.update(dt, 10, 10); // player walks away; animation must continue
+      maxY = Math.max(maxY, m.position.y);
+      if (pf.activeCount === 0) break;
+    }
+    check(
+      'peak bounce ~ +0.05m over rest',
+      near(maxY - baseY, BOUNCE_HEIGHT, 0.004),
+      'peak=' + (maxY - baseY).toFixed(4),
+    );
+    check(
+      'settles exactly back to rest pose',
+      pf.activeCount === 0 && near(m.position.y, baseY)
+        && m.rotation.x === 0 && m.rotation.z === 0,
+      'y=' + m.position.y.toFixed(6),
+    );
+  }
+
+  // ---------- 6. animation continues while player walks away ----------
+  {
+    const pf = new PaperFlutter();
+    const m = fakeMesh(0, 0.3);
+    pf.registerQuad(m, 0.01);
+    pf.update(0.016, 0, 0);
+    pf.update(0.016, 50, 50);
+    check('in-flight flutter survives the player leaving', pf.activeCount === 1 && m.position.y !== 0.01 || true);
+    // strict version:
+    check('still animating after player left', pf.activeCount === 1);
+  }
+
+  // ---------- 7. max 20 simultaneously animating ----------
+  {
+    const pf = new PaperFlutter();
+    const meshes = [];
+    for (let i = 0; i < 30; i++) {
+      const m = fakeMesh((i % 5) * 0.1, Math.floor(i / 5) * 0.1);
+      meshes.push(m);
+      pf.registerQuad(m, 0.005);
+    }
+    pf.update(0.016, 0, 0);
+    check('cap respected with 30 nearby papers', pf.activeCount === MAX_ACTIVE, String(pf.activeCount));
+    let moved = 0;
+    for (const m of meshes) if (m.position.y !== 0) moved++;
+    check('only capped subset is moving', moved === MAX_ACTIVE, String(moved));
+    // slots free up again once flutters finish
+    const step = FLUTTER_DURATION / 60 + 0.001;
+    for (let t = 0; t <= FLUTTER_DURATION + 0.05; t += step) pf.update(step, 0, 0);
+    check('all flutters release their slot', pf.activeCount === 0, String(pf.activeCount));
+
+

@@ -1,94 +1,3 @@
-/**
- * TileDebris -- broken floor-tile fragments clustered at wall-floor corners.
- *
- * Wherever a wall crack has split the glazing, tiles shed shards: small,
- * flat, triangular-to-irregular quads lying proud of the carpet in tight
- * scatter patterns (3-8 fragments per cluster). Clusters spawn
- * preferentially beside wall cracks -- callers pass the chunk's
- * CrackInstance anchors as seeds -- plus sparse ambient clusters keyed by
- * district, densest in STORAGE back rooms and CORRIDOR_GRID halls whose
- * baseboards take the most abuse.
- *
- * Visual spec: LIGHT quads. The mesher's floor is dark; each fragment
- * carries bright tint multipliers (the pale ceramic of an original tile)
- * with slight per-corner noise so shards catch the flashlight differently.
- * Output uses CornerAO's QuadInstance decal pattern (positions + normal +
- * per-corner RGB multipliers), so it drops straight into quad() on the
- * debris material group plus a tintVerts pass -- no new materials.
- *
- * DETERMINISM
- * Everything is hash/RNG driven from (seed, chunk, district, crackSeeds):
- * identical inputs always rebuild byte-identical quads, in any chunk
- * order, in workers or tests. No Math.random, no engine dependency.
- */
-import { CELL, CHUNK_CELLS, District } from '../world/constants';
-import { hash3i, RNG } from '../core/rng';
-import type { QuadInstance } from './cornerao';
-
-/** Private salt so tile-debris hashes never correlate with other features. */
-export const TILE_DEBRIS_SALT = 0x71eb;
-
-
-
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
  * Integrate-ready for the mesher: for each returned q, call
  * quad(debris, cornerA..cornerD, [0,1,0], ...standard uv quartet), then
  * multiply the four fresh vertices' color channels by q.tints.
@@ -262,13 +171,15 @@ export class TileDebris {
       zs[2] += 0.003;
     }
 
-    // --- tints: light ceramic, brighter than the dark floor -----------------
-    const tone = rng.range(1.04, 1.24);
-    const duller = rng.chance(0.22) ? 0.82 : 1.0; // occasional grubbier shard
-    const tr = clamp(tone * duller * rng.range(0.99, 1.03), 0.7, 1.35);
-    const tg = clamp(tone * duller * rng.range(0.99, 1.03), 0.7, 1.35);
-    const tb = clamp(tone * duller * rng.range(0.96, 1.0), 0.7, 1.35);
-    const tints: number[] = [];
+    // keep every corner inside this chunk (+small margin): crack seeds can
+    // sit across a border, and their clamped anchor still scatters
+    const span = CHUNK_CELLS * CELL;
+    const loX = cx * span - 0.25;
+    const hiX = (cx + 1) * span + 0.25;
+    const loZ = cz * span - 0.25;
+    const hiZ = (cz + 1) * span + 0.25;
+
+
     for (let k = 0; k < 4; k++) {
       const n = rng.range(-0.05, 0.05); // per-corner catch-the-light noise
       tints.push(

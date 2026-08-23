@@ -60,3 +60,152 @@ function makeMockCracks() {
     calls,
 
 
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+// [unrecovered line]
+  const w = new CrackMesherWiring(new CrackMesherPass(), mock);
+  const key = chunkKeyOf(4, 5);
+  const first = w.onLayoutBuilt({}, 4, 5, 7);
+  check('invalidate on an unknown key returns false', !w.invalidate(chunkKeyOf(99, 99)));
+  check('invalidate drops the cached entry', w.invalidate(key) === true && !w.isCached(key));
+  const second = w.onLayoutBuilt({}, 4, 5, 7);
+  check('post-invalidation build regenerates exactly once more',
+    mock.genCount() === 2 && second !== first && second !== null);
+  check('regenerated list is byte-identical for identical inputs',
+    JSON.stringify(second) === JSON.stringify(first));
+  check('cache is warm again after regeneration', w.isCached(key));
+  const third = w.onLayoutBuilt({}, 4, 5, 7);
+  check('subsequent builds are cache hits again',
+    third === second && mock.genCount() === 2);
+}
+
+// --- end-to-end with the real WallCracks + real mesher ----------------------
+
+/** Minimal Storage double so createWallCracks never touches localStorage. */
+function makeStorage() {
+  const map = new Map();
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => { map.set(k, String(v)); },
+  };
+}
+
+function makeClock() {
+  let t = 1_000_000;
+  return { now: () => t, advance: (ms) => { t += ms; } };
+}
+
+{
+  const storageA = makeStorage();
+  const clockA = makeClock();
+  const real = createWallCracks(clockA.now, storageA);
+  const w = new CrackMesherWiring(new CrackMesherPass({ seed: 9 }), real);
+
+  const key = chunkKeyOf(0, 0); // world coords 0..CHUNK_SIZE
+  const fresh = w.onLayoutBuilt({}, 0, 0, 12345);
+  check('real pipeline emits well-formed quads',
+    fresh.length > 0 &&
+    fresh.every((q) =>
+      q.positions.length === 12 && q.tints.length === 12 &&
+      q.normal.length === 3 && q.normal.every(Number.isFinite)),
+    'quads=' + (fresh ? fresh.length : 'null'));
+
+  const freshSnapshot = JSON.stringify(fresh);
+  check('same wiring rebuilds identically while cached',
+    w.onLayoutBuilt({}, 0, 0, 12345) === fresh);
+
+  // activity earns cracks: ACTIVITY_SECONDS_PER_CRACK seconds per slot
+  for (let i = 0; i < MAX_CRACKS_PER_CHUNK * ACTIVITY_SECONDS_PER_CRACK; i++) {
+    w.addActivity(15, 15, 1);
+  }
+  w.invalidate(key);
+  const afterDwell = w.onLayoutBuilt({}, 0, 0, 12345);
+  check('dwelling in a chunk grows its quad count after invalidation',
+    afterDwell.length > fresh.length,
+    fresh.length + ' -> ' + afterDwell.length);
+
+
