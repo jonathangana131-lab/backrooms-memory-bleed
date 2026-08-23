@@ -130,3 +130,167 @@ function buildSpec(variant: number): PoolTextureSpec {
           g(0.5, 0.5, 0.12, 2.4, 0.9, [[0.0, 0.35], [1.0, 0.0]]),
 
 
+          // Hot cores riding each lobe keep the twin-tube read bright.
+          g(0.5, 0.37, 0.15, 1.8, 0.42, [[0.0, 1.0], [1.0, 0.25]]),
+          g(0.5, 0.63, 0.15, 1.8, 0.42, [[0.0, 1.0], [1.0, 0.25]]),
+          // Wide dim fill so the housing never samples fully dark.
+          g(0.5, 0.5, 0.30, 2.1, 0.95, [[0.0, 0.30], [1.0, 0.0]]),
+        ],
+        noiseSeed: 404,
+        noiseAmount: 0.12,
+      };
+    case VARIANT_RECT_SOFT:
+    default:
+      // Troffer panel: broad soft plate, near-isotropic falloff, faint
+      // corner lift from side lobes. Also the out-of-range fallback.
+      return {
+        size: POOL_TEXTURE_SIZE,
+        gradients: [
+          g(0.5, 0.5, 0.30, 1.55, 1.55, [[0.0, 0.80], [0.6, 0.50], [1.0, 0.0]]),
+          g(0.5, 0.5, 0.16, 1.45, 1.45, [[0.0, 0.95], [1.0, 0.20]]),
+          g(0.28, 0.5, 0.18, 1.2, 1.3, [[0.0, 0.30], [1.0, 0.0]]),
+          g(0.72, 0.5, 0.18, 1.2, 1.3, [[0.0, 0.30], [1.0, 0.0]]),
+          g(0.5, 0.26, 0.16, 1.3, 1.2, [[0.0, 0.28], [1.0, 0.0]]),
+          g(0.5, 0.74, 0.16, 1.3, 1.2, [[0.0, 0.28], [1.0, 0.0]]),
+        ],
+        noiseSeed: 303,
+        noiseAmount: 0.06,
+      };
+  }
+}
+
+/** Evaluate one gradient's falloff profile at a normalized sample point. */
+function evalGradient(gr: PoolGradient, u: number, v: number): number {
+  const dx = (u - gr.cx) / gr.sx;
+  const dy = (v - gr.cy) / gr.sy;
+  const d = Math.sqrt(dx * dx + dy * dy) / gr.r;
+  const stops = gr.stops;
+  if (d <= stops[0].at) return stops[0].a;
+  for (let i = 1; i < stops.length; i++) {
+    if (d <= stops[i].at) {
+      const span = stops[i].at - stops[i - 1].at;
+      const t = span > 0 ? (d - stops[i - 1].at) / span : 1;
+      return stops[i - 1].a + (stops[i].a - stops[i - 1].a) * t;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Analytic composite of one variant's pool at normalized texture coords
+ * (u, v). Mirrors paint(): additive gradient composition followed by the
+ * seeded edge-noise mottle, so tests can reason about coverage without a
+ * canvas.
+ */
+export function sampleAlpha(variant: number, u: number, v: number): number {
+  return LightPools.sampleAlpha(variant, u, v);
+}
+
+/** Class-surface alias so consumers can reach the sampler without a second import. */
+export function sampleAlphaImpl(variant: number, u: number, v: number): number {
+  const spec = LightPools.getTexture(variant);
+  let a = 0;
+  for (const gr of spec.gradients) a += evalGradient(gr, u, v);
+  if (spec.noiseAmount > 0) {
+    // Value-noise mottle centered on zero: brightens as often as it dims
+    // so mean coverage survives while silhouettes turn ragged.
+    const n = fbm2(u * 48, v * 48, 2, 2, 0.5, spec.noiseSeed);
+    a += (n - 0.5) * spec.noiseAmount * 0.9;
+  }
+  return Math.min(1, Math.max(0, a));
+}
+
+/**
+ * Rasterize a spec onto a canvas context: radial gradients composited in
+ * 'lighter' mode, then a seeded per-texel jitter pass approximating the
+ * analytic noise in sampleAlpha(). Consumers own texture lifecycle.
+ */
+export function paint(ctx: CanvasRenderingContext2D, spec: PoolTextureSpec): void {
+  ctx.clearRect(0, 0, spec.size, spec.size);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const gr of spec.gradients) {
+    const cx = gr.cx * spec.size;
+    const cy = gr.cy * spec.size;
+    const r = gr.r * spec.size;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    for (const stop of gr.stops) {
+      grad.addColorStop(Math.min(1, Math.max(0, stop.at)), 'rgba(255,255,255,' + stop.a.toFixed(3) + ')');
+    }
+    ctx.setTransform(gr.sx, 0, 0, gr.sy, cx * (1 - gr.sx), cy * (1 - gr.sy));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, spec.size, spec.size);
+  }
+  ctx.restore();
+
+  if (spec.noiseAmount > 0) {
+    // Edge irregularity: seeded dabs matching the fbm field used by
+    // sampleAlpha, so bitmaps and analytic samples stay comparable.
+    const rng = new RNG(spec.noiseSeed);
+    ctx.save();
+    for (let i = 0; i < spec.size * 3; i++) {
+      const x = rng.next() * spec.size;
+      const y = rng.next() * spec.size;
+      const n = fbm2((x / spec.size) * 48, (y / spec.size) * 48, 2, 2, 0.5, spec.noiseSeed);
+      const dA = (n - 0.5) * spec.noiseAmount * 0.9;
+      if (Math.abs(dA) < 0.02) continue;
+      ctx.globalAlpha = Math.min(1, Math.abs(dA));
+      ctx.fillStyle = dA > 0 ? 'rgba(255,255,255,1)' : 'rgba(0,0,0,1)';
+      ctx.fillRect(x, y, 2, 2);
+    }
+    ctx.restore();
+  }
+}
+
+/**
+ * Fixture -> pool-shape assignment. Pure hashing of world position: any
+ * chunk regenerates identical pools for identical fixtures in any order.
+ */
+export class LightPools {
+  private static cache = new Map<number, PoolTextureSpec>();
+
+  /** Wrap any integer into the canonical variant range. */
+  private static wrap(variant: number): number {
+    return ((variant % POOL_VARIANT_COUNT) + POOL_VARIANT_COUNT) % POOL_VARIANT_COUNT;
+  }
+
+  /**
+   * Declarative texture spec for a variant (cached per variant).
+   * Out-of-range variants fall back to the soft rectangle.
+   */
+  static getTexture(variant: number): PoolTextureSpec {
+    const v = this.wrap(variant);
+    let spec = this.cache.get(v);
+    if (!spec) {
+      spec = buildSpec(v);
+      this.cache.set(v, spec);
+    }
+    return spec;
+  }
+
+  /** Deterministic pool variant for a fixture at world (wx, wz). */
+  static variantFor(wx: number, wz: number): number {
+    // Quarter-metre quantization keeps neighbouring fixtures distinct
+    // while remaining stable under float re-derivation.
+    return hash2i(Math.round(wx * 4), Math.round(wz * 4), SALT_VARIANT) % POOL_VARIANT_COUNT;
+  }
+
+  /** Deterministic pool rotation in [0, 2*PI), independent of variant. */
+  static rotationFor(wx: number, wz: number): number {
+    return rand2(Math.round(wx * 4), Math.round(wz * 4), SALT_ROTATION) * Math.PI * 2;
+  }
+
+  /** Analytic pool coverage at normalized (u, v) — see sampleAlpha(). */
+  static sampleAlpha(variant: number, u: number, v: number): number {
+    const spec = this.getTexture(variant);
+    let a = 0;
+    for (const gr of spec.gradients) a += evalGradient(gr, u, v);
+    if (spec.noiseAmount > 0) {
+      // Value-noise mottle centered on zero: brightens as often as it dims
+      // so mean coverage survives while silhouettes turn ragged.
+      const n = fbm2(u * 48, v * 48, 2, 2, 0.5, spec.noiseSeed);
+      a += (n - 0.5) * spec.noiseAmount * 0.9;
+    }
+    return Math.min(1, Math.max(0, a));
+  }
+}
