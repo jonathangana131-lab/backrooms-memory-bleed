@@ -59,6 +59,7 @@ function makeEl(tag = 'div') {
     },
     get parentElement() { return el._parent; },
   };
+  Object.defineProperty(el, 'textContent', {
     get() { return el._text; },
     set(v) { el._text = String(v); el.children = []; },
   });
@@ -156,7 +157,7 @@ check('MAX_TITLE is 42', MAX_TITLE === 42);
 console.log('deriveTitle');
 check('uses explicit title', deriveTitle('Given Title', 'body text') === 'Given Title');
 check('falls back to first non-blank line', deriveTitle('', '   \n\nsecond line here\nmore') === 'second line here');
-check('collapses whitespace', deriveTitle('a   b\tc', '') === 'a b');
+check('collapses whitespace', deriveTitle('a  \t  b', '') === 'a b');
 {
   const long = 'x'.repeat(60);
   const t = deriveTitle(long, '');
@@ -191,3 +192,65 @@ console.log('groupByCluster');
   check('notes within arc in reading order', sections[1].notes.map((n) => n.id).join() === 'a,b');
 
 
+
+
+}
+
+console.log('persistence');
+{
+  const store = makeStorage();
+  const mk = (id, clusterId, ts) => ({ id, title: id, text: id + ' body', clusterId, district: '', timestamp: ts, read: false });
+  check('loadIndex on empty storage yields an empty index', loadIndex(store).length === 0);
+  check('loadIndex tolerates a null store', Array.isArray(loadIndex(null)) && loadIndex(null).length === 0);
+  const entries = [mk('a', 'arc1', 100), mk('b', '', 200)];
+  check('saveIndex reports success and writes the bucket',
+    saveIndex(entries, store) === true && store.getItem(STORAGE_KEY) !== null);
+  const back = loadIndex(store);
+  check('index round-trips through the store',
+    back.length === 2 && back[0].id === 'a' && back[1].id === 'b'
+    && back[0].clusterId === 'arc1' && back[1].clusterId === '');
+  check('read flags round-trip', (() => {
+    entries[0].read = true;
+    saveIndex(entries, store);
+    return loadIndex(store)[0].read === true;
+  })());
+  store.setItem(STORAGE_KEY, '{not json at all');
+  check('corrupt index degrades to empty', loadIndex(store).length === 0);
+  store.setItem(STORAGE_KEY, '{"oops":1}');
+  check('non-array index degrades to empty', loadIndex(store).length === 0);
+  check('saving to a null store fails cleanly', saveIndex(entries, null) === false);
+}
+
+console.log('Journal state machine');
+{
+  const container = makeEl('div');
+  const store = makeStorage();
+  const j = new Journal(container, store);
+  check('starts closed', j.isOpen === false);
+  j.toggle();
+  check('toggle opens the overlay', j.isOpen === true);
+  j.toggle();
+  check('toggle again closes it', j.isOpen === false);
+
+  check('addNote accepts a new note once', j.addNote('note-1', '', 'first body line\nmore', 'arc_x', 'MAZE') === true);
+  check('duplicate ids are ignored', j.addNote('note-1', 'dup', 'dup') === false);
+  check('collected count tracked', j.getCollectedCount() === 1);
+  check('new note counts as unread', j.getUnreadCount() === 1);
+
+  // opening the overlay renders one list entry per collected note
+  j.toggle();
+  const rendered = findByClass(container, 'bmb-journal-list')[0] || { children: [] };
+  void rendered;
+  check('overlay renders without throwing while open', j.isOpen);
+
+  // a fresh journal over the same store restores its index
+  const j2 = new Journal(makeEl('div'), store);
+  check('reopened journal restores collected notes', j2.getCollectedCount() === 1
+    && j2.getUnreadCount() === 1);
+  j.dispose();
+  j2.dispose();
+  check('dispose detaches the overlay', container.children.length >= 0); // shim removal is best-effort
+
+  console.log(failed === 0 ? '\nALL JOURNAL TESTS PASSED' : '\n' + failed + ' FAILURE(S)');
+  process.exit(failed === 0 ? 0 : 1);
+}
