@@ -87,8 +87,8 @@ export class Flashlight {
       this.battery = Math.min(0.3, this.battery + ldt / 180);
     }
 
-
-
+    if (!this.has || !this.on) {
+      this.light.intensity = 0;
       this.light.position.set(0, -50, 0);
       this.beam.setEnabled(false);
       return;
