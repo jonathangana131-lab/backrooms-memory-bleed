@@ -63,37 +63,29 @@ import { CHUNK_SIZE } from '../world/constants';
 // Wave B: audio pack (ctx-gated, constructed in ensureAudioIntegrations())
 import { DoorCreaks } from '../audio/doors';
 import { StructureGroans } from '../audio/groans';
-import { VentAudio } from '../audio/vents';
-import { ElevatorAmbience } from '../audio/elevator';
 import { CrowdAmbience } from '../audio/crowd';
 import { LoreStings } from '../audio/loresting';
 import { BatteryCues } from '../audio/batterycue';
-import { ElectricPops } from '../audio/electricpop';
 import { FanAudio } from '../audio/fanaudio';
-import { FanSpeedAudio, type FanSpeedState } from '../audio/fanspeeds';
-import { CabinetCreaks } from '../audio/cabinetcreak';
-import { EchoSites } from '../audio/echoes';
-
-
+// Wave B: scene pack
+import { PostFX } from '../gfx/postfx';
+import { FaunaWiring } from '../entities/faunawiring';
 import { GazeWiring } from '../entities/gaze-wiring';
 import { GazeController } from '../entities/gaze';
 // Wave B: DOM overlays
 import { Minimap } from '../ui/minimap';
 import { Compass } from '../ui/compass';
 import { WeatherUI } from '../ui/weatherui';
-
-export type GameState = 'menu' | 'playing' | 'paused';
-
-const SPAWN_X = 1.25;
-const SPAWN_Z = 1.25;
-
-/** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
-function presetToQualityNum(q: string): number {
-  return q === 'low' ? 0.45 : q === 'medium' ? 0.6 : 1;
-}
-function qualityNumToPreset(q: number): 'low' | 'medium' | 'high' {
-  return q >= 0.9 ? 'high' : q >= 0.55 ? 'medium' : 'low';
-}
+// Wave C (C-3..C-8): ordered-chain modules
+import { Journal } from '../ui/journal';
+import { JournalFeed } from '../story/journal-feed';
+import { JournalWiring } from '../story/journal-wiring';
+import { Tracker, type TrackerState } from '../ui/tracker';
+import { TrackerFeed } from '../ui/tracker-wiring';
+import { CheckpointManager } from '../story/checkpoints';
+import { SaveScreen } from '../ui/savescreen';
+import { WatcherIntroController } from '../story/watcherintro';
+import { PhotoGallery } from '../ui/gallery';
 import { formatExtended, type ExtendedStats } from '../ui/endstatsext';
 import { chunkFogDensity } from '../gfx/fogvariation';
 
@@ -139,14 +131,13 @@ export class Game {
   exterior: ExteriorBleed | null = null;
   private audioModulesReady = false;
 
+
+  // ---- Wave A pure-logic integrations (nullable + guarded, see init()) ----
+  private settingsManager: SettingsManager | null = null;
+  private settingsPanel: SettingsPanelHandle | null = null;
   private syncingSettings = false;
   private a11yMgr: AccessibilityManager | null = null;
   private a11yCtl: AccessibilityController | null = null;
-  private reread: NoteReread | null = null;
-  private hints: DifficultyHints | null = null;
-  private hintsTimer = 0;
-
-
   private reread: NoteReread | null = null;
   private hints: DifficultyHints | null = null;
   private hintsTimer = 0;
@@ -166,43 +157,10 @@ export class Game {
   // ---- Wave B (B-1) audio pack: nullable, ctx-gated via ensureAudioIntegrations() ----
   private doorCreaks: DoorCreaks | null = null;
   private groans: StructureGroans | null = null;
-  private vents: VentAudio | null = null;
-  private elevatorAmb: ElevatorAmbience | null = null;
   private crowd: CrowdAmbience | null = null;
   private loreStings: LoreStings | null = null;
   private batteryCues: BatteryCues | null = null;
-  private electricPops: ElectricPops | null = null;
   private fanAudio: FanAudio | null = null;
-  private fanSpeedAudio: FanSpeedAudio | null = null;
-  private cabinetCreaks: CabinetCreaks | null = null;
-  private echoSites: EchoSites | null = null;
-
-
-  private heatShimmer: import('../gfx/heatshimmer').HeatShimmer | null = null;
-  photoMode: import('../ui/photomode').PhotoMode | null = null;
-  private beats: StoryBeats | null = null;
-  private endstats: EndStats | null = null;
-  private endcapture: EndCapture | null = null;
-  private wallCracks: WallCracks | null = null;
-  private stainGrowth: StainGrowth | null = null;
-  private graffitiEvolution: GraffitiEvolution | null = null;
-  /** last chunk key fed to the stain/graffiti stage helpers */
-  private prevStageChunk: string | null = null;
-  private daycycle: DayCycle | null = null;
-
-  // ---- Wave B (B-1) audio pack: nullable, ctx-gated via ensureAudioIntegrations() ----
-  private doorCreaks: DoorCreaks | null = null;
-  private groans: StructureGroans | null = null;
-  private vents: VentAudio | null = null;
-  private elevatorAmb: ElevatorAmbience | null = null;
-  private crowd: CrowdAmbience | null = null;
-  private loreStings: LoreStings | null = null;
-  private batteryCues: BatteryCues | null = null;
-  private electricPops: ElectricPops | null = null;
-  private fanAudio: FanAudio | null = null;
-  private fanSpeedAudio: FanSpeedAudio | null = null;
-  private cabinetCreaks: CabinetCreaks | null = null;
-  private echoSites: EchoSites | null = null;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -293,8 +251,72 @@ export class Game {
       const { WebGPUEngine } = await import('@babylonjs/core/Engines/webgpuEngine');
       if (await WebGPUEngine.IsSupportedAsync) {
         const e = new WebGPUEngine(canvas, { antialias: true });
+        await e.initAsync();
+        this.engine = e as unknown as Engine;
+        gpuOk = true;
+        console.log('[bmb] WebGPU engine active');
+      }
+    } catch (e) {
+      console.warn('[bmb] WebGPU unavailable, falling back', e);
+    }
+    if (!gpuOk) {
+      this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: false }, false);
+      console.log('[bmb] WebGL engine active');
+    }
 
+    this.scene = new Scene(this.engine);
+    this.scene.clearColor = new Color4(0.02, 0.018, 0.008, 1);
+    this.scene.ambientColor = new Color3(0.12, 0.11, 0.08);
 
+    this.camera = new TargetCamera('cam', new Vector3(SPAWN_X, 1.62, SPAWN_Z), this.scene);
+    this.camera.fov = 1.25;
+    this.camera.minZ = 0.08;
+    this.camera.maxZ = 140;
+
+    this.input = new Input(canvas);
+    this.mats = createMaterials(this.scene);
+    this.lighting = new LightingRig(this.scene);
+    this.lighting.attachToCamera(this.camera);
+    // Integration: surface detection is context-free, so it can boot here.
+    try {
+      this.surfaceDetector = new SurfaceDetector();
+    } catch (e) {
+      console.warn('[bmb] SurfaceDetector unavailable', e);
+    }
+    // ---- Wave B (B-2a): post-processing over the LightingRig pipeline ----
+    try {
+      this.postfx = new PostFX();
+      this.postfx.init(this.scene, { camera: this.camera });
+    } catch (e) {
+      console.warn('[bmb] PostFX unavailable', e);
+      this.postfx = null;
+    }
+    this.lighting.onLightDied = () => {
+      this.audio.lightCrack();
+      this.ui.say('...that light was coming to you...', 3.5);
+      this.showAudioCaption('IMPACT'); // Wave A (A-1b): caption routing
+    };
+    this.player = new PlayerController(this.camera, this.input, this.scene);
+    this.flashlight = new Flashlight(this.scene);
+    this.chunks = new ChunkManager(this.scene, this.mats, 1);
+    this.chunks.consumedBatteries = this.consumedBatteries;
+    this.chunks.discoveredLandmarks = this.seenLandmarks;
+    this.dust = new DustMotes(this.scene);
+    this.humans = new HumanManager(this.scene);
+    this.humans.onWatcherVanish = () => {
+      this.audio.lightCrack();
+      this.lighting.stressLevel = Math.min(1, this.lighting.stressLevel + 0.5);
+      this.showAudioCaption('SCREAM'); // Wave A (A-1b): caption routing
+    };
+    this.humans.onBeamFreeze = () => {
+      this.audio.beamFreezeSting();
+    };
+    // ---- Wave B (B-2m/B-2n): ambient fauna + per-figure gaze coordination ----
+    try { this.fauna = new FaunaWiring(this.scene, this.seed); }
+    catch (e) { console.warn('[bmb] FaunaWiring unavailable', e); this.fauna = null; }
+    try { this.gaze = new GazeWiring(); }
+    catch (e) { console.warn('[bmb] GazeWiring unavailable', e); this.gaze = null; }
+    this.mem = new MemoryField(1);
     this.weather = new MemoryWeather(1);
     this.mem.weather = this.weather;
     this.chunks.mem = this.mem;
@@ -306,6 +328,7 @@ export class Game {
       onSettingsChanged: (s) => this.applySettings(s),
     });
 
+
     // ---- Wave B (B-3): DOM overlays mounted into the HUD host ----
     try { this.minimap = new Minimap(this.ui.hud); }
     catch (e) { console.warn('[bmb] Minimap unavailable', e); this.minimap = null; }
@@ -313,6 +336,32 @@ export class Game {
     catch (e) { console.warn('[bmb] Compass unavailable', e); this.compass = null; }
     try { this.weatherUi = new WeatherUI(this.ui.hud); }
     catch (e) { console.warn('[bmb] WeatherUI unavailable', e); this.weatherUi = null; }
+
+    // ---- Wave C world-FX: emergency lights, heat shimmer, photo mode ----
+    try {
+      this.emergencyWiring = new EmergencyWiring();
+      this.emergencyWiring.ensureLights(this.scene);
+    } catch (e) { console.warn('[bmb] EmergencyLights unavailable', e); this.emergencyWiring = null; }
+    try { this.heatShimmer = new HeatShimmer(document.body); }
+    catch (e) { console.warn('[bmb] HeatShimmer unavailable', e); this.heatShimmer = null; }
+    try {
+      this.photoMode = new PhotoMode({
+        canvas: document.getElementById('renderCanvas') as HTMLCanvasElement,
+        getCameraPos: () => ({ x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z }),
+        setCameraPos: (p) => this.camera.position.set(p.x, p.y, p.z),
+        getCameraRot: () => ({ x: this.camera.rotation.x, y: this.camera.rotation.y, z: this.camera.rotation.z }),
+        setCameraRot: (r) => this.camera.rotation.set(r.x, r.y, r.z),
+      });
+      window.addEventListener('keydown', (ev) => {
+        if (ev.code === 'KeyP' && this.state === 'playing' && !this.photoMode?.isOpen) {
+          this.photoMode?.enter();
+        }
+      });
+    } catch (e) { console.warn('[bmb] PhotoMode unavailable', e); }
+
+    // ---- Wave C (C-7): gallery of captured endings ----
+    try { this.gallery = new PhotoGallery(document.body); }
+    catch (e) { console.warn('[bmb] PhotoGallery unavailable', e); this.gallery = null; }
 
     // ---- Wave A (A-4): persistence stage helpers (world decay bookkeeping) ----
     try { this.wallCracks = createWallCracks(); }
@@ -345,50 +394,53 @@ export class Game {
       this.a11yCtl = a11yAttach.controller;
     } catch (e) {
       console.warn('[bmb] AccessibilityManager unavailable', e);
-      onSettingsChanged: (s) => this.applySettings(s),
-    });
+    }
 
-    // ---- Wave B (B-3): DOM overlays mounted into the HUD host ----
-    try { this.minimap = new Minimap(this.ui.hud); }
-    catch (e) { console.warn('[bmb] Minimap unavailable', e); this.minimap = null; }
-    try { this.compass = new Compass(this.ui.hud); }
-    catch (e) { console.warn('[bmb] Compass unavailable', e); this.compass = null; }
-    try { this.weatherUi = new WeatherUI(this.ui.hud); }
-    catch (e) { console.warn('[bmb] WeatherUI unavailable', e); this.weatherUi = null; }
-
-
-    try { this.compass = new Compass(this.ui.hud); }
-    catch (e) { console.warn('[bmb] Compass unavailable', e); this.compass = null; }
-    try { this.weatherUi = new WeatherUI(this.ui.hud); }
-    catch (e) { console.warn('[bmb] WeatherUI unavailable', e); this.weatherUi = null; }
-
-    // ---- Wave C world-FX: emergency lights, heat shimmer, photo mode ----
+    // ---- Wave A (A-1c): schema-driven panel mounted into the shared pause-menu host ----
     try {
-      this.emergencyWiring = new EmergencyWiring();
-      this.emergencyWiring.ensureLights(this.scene);
-    } catch (e) { console.warn('[bmb] EmergencyLights unavailable', e); this.emergencyWiring = null; }
-    try { this.heatShimmer = new HeatShimmer(document.body); }
-    catch (e) { console.warn('[bmb] HeatShimmer unavailable', e); this.heatShimmer = null; }
-    try {
-      this.photoMode = new PhotoMode({
-        canvas: document.getElementById('renderCanvas') as HTMLCanvasElement,
-        getCameraPos: () => ({ x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z }),
-        setCameraPos: (p) => this.camera.position.set(p.x, p.y, p.z),
-        getCameraRot: () => ({ x: this.camera.rotation.x, y: this.camera.rotation.y, z: this.camera.rotation.z }),
-        setCameraRot: (r) => this.camera.rotation.set(r.x, r.y, r.z),
-      });
-      window.addEventListener('keydown', (ev) => {
-        if (ev.code === 'KeyP' && this.state === 'playing' && !this.photoMode?.isOpen) {
-          this.photoMode?.enter();
+      if (this.settingsManager && this.a11yMgr) {
+        const host = document.getElementById('settings-panel');
+        if (host) {
+          const store = compositeStore([
+            settingsStoreAdapter(this.settingsManager),
+            accessibilityStoreAdapter(this.a11yMgr),
+          ]);
+          this.settingsPanel = buildSettingsPanel(host, store, defaultSections());
         }
-      });
-    } catch (e) { console.warn('[bmb] PhotoMode unavailable', e); }
+      }
+    } catch (e) {
+      console.warn('[bmb] settings panel unavailable', e);
+    }
 
-    // ---- Wave C (C-7): gallery of captured endings ----
-    try { this.gallery = new PhotoGallery(document.body); }
-    catch (e) { console.warn('[bmb] PhotoGallery unavailable', e); this.gallery = null; }
+    // ---- Wave A (A-3a): expedition debrief overlay (invoked at ending) ----
+    try { this.endstats = new EndStats(document.body); }
+    catch (e) { console.warn('[bmb] EndStats unavailable', e); }
 
+    // ---- Wave A (A-3b): Threshold whiteout watcher + commemorative frame grab ----
+    try {
+      this.endcapture = new EndCapture();
+      // Wave C (C-7): every captured ending frame lands in the gallery
+      this.endcapture.onCapture = (blob) => {
+        console.log('[bmb] threshold frame captured');
+        try {
+          const dist = String(this.chunks.districtAtPos(this.player.body.x, this.player.body.z) ?? 0);
+          void this.gallery?.addPhoto(blob, dist);
+        } catch (err) { console.warn('[bmb] gallery capture failed', err); }
+      };
+      this.endcapture.arm(() => document.getElementById('renderCanvas') as HTMLCanvasElement | null);
+    } catch (e) {
+      console.warn('[bmb] EndCapture unavailable', e);
+    }
 
+    const host: DirectorHost = {
+      lightingStress: (v) => { this.lighting.stressLevel = v; },
+      killNearbyLight: () => this.killNearbyLight(),
+      blackoutPulse: (sec) => { this.blackoutUntil = this.playtimeSec + sec; },
+      whisperSurge: () => this.audio.whisper(),
+      distantThreat: () => {/* distant events are scheduled by audio engine */},
+      nonEuclideanNudge: () => this.nonEuclideanNudge(),
+      armDoorwayLoop: (sec) => { this.loopArmedUntil = this.playtimeSec + sec; },
+      requestEntitySpawn: (kind) => this.spawnEntity(kind),
       playerPosition: () => ({ x: this.player.body.x, z: this.player.body.z }),
       elapsed: () => this.playtimeSec,
     };
@@ -421,121 +473,6 @@ export class Game {
       }
     });
 
-    canvas.addEventListener('click', () => {
-      this.audio.unlock();
-      if (this.state === 'playing') this.input.requestLock();
-    });
-    this.input.onLockChange = (locked) => {
-      if (!locked && this.state === 'playing') this.pause();
-    };
-
-    try {
-      const s = await SaveDB.loadSettings();
-      if (s) this.ui.loadSettings(s);
-    } catch { /* defaults */ }
-
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'F3') {
-        e.preventDefault();
-        this.ui.toggleDebug();
-      }
-      if (e.code === 'KeyE' && this.state === 'playing') {
-        console.log('[key] KeyE firing, setting queue; sameInstance=', this === (window as unknown as Record<string, Record<string, unknown>>).__BMB__?.game);
-        this.interactQueued = true;
-      }
-      if (e.code === 'KeyF' && this.state === 'playing') {
-        const turned = this.flashlight.toggle();
-        if (turned && !this.flashHintShown) {
-          this.flashHintShown = true;
-          this.ui.say('The camp kit’s torch. It drinks from the working lights.', 4);
-        }
-      }
-      // batteries consume synchronously here so nothing can eat the press
-      if (e.code === 'KeyE' && this.state === 'playing') {
-        const b0 = this.chunks.nearestBattery(this.player.body.x, this.player.body.z);
-        console.log('[batE] reached, b=', !!b0);
-        const b = b0;
-        const beaconNear = [...this.story.beacons.values()].some(
-          (bb) => !bb.found && Math.hypot(bb.x - this.player.body.x, bb.z - this.player.body.z) < 2.6,
-        );
-        console.log('[batE] beaconNear=', beaconNear, 'b=', !!b);
-        if (b && !beaconNear) {
-          const cx2 = worldToChunk(b.x);
-          const cz2 = worldToChunk(b.z);
-          // coordinate-stable key matches the build-time filter
-          const key = cx2 + ':' + cz2 + ':' + Math.round(b.x * 100) + ':' + Math.round(b.z * 100);
-            accessibilityStoreAdapter(this.a11yMgr),
-          ]);
-          this.settingsPanel = buildSettingsPanel(host, store, defaultSections());
-        }
-      }
-    } catch (e) {
-      console.warn('[bmb] settings panel unavailable', e);
-    }
-
-    // ---- Wave A (A-3a): expedition debrief overlay (invoked at ending) ----
-    try { this.endstats = new EndStats(document.body); }
-    catch (e) { console.warn('[bmb] EndStats unavailable', e); }
-
-    // ---- Wave A (A-3b): Threshold whiteout watcher + commemorative frame grab ----
-    try {
-      this.endcapture = new EndCapture();
-      // Wave C (C-7): every captured ending frame lands in the gallery
-      this.endcapture.onCapture = (blob) => {
-        console.log('[bmb] threshold frame captured');
-        try {
-          const dist = String(this.chunks.districtAtPos(this.player.body.x, this.player.body.z) ?? 0);
-          void this.gallery?.addPhoto(blob, dist);
-        } catch (err) { console.warn('[bmb] gallery capture failed', err); }
-      };
-      this.endcapture.arm(() => document.getElementById('renderCanvas') as HTMLCanvasElement | null);
-    } catch (e) {
-      console.warn('[bmb] EndCapture unavailable', e);
-    }
-
-    const host: DirectorHost = {
-
-
-    this.settings = { ...s, fov: fovDeg };
-    this.camera.fov = fovDeg * Math.PI / 180;
-    this.player.sensitivity = 0.0022 * this.settings.sensitivity;
-    this.audio.setMasterVolume(this.settings.volume);
-    this.engine.setHardwareScalingLevel(1 / Math.max(0.4, Math.min(1, this.settings.quality)));
-    // Wave A (A-1a): keep the canonical settings store in agreement.
-    if (!this.syncingSettings && this.settingsManager) {
-      this.syncingSettings = true;
-      try {
-        this.settingsManager.set({
-          masterVolume: s.volume,
-          sensitivity: s.sensitivity,
-          quality: qualityNumToPreset(s.quality),
-          fov: fovDeg,
-        });
-        this.settingsPanel?.refresh();
-      } catch (e) {
-        console.warn('[bmb] settings mirror failed', e);
-      }
-      this.syncingSettings = false;
-    }
-    void SaveDB.saveSettings(this.settings).catch(() => {});
-  }
-
-  /** Wave A (A-1a): map the panel-store schema onto the game's SettingsData. */
-  private panelToGameSettings(gs: GameSettings): SettingsData {
-    return {
-      sensitivity: gs.sensitivity,
-      volume: gs.masterVolume,
-      quality: presetToQualityNum(gs.quality),
-      fov: gs.fov,
-    };
-  }
-
-  /** Wave A (A-1b): route a loud-sound label through the caption layer. */
-  private showAudioCaption(kind: string): void {
-    if (!this.a11yCtl) return;
-    try { this.a11yCtl.showCaption(kind); }
-    catch (e) { console.warn('[bmb] caption failed', e); }
-  }
     canvas.addEventListener('click', () => {
       this.audio.unlock();
       if (this.state === 'playing') this.input.requestLock();
@@ -631,28 +568,25 @@ export class Game {
       this.syncingSettings = false;
     }
     void SaveDB.saveSettings(this.settings).catch(() => {});
-
-
-    catch (e) { console.warn('[bmb] fauna reset failed', e); }
-    try { this.weatherUi?.reset(); }
-    catch (e) { console.warn('[bmb] weather ui reset failed', e); }
-    this.knownChunkKeys.clear();
-    this.lastChunksBuiltSeen = 0;
-    this.markedBeaconKeys.clear();
-    this.prevMiniChunk = null;
-    this.prevArcStage = this.story.stage;
-    this.player.teleport(pos.x, pos.z, pos.yaw);
-    this.setState('playing');
-    this.ui.showHud();
-    this.audio.unlock();
-    this.input.requestLock();
-    this.lastAutosave = this.playtimeSec;
+  }
+  /** Wave A (A-1a): map the panel-store schema onto the game's SettingsData. */
+  private panelToGameSettings(gs: GameSettings): SettingsData {
+    return {
+      sensitivity: gs.sensitivity,
+      volume: gs.masterVolume,
+      quality: presetToQualityNum(gs.quality),
+      fov: gs.fov,
+    };
   }
 
-  pause(): void {
-    if (this.state !== 'playing') return;
-    this.setState('paused');
-    this.ui.setPauseSummary(
+  /** Wave A (A-1b): route a loud-sound label through the caption layer. */
+  private showAudioCaption(kind: string): void {
+    if (!this.a11yCtl) return;
+    try { this.a11yCtl.showCaption(kind); }
+    catch (e) { console.warn('[bmb] caption failed', e); }
+  }
+
+  private setState(s: GameState): void {
     this.state = s;
     this.player.enabled = s === 'playing';
   }
@@ -718,6 +652,9 @@ export class Game {
     this.chunks.reset();
     this.humans.reset();
     this.forceDeadLights.clear();
+    // Wave C: forget accumulated emergency-light chunks for the fresh run
+    try { this.emergencyWiring?.reset(); }
+    catch (e) { console.warn('[bmb] emergency wiring reset failed', e); }
     this.blackoutUntil = 0;
     this.mem.seed = this.seed;
     this.weather = new MemoryWeather(this.seed ^ 0x5179);
@@ -733,8 +670,6 @@ export class Game {
       requestEntitySpawn: (kind) => this.spawnEntity(kind),
       playerPosition: () => ({ x: this.player.body.x, z: this.player.body.z }),
       elapsed: () => this.playtimeSec,
-
-
     }, this.seed);
     this.loopArmedUntil = 0;
     this.prevCell = null;
@@ -749,48 +684,24 @@ export class Game {
     this.gazeAttached.clear();
     try { this.fauna?.resetOnNewExpedition(this.seed); }
     catch (e) { console.warn('[bmb] fauna reset failed', e); }
+    try { this.weatherUi?.reset(); }
+    catch (e) { console.warn('[bmb] weather ui reset failed', e); }
+    this.knownChunkKeys.clear();
+    this.lastChunksBuiltSeen = 0;
+    this.markedBeaconKeys.clear();
+    this.prevMiniChunk = null;
+    this.prevArcStage = this.story.stage;
+    this.player.teleport(pos.x, pos.z, pos.yaw);
+    this.setState('playing');
+    this.ui.showHud();
+    this.audio.unlock();
+    this.input.requestLock();
+    this.lastAutosave = this.playtimeSec;
+  }
 
-
-    this.mem.seed = this.seed;
-    this.weather = new MemoryWeather(this.seed ^ 0x5179);
-    this.mem.weather = this.weather;
-    this.director = new HorrorDirector({
-      lightingStress: (v) => { this.lighting.stressLevel = v; },
-      killNearbyLight: () => this.killNearbyLight(),
-      blackoutPulse: (sec) => { this.blackoutUntil = this.playtimeSec + sec; },
-      whisperSurge: () => this.audio.whisper(),
-      distantThreat: () => {},
-      nonEuclideanNudge: () => this.nonEuclideanNudge(),
-      armDoorwayLoop: (sec) => { this.loopArmedUntil = this.playtimeSec + sec; },
-      requestEntitySpawn: (kind) => this.spawnEntity(kind),
-      playerPosition: () => ({ x: this.player.body.x, z: this.player.body.z }),
-      elapsed: () => this.playtimeSec,
-    }, this.seed);
-    this.loopArmedUntil = 0;
-    this.prevCell = null;
-    // Wave A: per-run resets for pure-logic state machines
-    try { this.beats?.reset(); }
-    catch (e) { console.warn('[bmb] beats reset failed', e); }
-    this.prevStageChunk = null;
-    // Wave B: per-run resets for scene/audio integrations
-    try { this.gaze?.dispose(); }
-    catch (e) { console.warn('[bmb] gaze reset failed', e); }
-    this.gazeIds = new WeakMap();
-    this.gazeAttached.clear();
-
-
-    catch (e) { console.warn('[bmb] emergency wiring reset failed', e); }
-    this.blackoutUntil = 0;
-
-
-    }
-    // storage canyons: a figure at the far end of a long sightline
-    if (this.director.phase === 'build' && this.chunks.districtAtPos(this.player.body.x, this.player.body.z) === (4 as number) && this.humans.count < 4 && rng.chance(0.2)) {
-      const yaw = rng.next() * Math.PI * 2;
-      const d = 30 + rng.next() * 10;
-      this.spawnWatcherAt(this.player.body.x - Math.sin(yaw) * d, this.player.body.z - Math.cos(yaw) * d);
-    }
-    // landmark attendants: a figure stationed inside each named room.
+  pause(): void {
+    if (this.state !== 'playing') return;
+    this.setState('paused');
     this.ui.setPauseSummary(
       sectorName(this.seed, this.player.body.x, this.player.body.z) + ' · ' +
       Math.floor(this.playtimeSec / 60) + 'm elapsed · ' +
@@ -851,8 +762,133 @@ export class Game {
     };
   }
 
+  // ---------- director actions ----------
 
+  private killNearbyLight(): boolean {
+    const px = this.player.body.x, pz = this.player.body.z;
+    let best: { x: number; z: number } | null = null;
+    let bd = 26 * 26;
+    for (const f of this.chunks.allFixtures()) {
+      if (!f.alive) continue;
+      const k = f.x + ',' + f.z;
+      if (this.forceDeadLights.has(k)) continue;
+      const d = (f.x - px) ** 2 + (f.z - pz) ** 2;
+      if (d < bd) { bd = d; best = f; }
+    }
+    if (!best) return false;
+    this.forceDeadLights.add(best.x + ',' + best.z);
+    this.audio.lightCrack();
+    return true;
+  }
 
+  private nonEuclideanNudge(): void {
+    const yaw = this.player.yaw;
+    const back = 28 + Math.random() * 18;
+    const dx = Math.sin(yaw) * -back;
+    const dz = Math.cos(yaw) * -back;
+    const colliders = this.chunks.collidersAround(this.player.body.x + dx, this.player.body.z + dz);
+    this.player.teleport(this.player.body.x + dx, this.player.body.z + dz, this.player.yaw);
+    // resolve against walls at destination so we never land inside geometry
+    moveCircle(this.player.body, 0, 0, colliders);
+  }
+
+  private entityTimer = 8;
+  private helperTimer = 200;
+  private staffedLandmarks = new Set<string>();
+
+  /** Ambient population: calm wanderers, post-discovery helpers, blackout incompletes. */
+  private entityScheduler(dt: number): void {
+    this.entityTimer -= dt;
+    if (this.entityTimer > 0) return;
+    this.entityTimer = 7;
+    const rng = new RNG(hash2i(Math.floor(this.playtimeSec), 555, this.seed));
+    // wanderers drift through during long calms
+    if (this.director.phase === 'calm' && this.humans.count < 2 && rng.chance(0.3)) {
+      this.spawnEntity('wanderer');
+    }
+    // during builds you start catching shapes standing far away
+    if (this.director.phase === 'build' && this.humans.count < 3 && rng.chance(0.22)) {
+      this.spawnEntity('watcher');
+    }
+    // sometimes your footsteps come back with company
+    if (this.director.phase === 'build' && rng.chance(0.18)) {
+      this.audio.startMirrorSteps(10 + rng.next() * 10);
+    }
+    // peaks: a light detaches and drifts toward you
+    if (this.director.phase === 'peak' && rng.chance(0.25)) {
+      this.lighting.startMigratingLight(this.player.body.x, this.player.body.z);
+    }
+    // your torch beam is visible from far away
+    if (this.director.phase === 'peak' && this.flashlight.on && this.humans.count < 4 && rng.chance(0.3)) {
+      this.spawnEntity('watcher');
+    }
+    // storage canyons: a figure at the far end of a long sightline
+    if (this.director.phase === 'build' && this.chunks.districtAtPos(this.player.body.x, this.player.body.z) === (4 as number) && this.humans.count < 4 && rng.chance(0.2)) {
+      const yaw = rng.next() * Math.PI * 2;
+      const d = 30 + rng.next() * 10;
+      this.spawnWatcherAt(this.player.body.x - Math.sin(yaw) * d, this.player.body.z - Math.cos(yaw) * d);
+    }
+    // landmark attendants: a figure stationed inside each named room.
+    // CHAPEL gets a believer humming to itself; everywhere else gets a watcher.
+    // Revisiting a previously-staffed landmark: a second figure has appeared.
+    if (this.humans.count < 4) {
+      for (const lm of this.chunks.landmarkCentersNear(this.player.body.x, this.player.body.z, 45)) {
+        const revisited = this.staffedLandmarks.has(lm.key);
+        if (revisited ? this.humans.count >= 3 : this.humans.count >= 4) continue;
+        if (!revisited && this.staffedLandmarks.has(lm.key)) continue;
+        if (revisited) this.staffedLandmarks.add(lm.key + ':r');
+        else this.staffedLandmarks.add(lm.key);
+        const ang2 = Math.random() * Math.PI * 2;
+        const wx = lm.x + Math.cos(ang2) * (revisited ? 2 : 3);
+        const wz = lm.z + Math.sin(ang2) * (revisited ? 2 : 3);
+        const type: HumanType = (() => {
+          switch (lm.name) {
+            case 'CHAPEL': return 'believer';
+            case 'ARCHIVE': return 'incomplete';
+            case 'MEDICAL BAY': return 'watcher';
+            case 'CANTEEN': return 'wanderer';
+            default: return 'watcher';
+          }
+        })();
+        const f = this.humans.spawn(type, wx, wz, hash2i(Math.floor(wx), Math.floor(wz), this.seed ^ (revisited ? 0x5ec : 0x417d)));
+        f.vanishAt = f.life + (revisited ? 60 : 90);
+        break;
+      }
+    }
+    // reconsolidation doubles: where your memories were copied, something
+    // walks your walk — even outside peaks
+    const memHere = this.mem.sampleAt(this.player.body.x, this.player.body.z);
+    if (memHere.kind === MemoryKind.PERSONAL && memHere.intensity > 0.45 && rng.chance(0.25) && this.humans.count < 4) {
+      const rk = Math.floor(this.player.body.x / 24) + ':' + Math.floor(this.player.body.z / 24);
+      if (!this.reconsolidationDoubles.has(rk)) {
+        this.reconsolidationDoubles.add(rk);
+        const yaw = rng.next() * Math.PI * 2;
+        const d = 16 + rng.next() * 8;
+        const f = this.humans.spawn('double', this.player.body.x - Math.sin(yaw) * d, this.player.body.z - Math.cos(yaw) * d, hash2i(Math.floor(this.player.body.x), Math.floor(this.player.body.z), this.seed ^ 0xdc));
+        f.vanishAt = f.life + 70;
+        this.audio.whisper();
+      }
+    }
+    // misleading safety: during long calms a figure stands far off in the fog
+    if (this.director.phase === 'calm' && this.humans.count < 4 && rng.chance(0.14)) {
+      const yaw = rng.next() * Math.PI * 2;
+      const d = 38 + rng.next() * 8;
+      const fx = this.player.body.x - Math.sin(yaw) * d;
+      const fz = this.player.body.z - Math.cos(yaw) * d;
+      const f = this.humans.spawn('watcher', fx, fz, hash2i(Math.floor(fx), Math.floor(fz), this.seed ^ 0xfa7));
+      f.vanishAt = f.life + 120;
+    }
+    // misleading safety: during long calms a figure stands far off in the fog
+    if (this.director.phase === 'calm' && this.humans.count < 4 && rng.chance(0.14)) {
+      const yaw = rng.next() * Math.PI * 2;
+      const d = 38 + rng.next() * 8;
+      const fx = this.player.body.x - Math.sin(yaw) * d;
+      const fz = this.player.body.z - Math.cos(yaw) * d;
+      const f = this.humans.spawn('watcher', fx, fz, hash2i(Math.floor(fx), Math.floor(fz), this.seed ^ 0xfa7));
+      f.vanishAt = f.life + 120;
+    }
+    // believers still work here
+    if ((this.director.phase === 'calm' || this.director.phase === 'build') && this.humans.count < 4 && rng.chance(0.12)) {
       const yaw = rng.next() * Math.PI * 2;
       const d = 12 + rng.next() * 8;
       const bx = this.player.body.x - Math.sin(yaw) * d;
@@ -873,53 +909,51 @@ export class Game {
       }
     }
     // an incomplete stands in dead-light zones during peaks
-      stability: this.erosion.stability,
-      relocations: this.erosion.relocations,
-      completed: this.story.stage >= 4,
-      pathEcho: this.pathHistory.filter((_, i) => i % 4 === 0).slice(-200).map((p) => ({ x: +p.x.toFixed(1), z: +p.z.toFixed(1) })),
-      story: this.story.serialize(),
-    };
-  }
-
-  // ---------- director actions ----------
-
-  private killNearbyLight(): boolean {
-    const px = this.player.body.x, pz = this.player.body.z;
-    let best: { x: number; z: number } | null = null;
-    let bd = 26 * 26;
-    for (const f of this.chunks.allFixtures()) {
-      if (!f.alive) continue;
-      const k = f.x + ',' + f.z;
-      if (this.forceDeadLights.has(k)) continue;
-      const d = (f.x - px) ** 2 + (f.z - pz) ** 2;
-      if (d < bd) { bd = d; best = f; }
+    const fxNear = this.chunks.nearestFixtureDist(this.player.body.x, this.player.body.z);
+    if (fxNear > 17 && this.director.phase === 'peak' && this.humans.count < 4 && rng.chance(0.35)) {
+      const yaw = this.player.yaw + (rng.next() - 0.5) * 1.6;
+      const d = 9 + rng.next() * 5;
+      this.humans.spawn('incomplete', this.player.body.x - Math.sin(yaw) * d, this.player.body.z - Math.cos(yaw) * d, hash2i(Math.floor(this.playtimeSec), 77, this.seed));
+      this.audio.whisper();
     }
-    if (!best) return false;
-    this.forceDeadLights.add(best.x + ',' + best.z);
-    this.audio.lightCrack();
-    // Wave B (B-1): pan an electric pop toward the murdered fixture
-    try {
-      const kdx = best.x - px, kdz = best.z - pz;
-      const klen = Math.hypot(kdx, kdz) || 1;
-      const kyaw = this.player.yaw;
-      this.electricPops?.pop(0.9, Math.max(-1, Math.min(1, (kdx * Math.cos(kyaw) - kdz * Math.sin(kyaw)) / klen)));
-    } catch (e) { console.warn('[bmb] electric pop failed', e); }
-    return true;
+    // a helper appears periodically once the expedition is underway
+    if (this.story.stage >= 1 && this.story.stage < 4 && this.humans.count < 4) {
+      this.helperTimer -= 7;
+      if (this.helperTimer <= 0) {
+        this.helperTimer = 220 + rng.next() * 160;
+        const target = this.nearestBeacon();
+        if (target) {
+          const ang = Math.atan2(target.x - this.player.body.x, target.z - this.player.body.z);
+          const hx = this.player.body.x - Math.sin(ang) * 11;
+          const hz = this.player.body.z - Math.cos(ang) * 11;
+          const f = this.humans.spawn('helper', hx, hz, hash2i(Math.floor(hx), Math.floor(hz), this.seed ^ 0x111));
+          f.vanishAt = f.life + 90;
+        }
+      }
+    }
   }
 
-  private nonEuclideanNudge(): void {
-    const yaw = this.player.yaw;
-    const back = 28 + Math.random() * 18;
-    const dx = Math.sin(yaw) * -back;
-    const dz = Math.cos(yaw) * -back;
-    const colliders = this.chunks.collidersAround(this.player.body.x + dx, this.player.body.z + dz);
-    this.player.teleport(this.player.body.x + dx, this.player.body.z + dz, this.player.yaw);
-    // resolve against walls at destination so we never land inside geometry
-    moveCircle(this.player.body, 0, 0, colliders);
+  private nearestBeacon(): { x: number; z: number } | null {
+    let best: { x: number; z: number } | null = null;
+    let bd = Infinity;
+    for (const b of this.story.beacons.values()) {
+      if (b.found) continue;
+      const d = Math.hypot(b.x - this.player.body.x, b.z - this.player.body.z);
+      if (d < bd && d > 20) { bd = d; best = b; }
+    }
+    return best;
   }
 
+  private static HELPER_LINES = [
+    'It said you would come.',
+    'The light remembers being a star. Do not tell it otherwise.',
+    'Keep walking. The carpet is patient but you should not be.',
+    'I had a face this morning. It is around here somewhere.',
+  ];
 
-
+  private static BELIEVER_LINES = [
+    'Morning. Coffee machine on three is still out.',
+    'They are saying the east stairwell moved again.',
     'You are new. Your badge has not faded yet.',
     'It fixes my tie every morning. I stopped asking how.',
     'Ignore the ones without faces. It is not personal with them.',
@@ -1039,31 +1073,15 @@ export class Game {
     const key = pcx + ':' + pcz;
     if (key === this.prevAudioChunk) return;
     this.prevAudioChunk = key;
-    if (this.cabinetCreaks) {
-      const cabs: { x: number; z: number }[] = [];
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const layout = this.chunks.layoutAt(pcx + dx, pcz + dz);
-          if (!layout) continue;
-          for (const p of layout.props) {
-            if (p.kind === 'cabinet') cabs.push({ x: p.x, z: p.z });
-          }
-        }
-      }
-      try { this.cabinetCreaks.setCabinets(cabs); }
-      catch (e) { console.warn('[bmb] cabinet feed failed', e); }
-    }
-    if (this.fanSpeedAudio || this.fanAudio) {
+    if (this.fanAudio) {
       // deterministic stand-in until the fan mesh wiring lands: ~57% of
       // chunks host a spinning ceiling fan, speed rolled per chunk
       const roll = hash2i(pcx, pcz, 0xfa17) % 7;
-      const states: FanSpeedState[] = ['SLOW', 'OFF', 'OFF', 'MEDIUM', 'SLOW', 'FAST', 'MEDIUM'];
-      const state = states[roll] ?? 'OFF';
-      try { this.fanSpeedAudio?.setState(state); }
-      catch (e) { console.warn('[bmb] fan state feed failed', e); }
-      const revs = state === 'OFF' ? 0 : state === 'SLOW' ? 0.9 : state === 'MEDIUM' ? 1.7 : 2.6;
-      try { this.fanAudio?.setSpeed(revs); }
-      catch (e) { console.warn('[bmb] fan speed feed failed', e); }
+      const revs = (roll === 3) ? 1.7 : (roll === 5) ? 2.6 : (roll === 1 || roll === 4 || roll === 6) ? 0.9 : 0;
+      if (revs > 0) {
+        try { this.fanAudio.setSpeed(revs); }
+        catch (e) { console.warn('[bmb] fan speed feed failed', e); }
+      }
     }
   }
 
@@ -1094,26 +1112,14 @@ export class Game {
     catch (e) { console.warn('[bmb] DoorCreaks unavailable', e); this.doorCreaks = null; }
     try { this.groans = new StructureGroans(ctx, dest); }
     catch (e) { console.warn('[bmb] StructureGroans unavailable', e); this.groans = null; }
-    try { this.vents = new VentAudio(ctx, dest); }
-    catch (e) { console.warn('[bmb] VentAudio unavailable', e); this.vents = null; }
-    try { this.elevatorAmb = new ElevatorAmbience(ctx, dest); }
-    catch (e) { console.warn('[bmb] ElevatorAmbience unavailable', e); this.elevatorAmb = null; }
     try { this.crowd = new CrowdAmbience(ctx, dest); }
     catch (e) { console.warn('[bmb] CrowdAmbience unavailable', e); this.crowd = null; }
     try { this.loreStings = new LoreStings(ctx, dest); }
     catch (e) { console.warn('[bmb] LoreStings unavailable', e); this.loreStings = null; }
     try { this.batteryCues = new BatteryCues(ctx, dest); }
     catch (e) { console.warn('[bmb] BatteryCues unavailable', e); this.batteryCues = null; }
-    try { this.electricPops = new ElectricPops(ctx, dest); }
-    catch (e) { console.warn('[bmb] ElectricPops unavailable', e); this.electricPops = null; }
     try { this.fanAudio = new FanAudio(ctx, dest); }
     catch (e) { console.warn('[bmb] FanAudio unavailable', e); this.fanAudio = null; }
-    try { this.fanSpeedAudio = new FanSpeedAudio(ctx, dest); }
-    catch (e) { console.warn('[bmb] FanSpeedAudio unavailable', e); this.fanSpeedAudio = null; }
-    try { this.cabinetCreaks = new CabinetCreaks(ctx, dest); }
-    catch (e) { console.warn('[bmb] CabinetCreaks unavailable', e); this.cabinetCreaks = null; }
-    try { this.echoSites = new EchoSites(ctx, dest); }
-    catch (e) { console.warn('[bmb] EchoSites unavailable', e); this.echoSites = null; }
     // ---- Wave B (B-2m): fauna skitter voice joins the shared graph ----
     try { this.fauna?.attachAudio(ctx); }
     catch (e) { console.warn('[bmb] fauna audio unavailable', e); }
@@ -1165,112 +1171,106 @@ export class Game {
             'CANTEEN': '...two long tables. Every chair is already pulled out for someone.',
             'ARCHIVE': '...shelves of files about people who were never hired here.',
             'SECURITY STATION': '...a wall of monitors. All of them show this room.',
-
-  // ---------- integrated systems boot ----------
-
-  /**
-   * Wave B: detect chunks that finished building since the last frame and
-   * forward each one to FaunaWiring's spawn lottery, plus minimap visited
-   * bookkeeping. Cheap when nothing new built (one integer compare).
-   */
-  private noteBuiltChunks(wx: number, wz: number): void {
-    const pcx = Math.floor(wx / CHUNK_SIZE);
-    const pcz = Math.floor(wz / CHUNK_SIZE);
-    // minimap fog marks the visited chunk only on chunk change
-    const miniKey = pcx + ':' + pcz;
-    if (this.minimap && this.state !== 'menu' && miniKey !== this.prevMiniChunk) {
-      this.prevMiniChunk = miniKey;
-      try { this.minimap.markVisited(pcx, pcz); }
-      catch (e) { console.warn('[bmb] minimap visit failed', e); }
-    }
-    if (this.chunks.totalBuilt === this.lastChunksBuiltSeen) return;
-    this.lastChunksBuiltSeen = this.chunks.totalBuilt;
-    for (let dz = -2; dz <= 2; dz++) {
-      for (let dx = -2; dx <= 2; dx++) {
-        const cx = pcx + dx;
-        const cz = pcz + dz;
-        const key = cx + ':' + cz;
-        if (this.knownChunkKeys.has(key)) continue;
-        const layout = this.chunks.layoutAt(cx, cz);
-        if (!layout) continue;
-        this.knownChunkKeys.add(key);
-        const district = this.chunks.districtAtPos(
-          cx * CHUNK_SIZE + CHUNK_SIZE / 2, cz * CHUNK_SIZE + CHUNK_SIZE / 2,
-        ) ?? 0;
-        // Wave C (C-3): built layouts carry their notes into the lore journal
-        if (this.journalWiring) {
-          try { this.journalWiring.onLayoutBuilt(layout, cx, cz, district); }
-          catch (e) { console.warn('[bmb] journal feed failed', e); }
+            'MEDICAL BAY': '...the gurneys are made up. Someone expects patients.',
+          };
+          this.ui.say(lines[this.playerLandmark] ?? ('...' + this.playerLandmark.toLowerCase() + '...'), 5);
+          // the space copies your visit into its own memory
+          this.mem.inject(this.player.body.x, this.player.body.z, MemoryKind.PERSONAL, 0.3);
+          this.audio.landmarkChord();
+          // Wave B (B-3a): pin the room on the minimap
+          try { this.minimap?.markLandmark(this.player.body.x, this.player.body.z, this.playerLandmark); }
+          catch (e) { console.warn('[bmb] minimap landmark failed', e); }
         }
-        if (!this.fauna) continue;
-        const lo = cx * CHUNK_SIZE, hi = (cx + 1) * CHUNK_SIZE;
-        const loZ = cz * CHUNK_SIZE, hiZ = (cz + 1) * CHUNK_SIZE;
-        const lights = this.chunks.allFixtures().filter((f) =>
-          f.x >= lo && f.x < hi && f.z >= loZ && f.z < hiZ,
-        );
-        this.fauna.onChunkBuilt(cx, cz, district, lights);
       }
-    }
-  }
-
-  /**
-   * Wave B: per-player-chunk audio feeds — CabinetCreaks gets the real
-
-
-      catch (e) { console.warn('[bmb] fan state feed failed', e); }
-      const revs = state === 'OFF' ? 0 : state === 'SLOW' ? 0.9 : state === 'MEDIUM' ? 1.7 : 2.6;
-      try { this.fanAudio?.setSpeed(revs); }
-      catch (e) { console.warn('[bmb] fan speed feed failed', e); }
-    }
-  }
-
-  private prevAudioChunk: string | null = null;
-
-  /**
-   * Construct every AudioContext-dependent integration exactly once, the
-   * first frame after the audio engine has unlocked its context. Each
-   * module is wrapped individually so one failing synth can never take
-   * down boot or the rest of the mix.
-   */
-  private ensureAudioIntegrations(): void {
-    if (this.audioModulesReady || !this.audio.started || !this.audio.ctx) return;
-    const ctx = this.audio.ctx;
-    const dest = ctx.destination;
-    try { this.humAudio = new PositionalHum(ctx, dest); }
-    catch (e) { console.warn('[bmb] PositionalHum unavailable', e); this.humAudio = null; }
-    try { this.watcherSteps = new WatcherSteps(ctx, dest); }
-    catch (e) { console.warn('[bmb] WatcherSteps unavailable', e); this.watcherSteps = null; }
-    try { this.surfaceFootsteps = new SurfaceFootsteps(ctx, dest); }
-    catch (e) { console.warn('[bmb] SurfaceFootsteps unavailable', e); this.surfaceFootsteps = null; }
-    try { this.score = new DynamicScore(ctx, dest); }
-    catch (e) { console.warn('[bmb] DynamicScore unavailable', e); this.score = null; }
-    try { this.exterior = new ExteriorBleed(ctx, dest); }
-    catch (e) { console.warn('[bmb] ExteriorBleed unavailable', e); this.exterior = null; }
-    // ---- Wave B (B-1): extended audio pack, each in its own failure island ----
-    try { this.doorCreaks = new DoorCreaks(ctx, dest); }
-    catch (e) { console.warn('[bmb] DoorCreaks unavailable', e); this.doorCreaks = null; }
-    try { this.groans = new StructureGroans(ctx, dest); }
-    catch (e) { console.warn('[bmb] StructureGroans unavailable', e); this.groans = null; }
-    try { this.vents = new VentAudio(ctx, dest); }
-    catch (e) { console.warn('[bmb] VentAudio unavailable', e); this.vents = null; }
-    try { this.elevatorAmb = new ElevatorAmbience(ctx, dest); }
-    catch (e) { console.warn('[bmb] ElevatorAmbience unavailable', e); this.elevatorAmb = null; }
-    try { this.crowd = new CrowdAmbience(ctx, dest); }
-    catch (e) { console.warn('[bmb] CrowdAmbience unavailable', e); this.crowd = null; }
-    try { this.loreStings = new LoreStings(ctx, dest); }
-    catch (e) { console.warn('[bmb] LoreStings unavailable', e); this.loreStings = null; }
-    try { this.batteryCues = new BatteryCues(ctx, dest); }
-    catch (e) { console.warn('[bmb] BatteryCues unavailable', e); this.batteryCues = null; }
-    try { this.electricPops = new ElectricPops(ctx, dest); }
-
-
-          if (!layout) continue;
-          for (const p of layout.props) {
-            if (p.kind === 'cabinet') cabs.push({ x: p.x, z: p.z });
-          }
+      // the space remembering YOU: entering strong personal-memory regions
+      {
+        const s = this.mem.sampleAt(this.player.body.x, this.player.body.z);
+        this.audio.setZoneAmbient(s.kind as number);
+        const inLandmark = !!this.chunks.landmarkAtPos(this.player.body.x, this.player.body.z);
+        this.audio.setSpaceSize(inLandmark ? 0.5 : 0.18);
+        const dist = this.chunks.districtAtPos(this.player.body.x, this.player.body.z);
+        this.audio.setStorageAmbient(dist === (4 as number));
+        // watcher proximity: dissonant beating swells within ~12 m
+        let wd = Infinity;
+        for (const f of this.humans.figures) {
+          if (f.type !== 'watcher' && f.type !== 'double') continue;
+          const d = Math.hypot(f.body.x - this.player.body.x, f.body.z - this.player.body.z);
+          if (d < wd) wd = d;
         }
-
-
+        this.audio.setWatchProximity(isFinite(wd) ? Math.max(0, 1 - wd / 12) : 0);
+        this.audio.setLandmarkAmbient(inLandmark ? this.chunks.landmarkAtPos(this.player.body.x, this.player.body.z) ?? null : null);
+        const rk = Math.floor(this.player.body.x / 24) + ',' + Math.floor(this.player.body.z / 24);
+        if (s.kind === MemoryKind.PERSONAL && s.intensity > 0.35 && !this.seenPersonal.has(rk)) {
+          this.seenPersonal.add(rk);
+          if (this.seenPersonal.size > 400) this.seenPersonal.clear();
+          const cues = [
+            '...the carpet here remembers your weight...',
+            '...somewhere behind the walls, your name is being pronounced badly...',
+            '...this hallway was copied from a memory of you copying it...',
+          ];
+          this.ui.say(cues[Math.floor(Math.random() * cues.length)], 5);
+          setTimeout(() => { this.audio.footstep(false); }, 700);
+          setTimeout(() => { this.audio.footstep(false); }, 1500);
+          this.mem.inject(this.player.body.x, this.player.body.z, MemoryKind.PERSONAL, 0.3);
+        }
+      }
+      if (this.weather.update(dt, this.player.body.x, this.player.body.z)) {
+        if (this.playtimeSec > 45) {
+          this.ui.toast('The air feels different. Something has moved through this place.', 7000);
+        }
+      }
+      this.lighting.setWeatherTint(this.weather.fogTint(), dt);
+      // scars: more relocations = heavier permanent vignette
+      this.lighting.setVignetteWeight(2.6 + Math.min(3, this.erosion.relocations * 0.8));
+      const dist = this.chunks.districtAtPos(this.player.body.x, this.player.body.z);
+      if (dist !== null) this.lighting.setDistrictFog(dist, dt);
+      this.director.update(dt);
+      // Wave A (A-2c): ambient story beats surface as quiet observations.
+      if (this.beats) {
+        try {
+          const beatLine = this.beats.update(dt, {
+            playtimeSec: this.playtimeSec,
+            discoveries: this.story.discoveries,
+            notesRead: this.notesRead,
+            landmarksSeen: this.seenLandmarks,
+            stability: this.erosion.stability,
+            phase: this.director.phase,
+          });
+          if (beatLine) this.ui.say(beatLine, 7);
+        } catch (e) {
+          console.warn('[bmb] story beats failed', e);
+        }
+      }
+      // Wave A (A-5a): day-cycle drift freezes during blackouts.
+      if (this.daycycle) {
+        try { this.daycycle.update(dt, this.playtimeSec < this.blackoutUntil); }
+        catch (e) { console.warn('[bmb] day cycle failed', e); }
+      }
+      // Wave A (A-4): world-decay stage bookkeeping.
+      try { this.wallCracks?.addActivity(this.player.body.x, this.player.body.z, dt); }
+      catch (e) { console.warn('[bmb] crack activity failed', e); }
+      {
+        const stageChunk = Math.floor(this.player.body.x / CHUNK_SIZE) + ':' + Math.floor(this.player.body.z / CHUNK_SIZE);
+        if (stageChunk !== this.prevStageChunk) {
+          this.prevStageChunk = stageChunk;
+          try { this.stainGrowth?.noteChunkEntry(stageChunk); }
+          catch (e) { console.warn('[bmb] stain growth failed', e); }
+          try { this.graffitiEvolution?.noteChunkEntry(stageChunk); }
+          catch (e) { console.warn('[bmb] graffiti evolution failed', e); }
+        }
+      }
+      // Wave B (B-2n): reconcile + advance gaze controllers ahead of the sim step.
+      if (this.gaze) {
+        try {
+          const seen = new Set<string>();
+          for (const f of this.humans.figures) {
+            let id = this.gazeIds.get(f);
+            if (!id) {
+              id = 'fig' + (this.gazeNextId++);
+              this.gazeIds.set(f, id);
+            }
+            if (!this.gazeAttached.has(id)) {
+              this.gaze.attach(id, new GazeController({
                 watcher: f.type === 'watcher' || f.type === 'double',
                 seed: hash2i(Math.floor(f.body.x * 4), Math.floor(f.body.z * 4), this.seed),
               }));
@@ -1291,8 +1291,6 @@ export class Game {
       }
       this.humans.update(dt, this.player.body.x, this.player.body.z, this.player.yaw, colliders, { on: this.flashlight.on });
       // Wave B (B-2m): ambient fauna tick directly after the human sim
-
-
       if (this.fauna) {
         try {
           this.fauna.updateAll(dt, this.player.body.x, this.player.body.z, this.player.yaw,
@@ -1359,9 +1357,6 @@ export class Game {
         const dist = 220 + Math.random() * 200;
         const nx = this.player.body.x + Math.cos(ang) * dist;
         const nz = this.player.body.z + Math.sin(ang) * dist;
-        // Wave B (B-1f): the abandoned site keeps murmuring after you're moved
-        try { this.echoSites?.markSite(this.player.body.x, this.player.body.z); }
-        catch (e) { console.warn('[bmb] echo mark failed', e); }
         this.player.teleport(nx, nz, Math.random() * Math.PI * 2);
         // build the immediate area synchronously so we never wake up in void
         for (let i = 0; i < 4; i++) this.chunks.update(nx, nz);
@@ -1459,13 +1454,6 @@ export class Game {
         const dur = 2 + Math.random() * 5;
         this.ghostLit.set(pick.x + ',' + pick.z, this.playtimeSec + dur);
         this.audio.lightCrack();
-        // Wave B (B-1): distant electrical fight-back pop
-        try {
-          const gdx = pick.x - this.player.body.x, gdz = pick.z - this.player.body.z;
-          const glen = Math.hypot(gdx, gdz) || 1;
-          const gyaw = this.player.yaw;
-          this.electricPops?.pop(0.5, Math.max(-1, Math.min(1, (gdx * Math.cos(gyaw) - gdz * Math.sin(gyaw)) / glen)));
-        } catch (e) { console.warn('[bmb] ghost pop failed', e); }
       }
     }
     if (!blackout) this.ghostLit.clear();
@@ -1566,21 +1554,9 @@ export class Game {
       try { this.groans.update(dt, tension); }
       catch (e) { console.warn('[bmb] structure groans update failed', e); }
     }
-    if (this.vents) {
-      try { this.vents.update(dt, bDistrict, focus.x, focus.z); }
-      catch (e) { console.warn('[bmb] vent audio update failed', e); }
-    }
-    if (this.elevatorAmb) {
-      try { this.elevatorAmb.update(dt, bDistrict); }
-      catch (e) { console.warn('[bmb] elevator ambience update failed', e); }
-    }
     if (this.crowd) {
       try { this.crowd.update(dt, bDistrict, tension); }
       catch (e) { console.warn('[bmb] crowd ambience update failed', e); }
-    }
-    if (this.echoSites) {
-      try { this.echoSites.update(dt, focus.x, focus.z); }
-      catch (e) { console.warn('[bmb] echo sites update failed', e); }
     }
     if (this.batteryCues) {
       try {
@@ -1588,245 +1564,9 @@ export class Game {
         this.batteryCues.update(this.flashlight.battery, charging);
       } catch (e) { console.warn('[bmb] battery cues update failed', e); }
     }
-    if (this.electricPops) {
-      try { this.electricPops.update(dt); }
-      catch (e) { console.warn('[bmb] electric pops update failed', e); }
-    }
     if (this.fanAudio) {
       try { this.fanAudio.update(dt); }
       catch (e) { console.warn('[bmb] fan audio update failed', e); }
-    }
-    if (this.fanSpeedAudio) {
-      try { this.fanSpeedAudio.update(dt); }
-      catch (e) { console.warn('[bmb] fan speed audio update failed', e); }
-    }
-    if (this.cabinetCreaks) {
-      try { this.cabinetCreaks.update(dt, focus.x, focus.z); }
-      catch (e) { console.warn('[bmb] cabinet creaks update failed', e); }
-    }
-    // lore stings: cluster-complete sting when the story arc advances
-    if (this.loreStings && this.story.stage !== this.prevArcStage) {
-      try {
-        if (this.story.stage > this.prevArcStage) this.loreStings.clusterComplete(this.story.stage);
-        this.prevArcStage = this.story.stage;
-      } catch (e) { console.warn('[bmb] lore sting cluster failed', e); }
-    }
-
-    // Heartbeat: a closing watcher (within 8 m) OR unstable reality.
-    // Uses the humans manager proximity data when freshly published,
-    // falling back to the live figures list.
-    try {
-      let hb = 0;
-      const prox = this.humans.proximities;
-      let wd = nearestWatcherDist;
-      if (wd === null && prox.length > 0) {
-        for (const e of prox) {
-          if (e.type !== 'watcher' && e.type !== 'double') continue;
-          wd = wd === null ? e.dist : Math.min(wd, e.dist);
-        }
-      }
-      if (wd !== null && wd < 8) hb = Math.max(0, 1 - wd / 8);
-      else if (this.erosion.stability < 0.3) hb = 0.5;
-      this.audio.setHeartbeat(active ? hb : 0);
-    } catch (e) {
-      console.warn('[bmb] heartbeat failed', e);
-    }
-
-    // WatcherSteps: mirror-steps on whatever floor THEY stand on. Only the
-    // playing state advances them (paused/menu keeps the trail parked).
-    if (this.watcherSteps && active && this.surfaceDetector) {
-      try {
-        const district = this.chunks.districtAtPos(this.player.body.x, this.player.body.z) ?? 0;
-        const surface = this.surfaceDetector.detect(this.player.body.x, this.player.body.z, district);
-        this.watcherSteps.update(dt, nearestWatcherDist, this.player.speed > 0.05, surface);
-      } catch (e) {
-        console.warn('[bmb] watcher steps failed', e);
-      }
-    }
-
-    // beacon transmitter pulse when close
-    if (active && this.story.stage < 4) {
-      let nb = Infinity, nx2 = 0, nz2 = 0;
-      for (const b of this.story.beacons.values()) {
-        if (b.found) continue;
-        const d = Math.hypot(b.x - this.player.body.x, b.z - this.player.body.z);
-        if (d < nb) { nb = d; nx2 = b.x; nz2 = b.z; }
-      }
-      if (isFinite(nb) && nb < 40 && nb > 2.6) {
-        const dx = (nx2 - this.player.body.x) / (nb || 1);
-        const dz = (nz2 - this.player.body.z) / (nb || 1);
-        const pan = Math.max(-1, Math.min(1, dx * Math.cos(this.player.yaw) - dz * Math.sin(this.player.yaw)));
-        this.audio.beaconUpdate(nb, pan);
-      }
-      // Wave B (B-3b): compass points at that same nearest unfound beacon
-      if (this.compass) {
-        try {
-          this.compass.update(this.player.body.x, this.player.body.z, this.player.yaw,
-            this.camera, nx2, nz2, isFinite(nb));
-        } catch (e) { console.warn('[bmb] compass update failed', e); }
-      }
-    } else if (this.compass) {
-      try { this.compass.hide(); }
-      catch (e) { console.warn('[bmb] compass hide failed', e); }
-    }
-
-    const fx2 = this.state === 'menu' ? this.attract.x : this.player.body.x;
-    const fz2 = this.state === 'menu' ? this.attract.z : this.player.body.z;
-    this.dust.update(dt, fx2, fz2);
-    // camera shake: proximity + tension + peak = fear you can feel
-    let shakeAmt = 0;
-    if (active && this.director.tension > 0.3) {
-      let wd = Infinity;
-      for (const f of this.humans.figures) {
-      this.chunks.update(this.player.body.x, this.player.body.z);
-    }
-
-    // ---- Wave B: announce freshly built chunks + per-chunk audio feeds ----
-    {
-      const bwx = this.state === 'menu' ? this.attract.x : this.player.body.x;
-      const bwz = this.state === 'menu' ? this.attract.z : this.player.body.z;
-      try { this.noteBuiltChunks(bwx, bwz); }
-      catch (e) { console.warn('[bmb] chunk announce failed', e); }
-      try { this.refreshChunkAudio(Math.floor(bwx / CHUNK_SIZE), Math.floor(bwz / CHUNK_SIZE)); }
-      catch (e) { console.warn('[bmb] chunk audio feed failed', e); }
-    }
-
-    // fixture list with director overrides (no allocation in the common case)
-    const blackout = this.playtimeSec < this.blackoutUntil;
-    // panels go dark too - emissive swap on the shared fixture material
-    if (blackout !== this.lastBlackoutVisual) {
-      this.lastBlackoutVisual = blackout;
-      this.mats.fixture.emissiveColor = blackout
-        ? new Color3(0.012, 0.012, 0.01)
-        : new Color3(1.0, 0.98, 0.86);
-    }
-    if (blackout && Math.random() < dt * 0.12) {
-      // one distant light fights back
-      const cands = this.chunks.allFixtures().filter((f) => {
-        const d = Math.hypot(f.x - this.player.body.x, f.z - this.player.body.z);
-        return f.alive && d > 22 && d < 60;
-      });
-      if (cands.length) {
-        const pick = cands[Math.floor(Math.random() * cands.length)];
-        const dur = 2 + Math.random() * 5;
-        this.ghostLit.set(pick.x + ',' + pick.z, this.playtimeSec + dur);
-        this.audio.lightCrack();
-        // Wave B (B-1): distant electrical fight-back pop
-        try {
-          const gdx = pick.x - this.player.body.x, gdz = pick.z - this.player.body.z;
-          const glen = Math.hypot(gdx, gdz) || 1;
-          const gyaw = this.player.yaw;
-          this.electricPops?.pop(0.5, Math.max(-1, Math.min(1, (gdx * Math.cos(gyaw) - gdz * Math.sin(gyaw)) / glen)));
-        } catch (e) { console.warn('[bmb] ghost pop failed', e); }
-      }
-    }
-    if (!blackout) this.ghostLit.clear();
-    let fixtures: ReadonlyArray<{ x: number; z: number; flicker: number; alive: boolean }> =
-      this.chunks.allFixtures();
-      } catch (e) {
-        console.warn('[bmb] postfx update failed', e);
-      }
-    }
-
-    // ---- integrated audio/gameplay systems -------------------------------
-    this.ensureAudioIntegrations();
-
-    // PositionalHum: the nearest fixtures each become their own voice.
-    if (this.humAudio) {
-      try {
-        const near = fixtures
-          .filter((f) => f.alive)
-          .map((f) => ({ f, d2: (f.x - focus.x) ** 2 + (f.z - focus.z) ** 2 }))
-          .sort((a, b) => a.d2 - b.d2)
-          .slice(0, 12)
-          .map((e) => ({ x: e.f.x, z: e.f.z }));
-        this.humAudio.setFixtures(near);
-        this.humAudio.update(focus.x, focus.z, focus.yaw);
-      } catch (e) {
-        console.warn('[bmb] positional hum update failed', e);
-      }
-    }
-
-    // Watcher proximity shared by watcher steps + heartbeat.
-    let nearestWatcherDist: number | null = null;
-    for (const fig of this.humans.figures) {
-      if (fig.type !== 'watcher' && fig.type !== 'double') continue;
-      const d = Math.hypot(fig.body.x - focus.x, fig.body.z - focus.z);
-      if (nearestWatcherDist === null || d < nearestWatcherDist) nearestWatcherDist = d;
-    }
-
-    const zoneSample = this.mem.sampleAt(focus.x, focus.z);
-    const zoneKind = zoneSample.kind as number;
-    const tension = this.director.tension;
-
-    // DynamicScore: zone-keyed drone bed + tension cluster.
-    if (this.score) {
-      try {
-        this.score.setState(zoneKind, tension);
-        this.score.update(dt);
-      } catch (e) {
-        console.warn('[bmb] dynamic score failed', e);
-      }
-    }
-
-    // ExteriorBleed: rain tracks storm fronts overhead; tension thins birds.
-    if (this.exterior) {
-      try {
-        const fr = this.weather.front;
-        const overFront = Math.max(0, 1 - Math.hypot(focus.x - fr.cx, focus.z - fr.cz) / Math.max(1, fr.radiusM));
-        this.exterior.update(dt, zoneKind, tension, fr.storm ? fr.strength * overFront : 0);
-      } catch (e) {
-        console.warn('[bmb] exterior bleed failed', e);
-      }
-    }
-
-    // ---- Wave B (B-1): extended ambience pack -----------------------------
-    const bDistrict = this.chunks.districtAtPos(focus.x, focus.z) ?? 0;
-    if (this.doorCreaks) {
-      try { this.doorCreaks.update(dt, tension); }
-      catch (e) { console.warn('[bmb] door creaks update failed', e); }
-    }
-    if (this.groans) {
-      try { this.groans.update(dt, tension); }
-      catch (e) { console.warn('[bmb] structure groans update failed', e); }
-    }
-    if (this.vents) {
-      try { this.vents.update(dt, bDistrict, focus.x, focus.z); }
-      catch (e) { console.warn('[bmb] vent audio update failed', e); }
-    }
-    if (this.elevatorAmb) {
-      try { this.elevatorAmb.update(dt, bDistrict); }
-      catch (e) { console.warn('[bmb] elevator ambience update failed', e); }
-    }
-    if (this.crowd) {
-      try { this.crowd.update(dt, bDistrict, tension); }
-      catch (e) { console.warn('[bmb] crowd ambience update failed', e); }
-    }
-    if (this.echoSites) {
-      try { this.echoSites.update(dt, focus.x, focus.z); }
-      catch (e) { console.warn('[bmb] echo sites update failed', e); }
-    }
-    if (this.batteryCues) {
-      try {
-        const charging = !blackout && this.chunks.nearestFixtureDist(focus.x, focus.z) < 8;
-        this.batteryCues.update(this.flashlight.battery, charging);
-      } catch (e) { console.warn('[bmb] battery cues update failed', e); }
-    }
-    if (this.electricPops) {
-      try { this.electricPops.update(dt); }
-      catch (e) { console.warn('[bmb] electric pops update failed', e); }
-    }
-    if (this.fanAudio) {
-      try { this.fanAudio.update(dt); }
-      catch (e) { console.warn('[bmb] fan audio update failed', e); }
-    }
-    if (this.fanSpeedAudio) {
-      try { this.fanSpeedAudio.update(dt); }
-      catch (e) { console.warn('[bmb] fan speed audio update failed', e); }
-    }
-    if (this.cabinetCreaks) {
-      try { this.cabinetCreaks.update(dt, focus.x, focus.z); }
-      catch (e) { console.warn('[bmb] cabinet creaks update failed', e); }
     }
     // lore stings: cluster-complete sting when the story arc advances
     if (this.loreStings && this.story.stage !== this.prevArcStage) {
@@ -1943,200 +1683,260 @@ export class Game {
     this.hintsTimer -= dt;
     if (active && this.hintsTimer <= 0 && this.hints) {
       this.hintsTimer = 1.0;
-
-
-    this.ui.torchOn = this.flashlight.on;
-    this.ui.tickSubtitles(dt);
-    // Wave B (B-3a): minimap redraw at the live focus pose
-    if (this.minimap) {
-      try {
-        this.minimap.update(fx2, fz2, this.state === 'menu' ? this.camera.rotation.y : this.player.yaw);
-      } catch (e) { console.warn('[bmb] minimap update failed', e); }
-    }
-    // Wave B (B-3c): incoming-front warnings, phase-suppressed during peaks
-    if (this.weatherUi) {
-      try {
-        if (this.director.phase !== this.weatherPhase) {
-          this.weatherPhase = this.director.phase;
-          this.weatherUi.setPhase(this.weatherPhase);
-        }
-        // Wave B (B-3c): nextFront() already speaks WeatherUI's forecast shape
-        this.weatherUi.update(this.weather.nextFront());
-      } catch (e) { console.warn('[bmb] weather ui update failed', e); }
-    }
-    this.objectiveTimer -= dt;
-    if (active && this.objectiveTimer <= 0 && this.story.stage < 4) {
-      this.objectiveTimer = 1.0;
-      this.ui.setObjective(this.story.objectiveText(this.player.body.x, this.player.body.z));
-    }
-    // Wave A (A-2b): throttled ambient difficulty hints from the walls.
-    this.hintsTimer -= dt;
-    if (active && this.hintsTimer <= 0 && this.hints) {
-      this.hintsTimer = 1.0;
       try {
         this.hints.update(1.0, this.humans.getPlayerProfile().cautiousness);
       } catch (e) {
         console.warn('[bmb] difficulty hints failed', e);
       }
     }
+
+    this.ui.updateDebug(dt * 1000, {
+      pos: this.player.body.x.toFixed(1) + ', ' + this.player.body.z.toFixed(1),
+      chunks: this.chunks.loadedCount,
+      built: this.chunks.totalBuilt,
+      buildMs: this.chunks.lastBuildMs.toFixed(1),
+      act: this.scene.getActiveMeshes().length,
+      phase: this.director.describe(),
+      humans: this.humans.count,
+      mem: JSON.stringify(this.mem.stats()),
+      story: 'st' + this.story.stage + '/' + this.story.discoveries,
+      state: this.state,
+      seed: (this.seed >>> 0).toString(16),
+    });
+
+    // expedition log refresh (throttled)
+    this.logTimer -= dt;
+    if (this.logOpen && this.logTimer <= 0) {
+      const s = this.mem.sampleAt(this.player.body.x, this.player.body.z);
+      const memName = MEMORY_NAMES[s.kind];
+      this.ui.setLog(true, [
+        'SECTOR    ' + sectorName(this.seed, this.player.body.x, this.player.body.z),
+        'ELAPSED   ' + Math.floor(this.playtimeSec / 60) + 'm ' + Math.floor(this.playtimeSec % 60) + 's',
+        'SEED      ' + (this.seed >>> 0).toString(16).toUpperCase(),
+        'DISCOVERIES ' + this.story.discoveries + ' · STAGE ' + this.story.stage,
+        'NOTES READ ' + this.notesRead,
+        'ROOMS      ' + this.seenLandmarks.size,
+        'STABILITY ' + Math.round(this.erosion.stability * 100) + '%',
+        'RELOCATIONS ' + this.erosion.relocations,
+        'AIR       ' + (memName ? 'touched by ' + memName : 'neutral') + ' (' + Math.round(s.intensity * 100) + '%)',
+        'PRESENCE  ' + this.humans.count + ' figure(s) registered nearby',
+        '',
+        '[TAB] to close',
+      ]);
+    } else if (!this.logOpen && this.ui.logOpen) {
+      this.ui.setLog(false);
+    }
+
+    if (active && this.playtimeSec - this.lastAutosave > 30) {
+      this.lastAutosave = this.playtimeSec;
+      void this.saveNow();
+    }
+
+    this.scene.render();
     // Wave C (C-4): throttled achievement evaluation from live gameplay state
     this.trackerTimer -= dt;
     if (active && this.trackerTimer <= 0 && this.trackerFeed) {
       this.trackerTimer = 1.0;
       try {
         const tf: TrackerState = {
+          discoveries: this.story.discoveries,
+          notesRead: this.notesRead,
+          landmarksSeen: [...this.seenLandmarks],
+          playtimeSec: this.playtimeSec,
+          completed: this.story.stage >= 4,
+        };
+        this.trackerFeed.feed(tf);
+      } catch (e) {
+        console.warn('[bmb] tracker update failed', e);
+      }
+    }
+    // Wave C (C-8): extended-debrief telemetry accumulation
+    if (active) {
+      if (this.flashlight.on) this.torchLitSec += dt;
+      if (this.director.phase !== this.lastPhaseKey) {
+        this.lastPhaseKey = this.director.phase;
+        this.phaseSessions++;
+      }
+      const dkey = String(this.chunks.districtAtPos(this.player.body.x, this.player.body.z) ?? 0);
+      if (dkey !== this.prevDistrictKey) {
+        this.prevDistrictKey = dkey;
+        this.districtVisitCounts.set(dkey, (this.districtVisitCounts.get(dkey) ?? 0) + 1);
+      }
+    }
+  }
 
 
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
+  private openNote: string | null = null;
+  private notesRead = 0;
+
+  private nearestBattery(): { x: number; z: number } | null {
+    const p = this.chunks.nearestBattery(this.player.body.x, this.player.body.z);
+    return p ? { x: p.x, z: p.z } : null;
+  }
+
+  private handleInteraction(dt: number): void {
+    const pressed = this.interactQueued;
+    this.interactQueued = false;
+    // reading a note swallows input until it is put down
+    if (this.openNote) {
+      this.ui.setPrompt(null);
+      if (this.interactQueued) {
+        this.openNote = null;
+        this.interactQueued = false;
+        this.ui.hideNote();
+      }
+      return;
+    }
+
+    const note = this.chunks.nearestNote(this.player.body.x, this.player.body.z);
+    const battery = this.nearestBattery();
+    let prompt: string | null = null;
+    let beaconTouch = false;
+    for (const b of this.story.beacons.values()) {
+      if (!b.found && Math.hypot(b.x - this.player.body.x, b.z - this.player.body.z) < 2.6) {
+        prompt = b.threshold ? '[E] REACH THE THRESHOLD' : '[E] ACCESS RESEARCH BEACON';
+        beaconTouch = true;
+        break;
+      }
+    }
+    if (!prompt && battery) prompt = '[E] TAKE BATTERY (+35% TORCH)';
+    if (!prompt && note) prompt = '[E] READ NOTE';
+    this.ui.setPrompt(prompt);
+
+    // act only on queued presses while a prompt is showing
+    if (!pressed || !prompt) return;
+
+    const lore = this.story.interact(this.player.body.x, this.player.body.z);
+    if (lore) {
+      this.ui.flashBeacon();
+      // first camp yields the torch: darkness becomes negotiable
+      if (!this.flashlight.has) {
+        this.flashlight.has = true;
+        this.flashlight.battery = 1;
+        setTimeout(() => {
+          if (!this.flashHintShown) {
+            this.flashHintShown = true;
+            this.ui.say('You take the torch from the camp kit. [F]', 5);
+          }
+        }, 2500);
+      }
+      this.ui.toast(lore, 9000);
+      this.director.notifyDiscovery();
+      this.erosion.stability = Math.min(1, this.erosion.stability + 0.25);
+      this.mem.inject(this.player.body.x, this.player.body.z, MemoryKind.PERSONAL, 0.45);
+      if (lore.includes('THRESHOLD')) this.triggerEnding();
+    }
+    // Wave A (A-2a): NoteReread ledger + bleed distortion on re-reads.
+    else if (prompt === '[E] READ NOTE' && note && this.reread) {
+      try {
+        const noteId = 'note:' + Math.round(note.x * 10) + ':' + Math.round(note.z * 10);
+        const firstRead = !this.reread.isRead(noteId);
+        this.reread.markRead(noteId);
+        if (!firstRead) {
+          const res = this.reread.distort(note.text, noteId);
+          if (res.altered) this.ui.showNote(res.text);
+        }
+      } catch (e) {
+        console.warn('[bmb] note reread failed', e);
+      }
+    }
+    // Wave B (B-1i): stage-gated reading sting on any note read
+    else if (prompt === '[E] READ NOTE' && note) {
+      try { this.loreStings?.noteRead(this.story.stage); }
+      catch (e) { console.warn('[bmb] lore sting note read failed', e); }
+    }
+  }
+
+  /** Wave A (A-3a): assemble expedition telemetry for the debrief screen. */
+  private buildExpeditionStats(): ExpeditionStats {
+    let deepestM = Math.hypot(this.player.body.x - SPAWN_X, this.player.body.z - SPAWN_Z);
+    let distanceM = 0;
+    const chunkSet = new Set<string>();
+    const track = (x: number, z: number): void => {
+      deepestM = Math.max(deepestM, Math.hypot(x - SPAWN_X, z - SPAWN_Z));
+      chunkSet.add(Math.floor(x / CHUNK_SIZE) + ':' + Math.floor(z / CHUNK_SIZE));
+    };
+    for (let i = 0; i < this.pathHistory.length; i++) {
+      const p = this.pathHistory[i];
+      track(p.x, p.z);
+      if (i > 0) {
+        const q = this.pathHistory[i - 1];
+        distanceM += Math.hypot(p.x - q.x, p.z - q.z);
+      }
+    }
+    track(this.player.body.x, this.player.body.z);
+    return {
+      seed: this.seed,
+      durationSec: this.playtimeSec,
+      distanceM: Math.round(distanceM),
+      uniqueChunks: chunkSet.size,
+      landmarkNames: [...this.seenLandmarks],
+      notesRead: this.notesRead,
+      batteries: this.consumedBatteries.size,
+      relocations: this.erosion.relocations,
+      phaseTimePct: { calm: 0, build: 0, peak: 0, release: 0 },
+      deepestM: Math.round(deepestM),
+      discoveries: this.story.discoveries,
+    };
+  }
+
+  private triggerEnding(): void {
+    const lines = [
+      'The Threshold opens like an eye that has finally decided to see you.',
+      'Behind you, the corridors fold the carpet back over their tracks.',
+      'Somewhere in the yellow, something practices saying your name —',
+      'it gets one syllable wrong. It will practice until it does not matter.',
+    ];
+    if (this.story.discoveries >= 6) {
+      lines.push('Six beacons or more. You were very interesting indeed. It has already started a better copy of you.');
+    } else if (this.story.discoveries <= 4) {
+      lines.push('You found so little. It will have to guess, and its guesses are enormous.');
+    }
+    if (this.erosion.relocations > 0) {
+      lines.push('You were moved ' + this.erosion.relocations + ' time(s). The version of you that started this expedition did not arrive.');
+    }
+    if (this.notesRead >= 8) {
+      lines.push('You read their words. They know.');
+    }
+    if (this.seenLandmarks.size >= 3) {
+      lines.push('You have seen the rooms it builds.');
+    }
+    if (this.flashlight.has && !this.flashlight.on) {
+      lines.push('You walked in darkness and it respected you for it.');
+    }
+    if (this.playtimeSec < 600) {
+      lines.push('So brief. It barely had time to learn you.');
+    } else if (this.playtimeSec > 3600) {
+      lines.push('So long. It knows you better than you know yourself now.');
+    }
+    lines.push('');
+    lines.push('EXPEDITION COMPLETE — ' + this.story.discoveries + ' beacons contacted · seed ' + (this.seed >>> 0).toString(16));
+    void SaveDB.saveGame(this.captureSlot()).then(() => {});
+    // whiteout beat, then the log
+    document.body.style.transition = 'background 1.2s ease';
+    document.body.style.background = '#efe9d8';
+    setTimeout(() => {
+      document.body.style.transition = '';
+      document.body.style.background = '';
+      this.setState('menu');
+      this.ui.showEnding(lines.filter((l) => l.length > 0), () => {
+        // Wave A (A-3a): expedition debrief over the title screen.
+        if (this.endstats) {
+          try { this.endstats.show(this.buildExpeditionStats()); }
+          catch (e) { console.warn('[bmb] end stats failed', e); }
+          // Wave C (C-8): extended debrief telemetry beside the base rows.
+          try {
+            for (const line of formatExtended(this.buildExtendedStats())) this.ui.say(line, 6);
+          } catch (e) { console.warn('[bmb] extended debrief failed', e); }
+        }
+        this.ui.showTitle(true);
+      });
+    }, 1400);
+    this.input.releaseLock();
+  }
+
+  /** Wave C (C-8): assemble the deeper debrief telemetry snapshot. */
+  private buildExtendedStats(): ExtendedStats {
     const totalSec = Math.max(0.001, this.playtimeSec);
     const districtVisits: Record<string, number> = {};
     for (const [k, v] of this.districtVisitCounts) districtVisits[k] = v;
@@ -2197,5 +1997,11 @@ export class Game {
   /** Wave C (C-5): refresh and open the save/load browser over the pause menu. */
   private async openSaveScreen(): Promise<void> {
     if (!this.saveScreen || !this.checkpointsMgr) return;
-
-
+    try {
+      const slots = await this.checkpointsMgr.listCheckpoints();
+      this.saveScreen.show(slots as unknown as Parameters<SaveScreen['show']>[0]);
+    } catch (e) {
+      console.warn('[bmb] save screen failed', e);
+    }
+  }
+}
