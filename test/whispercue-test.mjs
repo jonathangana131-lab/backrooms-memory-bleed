@@ -126,165 +126,96 @@ check('readMotionReduction reads the bmb-accessibility flag', () => {
     readMotionReduction(
 
 
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
+      stubStorage(new Map([['bmb-accessibility', '{not json']])),
+    ),
+    false,
+    'corrupt JSON reads as unset',
+  );
+  assert.equal(
+    readMotionReduction(
+      stubStorage(new Map([['bmb-accessibility', JSON.stringify({ motionReduction: 'yes' })]])),
+    ),
+    false,
+    'non-boolean flag reads as unset',
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* Fade state machine                                                  */
+/* ------------------------------------------------------------------ */
+
+check('WhisperCueState eases out quadratically across the fade window', () => {
+  const st = new WhisperCueState();
+  assert.equal(st.isActive, false, 'fresh state is idle');
+  st.trigger(0, false); // dead ahead -> north edge only
+  assert.equal(st.isActive, true);
+  assert.ok(st.currentWeights.north > 0 && st.currentWeights.south === 0);
+
+  const f0 = st.update(0, false);
+  assert.ok(Math.abs(f0.north - SHIMMER_PEAK_OPACITY) < 1e-9, 'frame zero is full strength');
+
+  const half = st.update(SHIMMER_FADE_MS / 2, false);
+  assert.ok(half.north > 0 && half.north < SHIMMER_PEAK_OPACITY, 'halfway is mid-fade');
+
+  let last = half;
+  for (let ms = 100; ms <= SHIMMER_FADE_MS; ms += 100) last = st.update(100, false);
+  assert.equal(last.north, 0, 'fully faded once the window elapses');
+  assert.equal(st.isActive, false);
+});
+
+check('reduced-motion snaps dim, holds, then clears instantly', () => {
+  const st = new WhisperCueState();
+  st.trigger(-Math.PI / 2, true); // west edge
+  const dim = SHIMMER_PEAK_OPACITY * REDUCED_EFFECT_SCALE;
+
+  const f0 = st.update(0, true);
+  assert.ok(Math.abs(f0.west - dim) < 1e-9, 'appears at reduced strength immediately');
+  const held = st.update(REDUCED_HOLD_MS - 100, true);
+  assert.ok(Math.abs(held.west - dim) < 1e-9, 'holds statically for the hold window');
+  const off = st.update(200, true);
+  assert.equal(off.west, 0, 'clears instantly when the hold expires');
+});
+
+/* ------------------------------------------------------------------ */
+/* DOM layer                                                           */
+/* ------------------------------------------------------------------ */
+
+/** Minimal document stub tracking children, styles, and removal. */
+function makeStubDocument() {
+  function createElement(tag) {
+    const el = {
+      tagName: tag,
+      className: '',
+      textContent: '',
+      children: [],
+      removed: false,
+      ownerDocument: null,
+      parent: null,
+      styleProps: {},
+      appendChild(child) { this.children.push(child); child.parent = this; return child; },
+      remove() {
+        this.removed = true;
+        if (this.parent) {
+          const i = this.parent.children.indexOf(this);
+          if (i >= 0) this.parent.children.splice(i, 1);
+        }
+      },
+    };
+    el.style = { setProperty: (n, v) => { el.styleProps[n] = v; } };
+    return el;
+  }
+  return { createElement, head: createElement('head') };
+}
+
+function findEdge(layer, name) {
+  return layer.children.find((c) => c.className.endsWith(name));
+}
+
+check('DOM layer paints the nearest edge and fades it', () => {
+  const doc = makeStubDocument();
+  const hud = doc.createElement('hud');
+  hud.ownerDocument = doc;
+  const cue = new WhisperCue(hud);
 
   // Style injected once into head, layer attached to the HUD.
   const styleEl = doc.head.children.find((c) => c.className === 'bmb-whispercue-styles');
@@ -306,8 +237,8 @@ check('readMotionReduction reads the bmb-accessibility flag', () => {
   assert.equal(parseFloat(south.styleProps['opacity']), SHIMMER_PEAK_OPACITY);
   assert.equal(parseFloat(north.styleProps['opacity']), 0);
 
-  // Camera facing west makes that same behind-source read as east.
-  cue.trigger(Math.PI, -Math.PI / 2);
+  // Camera facing east (+PI/2) makes that same behind-source read as east.
+  cue.trigger(Math.PI, Math.PI / 2);
   assert.equal(parseFloat(findEdge(layer, 'east').styleProps['opacity']), SHIMMER_PEAK_OPACITY);
 
   cue.update(0.6);
@@ -325,5 +256,29 @@ check('WhisperCue honors reduced motion from storage at trigger time', () => {
   hud.ownerDocument = doc;
 
   const realStorageDesc = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  globalThis.localStorage = stubStorage(
+    new Map([['bmb-accessibility', JSON.stringify({ motionReduction: true })]]),
+  );
+  try {
+    const cue = new WhisperCue(hud);
+    const layer = hud.children[0];
+    cue.trigger(Math.PI, 0); // behind -> south edge
+    const dim = SHIMMER_PEAK_OPACITY * REDUCED_EFFECT_SCALE;
+    const south = findEdge(layer, 'south');
+    assert.ok(Math.abs(parseFloat(south.styleProps['opacity']) - dim) < 1e-9,
+      'static glow paints at reduced strength, never full');
 
+    cue.update(0.3); // inside the hold window: unchanged
+    assert.ok(Math.abs(parseFloat(south.styleProps['opacity']) - dim) < 1e-9,
+      'no animation while motion reduction holds');
+    cue.update(REDUCED_HOLD_MS / 1000); // past the hold
+    assert.equal(parseFloat(south.styleProps['opacity']), 0,
+      'clears instantly after the hold');
+    cue.dispose();
+  } finally {
+    if (realStorageDesc) Object.defineProperty(globalThis, 'localStorage', realStorageDesc);
+    else delete globalThis.localStorage;
+  }
+});
 
+console.log('\nALL WHISPERCUE TESTS PASSED (' + passed + ' checks)');
