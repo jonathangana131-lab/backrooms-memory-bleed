@@ -14,5 +14,4 @@ class FakeRequest {
 class FakeObjectStore {
   constructor(data, keys, tx) { this.data = data; this.keys = keys; this.tx = tx; }
 
-(Showing lines 3-17 of 71. Use offset=18 to continue.)
 

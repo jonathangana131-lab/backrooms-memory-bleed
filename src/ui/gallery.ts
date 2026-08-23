@@ -263,7 +263,6 @@ export class PhotoGallery {
     this.viewer = null;
   }
 
-(Showing lines 225-264 of 556. Use offset=265 to continue.)
 
 
   /* ------------------------- public actions ----------------------- */
@@ -401,7 +400,6 @@ export class PhotoGallery {
     this.objectUrls = [];
     if (this.viewerUrl !== null) {
 
-(Showing lines 355-399 of 556. Use offset=400 to continue.)
 
       try { URL.revokeObjectURL(this.viewerUrl); } catch { /* ignore */ }
       this.viewerUrl = null;

@@ -14,6 +14,8 @@ import { generateLayout, type Box2, type ChunkLayout, type LightFixture, type Si
 import { getLayoutPool } from '../workers/layoutPool';
 import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
+
+
 import type { GraffitiInstance, PropInstance } from './architect';
 import { hash2i } from '../core/rng';
 import type { MaterialSet } from '../gfx/materials';
@@ -59,7 +61,6 @@ export class ChunkManager {
 
   key(cx: number, cz: number): string {
 
-(Showing lines 1-60 of 483. Use offset=61 to continue.)
 
     return cx + ',' + cz;
   }
@@ -190,7 +191,6 @@ export class ChunkManager {
       [0.96, 0.94, 0.88],  // maze: warm-dim
       [1.04, 1.02, 0.95],  // open office: brighter
 
-(Showing lines 181-188 of 483. Use offset=189 to continue.)
 
     } catch (e) { console.warn('[bmb] contact shadows unavailable', e); }
     const geo = buildChunkGeometry(layout);
@@ -201,7 +201,6 @@ export class ChunkManager {
       [1.00, 0.97, 0.90],  // honeycomb
       [0.92, 0.95, 1.00],  // corridor grid: cool
 
-(Showing lines 183-196 of 489. Use offset=197 to continue.)
 
 
     const meshes: Mesh[] = [];
@@ -367,7 +366,6 @@ export class ChunkManager {
     for (const c of this.chunks.values()) {
       for (const n of c.layout.notes) {
 
-(Showing lines 280-359 of 483. Use offset=360 to continue.)
 
         const d = Math.hypot(n.x - x, n.z - z);
         if (d < 1.7 && d < bd) { bd = d; best = n; }
@@ -464,37 +462,5 @@ export class ChunkManager {
     for (const c of this.chunks.values()) {
       for (const l of c.layout.lights) {
         if (!l.alive) continue;
-
-(Showing lines 415-454 of 489. Use offset=455 to continue.)
-
-    const len = Math.hypot(dx, dz) || 1;
-    // camera-right vector for Babylon yaw is (cos, -sin)
-    const pan = Math.max(-1, Math.min(1, (dx * Math.cos(yaw) + dz * -Math.sin(yaw)) / len));
-    return { d: Math.sqrt(bd), pan };
-  }
-
-  get loadedCount(): number { return this.chunks.size; }
-
-  layoutAt(cx: number, cz: number): ChunkLayout | undefined {
-    return this.chunks.get(this.key(cx, cz))?.layout;
-  }
-
-  /** District of the chunk containing a position (if built). */
-  districtAtPos(x: number, z: number): number | null {
-    const c = this.chunks.get(this.key(worldToChunk(x), worldToChunk(z)));
-    return c ? (c.layout.district as number) : null;
-  }
-
-  /** deterministic sparse selection used by story beacon placement */
-  chunkSalt(cx: number, cz: number): number {
-    return hash2i(cx, cz, this.seed ^ BEACON_SALT);
-  }
-
-  cellKey(x: number, z: number): number {
-    return hash2i(Math.floor(x / CELL), Math.floor(z / CELL), this.seed);
-  }
-
-  static CELLS = CHUNK_CELLS;
-}
 
 

@@ -253,7 +253,6 @@ export class WetReflections {
 
   /** Sine-wave y-offset on reflection vertices: fake water movement. */
 
-(Showing lines 195-254 of 279. Use offset=255 to continue.)
 
     const dirZ = 0.70710678;
     for (let ei = 0; ei < this.entries.length; ei++) {

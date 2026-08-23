@@ -129,5 +129,4 @@ function buildSpec(variant: number): PoolTextureSpec {
           g(0.5, 0.63, 0.26, 1.95, 0.50, [[0.0, 0.95], [0.55, 0.55], [1.0, 0.0]]),
           g(0.5, 0.5, 0.12, 2.4, 0.9, [[0.0, 0.35], [1.0, 0.0]]),
 
-(Showing lines 1-130 of 280. Use offset=131 to continue.)
 

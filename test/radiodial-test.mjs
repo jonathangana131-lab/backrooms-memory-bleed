@@ -69,5 +69,4 @@ check('two brands declared HALCYON and REGENCY',
     Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 &&
     width > height && width % 4 === 0 && height % 4 === 0,
 
-(Showing lines 40-109 of 254. Use offset=110 to continue.)
 

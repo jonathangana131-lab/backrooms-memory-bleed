@@ -198,7 +198,6 @@ try {
         }
         return u || m;
 
-(Showing lines 178-199 of 317. Use offset=200 to continue.)
 
     await page.waitForTimeout(900); // allow budgeted builds
 
@@ -207,7 +206,6 @@ try {
       const p = window.__PERF__;
       // Collect garbage before sampling: chunk builds allocate short-lived
 
-(Showing lines 198-205 of 300. Use offset=206 to continue.)
 
   for (let hop = 1; hop <= HOPS; hop++) {
     await page.evaluate((hop) => {
@@ -248,7 +246,6 @@ try {
     });
     s.hop = hop;
 
-(Showing lines 234-243 of 317. Use offset=244 to continue.)
 
       p.exterior.calls = 0; p.exterior.ms = 0;
       p.minimap.updates = 0; p.minimap.ms = 0; p.minimap.marks = 0;
@@ -289,7 +286,6 @@ try {
     gameIdentityStable: identityStable,
     bmbSystemWarnings: [...bmbWarns],
 
-(Showing lines 270-281 of 300. Use offset=282 to continue.)
 
     exteriorBleed: aggTimed((s) => ({ calls: s.exterior.calls, msTotal: s.exterior.avgMs * s.exterior.calls })),
     minimapUpdate: aggTimed((s) => ({ calls: s.minimap.updates, msTotal: s.minimap.avgMs * s.minimap.updates })),

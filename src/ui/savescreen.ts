@@ -518,7 +518,6 @@ export class SaveScreen {
     if (next === this.selected) return;
     this.selected = next;
 
-(Showing lines 460-519 of 525. Use offset=520 to continue.)
 
     this.armedDelete = -1;
     this.setStatus('');

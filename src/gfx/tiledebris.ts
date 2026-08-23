@@ -29,7 +29,6 @@ import type { QuadInstance } from './cornerao';
 export const TILE_DEBRIS_SALT = 0x71eb;
 
 
-(Showing lines 1-30 of 290. Use offset=31 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -263,16 +262,13 @@ export class TileDebris {
       zs[2] += 0.003;
     }
 
-    // keep every corner inside this chunk (+small margin): crack seeds can
-    // sit across a border, and their clamped anchor still scatters
-    const span = CHUNK_CELLS * CELL;
-    const loX = cx * span - 0.25;
-    const hiX = (cx + 1) * span + 0.25;
-    const loZ = cz * span - 0.25;
-    const hiZ = (cz + 1) * span + 0.25;
-
-(Showing lines 90-269 of 302. Use offset=270 to continue.)
-
+    // --- tints: light ceramic, brighter than the dark floor -----------------
+    const tone = rng.range(1.04, 1.24);
+    const duller = rng.chance(0.22) ? 0.82 : 1.0; // occasional grubbier shard
+    const tr = clamp(tone * duller * rng.range(0.99, 1.03), 0.7, 1.35);
+    const tg = clamp(tone * duller * rng.range(0.99, 1.03), 0.7, 1.35);
+    const tb = clamp(tone * duller * rng.range(0.96, 1.0), 0.7, 1.35);
+    const tints: number[] = [];
     for (let k = 0; k < 4; k++) {
       const n = rng.range(-0.05, 0.05); // per-corner catch-the-light noise
       tints.push(

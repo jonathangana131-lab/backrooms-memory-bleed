@@ -79,5 +79,4 @@ const BASE = crack(12.5, -7.25, Math.PI / 2, 1);
       const x = q.positions[i * 3], y = q.positions[i * 3 + 1], z = q.positions[i * 3 + 2];
       const along = x * n[0] + y * n[1] + z * n[2];
 
-(Showing lines 1-80 of 184. Use offset=81 to continue.)
 

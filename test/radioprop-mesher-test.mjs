@@ -29,5 +29,4 @@
   const ctxC = new RecordingCtx();
   new RadioPropMesh().emit(PLACE, record(new Sink()).fn, { seed: 'radio:99:99', dialCtx: ctxC });
 
-(Showing lines 185-214 of 288. Use offset=215 to continue.)
 

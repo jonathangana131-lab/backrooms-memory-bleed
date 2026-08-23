@@ -79,5 +79,4 @@ test('no slide while crouching below sprint speed (walk pace)', () => {
   const h = makeSlide();
   h.step({ sprinting: false, crouching: true, speed: SLIDE_TRIGGER_SPEED - 0.5 });
 
-(Showing lines 1-80 of 223. Use offset=81 to continue.)
 

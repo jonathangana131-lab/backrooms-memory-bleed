@@ -14,5 +14,4 @@ const constructions = [
 for (const c of constructions) {
   const idx = src.indexOf(c);
 
-(Showing lines 95-109 of 144. Use offset=110 to continue.)
 

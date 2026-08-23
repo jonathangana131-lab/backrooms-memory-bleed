@@ -49,5 +49,4 @@ function transpile(relSrc, outRel) {
   }).outputText;
   // Node ESM needs explicit extensions on relative and @babylonjs subpath imports.
 
-(Showing lines 1-50 of 305. Use offset=51 to continue.)
 

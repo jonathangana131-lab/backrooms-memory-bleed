@@ -357,7 +357,6 @@ export class Journal {
       if (this.readerVisible()) this.closeReader();
       else this.close();
 
-(Showing lines 345-358 of 615. Use offset=359 to continue.)
 
     }
   };

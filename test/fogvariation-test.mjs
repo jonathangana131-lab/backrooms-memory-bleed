@@ -86,7 +86,6 @@ const {
 {
   const fv = createFogVariation();
 
-(Showing lines 28-87 of 179. Use offset=88 to continue.)
 
   const S = CHUNK_SIZE; // 30
   // Puddle at world (35, -25) => chunk (1, -1)

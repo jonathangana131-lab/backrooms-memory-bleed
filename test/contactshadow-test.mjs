@@ -79,5 +79,4 @@ for (let t = 0; t <= 1.0001; t += 0.01) {
   const a = sampleShadowAlpha(Math.min(t, 1));
   if (a > prev + EPS) monotonic = false;
 
-(Showing lines 1-80 of 222. Use offset=81 to continue.)
 

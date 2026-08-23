@@ -79,5 +79,4 @@ try {
   // --- 3. rotation variety (~half counterclockwise) ----------------------------
   {
 
-(Showing lines 1-80 of 146. Use offset=81 to continue.)
 

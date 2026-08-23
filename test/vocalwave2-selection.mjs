@@ -31,7 +31,6 @@
   ok(!hasComma, 'interior punctuation stripped before corruption');
   // word count never grows beyond source (doubling reuses prefix, tail may drop)
 
-(Showing lines 118-149 of 183. Use offset=150 to continue.)
 
   let grewLonger = false;
   for (let s = 0; s < 100; s++) {
@@ -64,5 +63,4 @@ try {
   console.error('  FAIL behavioural section could not run:', err && err.stack || err);
   failures++;
 
-(Showing lines 150-179 of 183. Use offset=180 to continue.)
 

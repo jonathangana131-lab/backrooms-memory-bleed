@@ -38,9 +38,6 @@ export interface GazeOptions {
 }
 
 /** Full lock inside this distance (metres). */
-
-(Showing lines 1-40 of 222. Use offset=41 to continue.)
-
 const LOCK_RANGE = 5;
 /** Gentle-bias distance: tracking is weakest-but-present here. */
 const FADE_START = 20;
@@ -125,106 +122,5 @@ export class GazeController {
 
   /** Current head yaw offset relative to body yaw, radians. */
   get headYawOffset(): number {
-
-(Showing lines 15-124 of 222. Use offset=125 to continue.)
-
-    return this.currentOffset;
-  }
-
-  /** Snapshot of internal state, useful for tuning and tests. */
-  get state(): GazeState {
-    return {
-      distance: this.lastDistance,
-      inPeripheral: this.inPeripheral,
-      weight: this.weight,
-      mutualGazeTime: this.mutualTime,
-      averting: this.averting,
-    };
-  }
-
-  /**
-   * Advance one frame.
-   *
-   * @param dt        timestep, seconds
-   * @param px pz     player position
-   * @param fx fz     figure position
-   * @param bodyYaw   figure body yaw (world yaw = atan2(dx, dz) convention)
-   * @returns head yaw offset in radians to apply to the head node
-   */
-  update(dt: number, px: number, pz: number, fx: number, fz: number, bodyYaw: number): number {
-    const dx = px - fx;
-    const dz = pz - fz;
-    const dist = Math.hypot(dx, dz);
-    this.lastDistance = dist;
-
-    const toPlayerYaw = dist > 1e-6 ? Math.atan2(dx, dz) : bodyYaw;
-    const rawOffset = wrapAngle(toPlayerYaw - bodyYaw);
-
-    // --- peripheral gate: angle between body forward and player direction ---
-    // inside the cone  <=>  cos(angle) >= cos(half-angle)
-    this.inPeripheral = dist > 1e-6 && Math.cos(rawOffset) >= this.peripheralCos - 1e-9;
-
-    // --- proximity weight: full at LOCK_RANGE, FAR_BIAS at FADE_START, 0 past FADE_END ---
-    let targetWeight: number;
-    if (dist <= LOCK_RANGE) {
-      targetWeight = 1;
-    } else if (dist < FADE_START) {
-      const t = (dist - LOCK_RANGE) / (FADE_START - LOCK_RANGE);
-      targetWeight = 1 + (FAR_BIAS - 1) * t;
-    } else if (dist < FADE_END) {
-      const t = (dist - FADE_START) / (FADE_END - FADE_START);
-      targetWeight = FAR_BIAS * (1 - t);
-    } else {
-      targetWeight = 0;
-    }
-    // outside the cone the head relaxes entirely
-    if (!this.inPeripheral) targetWeight = 0;
-
-    this.weight += (targetWeight - this.weight) * clamp(dt * 8, 0, 1);
-
-    // --- mutual-gaze bookkeeping (watchers are exempt from averting) ---
-    if (!this.watcher && this.inPeripheral && dist <= LOCK_RANGE && !this.averting) {
-      // close enough for eye contact and already oriented -> mutual gaze
-      this.mutualTime += dt;
-      if (this.mutualTime >= this.nextAvertAt) {
-        this.averting = true;
-        this.avertUntil = this.rng.range(1, 3);
-        // glance off to one side, well clear of the player
-        const side = this.rng.next() < 0.5 ? -1 : 1;
-        this.avertTarget = side * this.rng.range(0.7, 1.1) * this.neckClamp;
-      }
-    }
-    if (this.averting) {
-      this.avertUntil -= dt;
-      if (this.avertUntil <= 0 || !this.inPeripheral || dist > LOCK_RANGE * 2) {
-        this.averting = false;
-        this.mutualTime = 0;
-        this.nextAvertAt = this.rng.range(2, 4);
-      }
-    } else if (!this.inPeripheral || dist > LOCK_RANGE) {
-      // broken contact drains the clock
-      this.mutualTime = Math.max(0, this.mutualTime - dt * 2);
-    }
-
-    // --- desired offset ---
-    let desired: number;
-    if (this.averting) {
-      desired = this.avertTarget;
-    } else {
-      const clamped = clamp(rawOffset, -this.neckClamp, this.neckClamp);
-      desired = clamped * this.weight;
-    }
-
-    // --- smooth motion: proportional ease capped at maxTurnRate ---
-    const delta = wrapAngle(desired - this.currentOffset);
-    const ease = clamp(Math.abs(delta) * 6, 0, 1);
-    let step = delta * ease;
-    const maxStep = this.maxTurnRate * dt;
-    if (Math.abs(step) > maxStep) step = Math.sign(step) * maxStep;
-    this.currentOffset = wrapAngle(this.currentOffset + step);
-
-    return this.currentOffset;
-  }
-}
 
 

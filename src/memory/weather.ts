@@ -98,7 +98,6 @@ export interface WeatherForecast {
 }
 
 
-(Showing lines 88-99 of 369. Use offset=100 to continue.)
 
 interface FrontPlan {
   kind: MemoryKind;
@@ -301,7 +300,6 @@ export class MemoryWeather {
     // blend in the fading echo of the departed front
     const res = this.residual;
 
-(Showing lines 100-299 of 369. Use offset=300 to continue.)
 
     if (res) {
       const a = res.strength * Math.max(0, 1 - res.age / RESIDUAL_SECS) * RESIDUAL_WEIGHT;

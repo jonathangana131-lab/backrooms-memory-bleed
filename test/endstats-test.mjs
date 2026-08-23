@@ -119,5 +119,4 @@ check('formatStatLines lists every tracked stat in order', () => {
 });
 
 
-(Showing lines 1-120 of 235. Use offset=121 to continue.)
 

@@ -39,5 +39,4 @@ export class BoundaryCue {
   private accentCount = 0;
   private lastAccentDistrict = -1;
 
-(Showing lines 1-40 of 177. Use offset=41 to continue.)
 

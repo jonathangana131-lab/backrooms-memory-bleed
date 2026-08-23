@@ -59,5 +59,4 @@ ok(s.p95 >= s.min && s.p95 <= s.max, 'p95 within [min,max]');
 mark('string.start');
 const ms2 = measure('string.start', 'string.start');
 
-(Showing lines 1-60 of 104. Use offset=61 to continue.)
 

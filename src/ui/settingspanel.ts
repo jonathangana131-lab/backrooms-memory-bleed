@@ -698,7 +698,6 @@ export function buildSettingsPanel(
   /* ----------------------------------------------------- styles ----- */
 
 
-(Showing lines 655-699 of 732. Use offset=700 to continue.)
 
   try {
     const head = doc.head;

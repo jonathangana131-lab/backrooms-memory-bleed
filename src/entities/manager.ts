@@ -278,7 +278,6 @@ export class HumanManager {
     for (const f of this.figures) f.dispose();
     this.figures.length = 0;
 
-(Showing lines 190-279 of 297. Use offset=280 to continue.)
 
     this.spawnMemory.clear();
     this.lastPx = null;

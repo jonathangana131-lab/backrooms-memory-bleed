@@ -364,7 +364,6 @@ export class Tracker {
   }
 }
 
-(Showing lines 338-365 of 373. Use offset=366 to continue.)
 
 
 function injectStyles(): void {

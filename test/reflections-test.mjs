@@ -14,5 +14,4 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;
 
-(Showing lines 1-15 of 189. Use offset=16 to continue.)
 

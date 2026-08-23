@@ -78,9 +78,6 @@ async function behaviour() {
   // Node's strip-types loader needs explicit extensions, so register a
   // resolve hook that retries with '.ts' appended when plain resolution fails.
   let hooksRegistered = false;
-
-(Showing lines 1-80 of 222. Use offset=81 to continue.)
-
   try {
     const { registerHooks } = await import('node:module');
     registerHooks({

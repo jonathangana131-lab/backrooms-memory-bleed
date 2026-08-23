@@ -58,9 +58,6 @@ export class StorySystem {
     return b;
   }
 
-
-(Showing lines 1-60 of 225. Use offset=61 to continue.)
-
   /** Guaranteed first beacon near spawn ring and the far threshold. */
   anchors(): { first: BeaconState; threshold: BeaconState } {
     const rng = new RNG(this.seed ^ 0xa11ce);
@@ -121,113 +118,5 @@ export class StorySystem {
         this.buildMesh(key, b);
       }
       const m = this.meshes.get(key);
-      if (m) {
-        if (d > view + 15 || b.found) {
-          m.mesh.dispose();
-          this.meshes.delete(key);
-          continue;
-        }
-        const pulse = 0.65 + 0.35 * Math.sin(time * (b.threshold ? 1.4 : 2.6));
-        m.mat.emissiveColor = b.threshold
-          ? new Color3(0.9 * pulse, 0.9 * pulse, 0.85 * pulse)
-          : new Color3(0.25 * pulse, 0.75 * pulse, 0.78 * pulse);
-      }
-    }
-  }
-
-  private buildMesh(key: string, b: BeaconState): void {
-    const h = b.threshold ? 3.2 : 2.3;
-    const pole = MeshBuilder.CreateBox('beaconPole', { width: 0.14, height: h, depth: 0.14 }, this.scene);
-    pole.position.set(b.x, h / 2, b.z);
-    const lamp = MeshBuilder.CreateBox('beaconLamp', { width: 0.34, height: 0.22, depth: 0.34 }, this.scene);
-    lamp.position.set(b.x, h + 0.11, b.z);
-    const mat = new StandardMaterial('beaconMat', this.scene);
-    mat.emissiveColor = new Color3(0.3, 0.8, 0.8);
-    mat.diffuseColor = new Color3(0.1, 0.12, 0.12);
-    mat.disableLighting = true;
-    lamp.material = mat;
-    pole.material = mat;
-    pole.isPickable = false;
-    lamp.isPickable = false;
-    // combine visually via one entry
-    lamp.parent = pole;
-    this.meshes.set(key, { mesh: pole, mat });
-  }
-
-  /** Returns lore text when the player interacts with a nearby beacon. */
-  interact(px: number, pz: number): string | null {
-    for (const [key, b] of this.beacons) {
-      if (Math.hypot(b.x - px, b.z - pz) > 2.6 || b.found) continue;
-      b.found = true;
-      const m = this.meshes.get(key);
-      if (m) { m.mesh.dispose(); this.meshes.delete(key); }
-
-(Showing lines 111-160 of 225. Use offset=161 to continue.)
-
-      if (b.threshold) {
-        this.stage = 4;
-        this.endingTriggered = true;
-        return 'THE THRESHOLD ACCEPTS YOU.';
-      }
-      const lore = LORE[Math.min(this.discoveries, LORE.length - 1)];
-      this.discoveries++;
-      if (this.stage === 0) this.stage = 1;
-      if (this.discoveries >= 3 && this.stage < 3) this.stage = 3;
-      return lore;
-    }
-    return null;
-  }
-
-  /** Nearest unfound beacon distance from a position. */
-  targetDistance(px: number, pz: number): number {
-    let bd = Infinity;
-    for (const b of this.beacons.values()) {
-      if (b.found) continue;
-      const d = Math.hypot(b.x - px, b.z - pz);
-      if (d < bd) bd = d;
-    }
-    return bd;
-  }
-
-  objectiveText(px = 0, pz = 0): string {
-    const hint = isFinite(this.targetDistance(px, pz)) ? ' signal ~' + Math.round(this.targetDistance(px, pz)) + 'm' : '';
-    switch (this.stage) {
-      case 0:
-        return 'OBJECTIVE — A research beacon is transmitting somewhere out there. Follow the cyan light.' + hint;
-      case 1:
-      case 2:
-        return 'OBJECTIVE — Find more research beacons (' + this.discoveries + '/3).' + hint;
-      case 3:
-        return 'OBJECTIVE — The Threshold is open. Reach the white light.' + hint;
-      case 4:
-        return 'EXPEDITION COMPLETE';
-      default:
-        return '';
-    }
-  }
-
-  serialize(): { stage: number; discoveries: number; found: [number, number, boolean][] } {
-    const found: [number, number, boolean][] = [];
-    for (const b of this.beacons.values()) if (b.found) found.push([b.cx, b.cz, b.threshold]);
-    return { stage: this.stage, discoveries: this.discoveries, found };
-  }
-
-  static deserialize(scene: Scene, seed: number, data: ReturnType<StorySystem['serialize']> | null): StorySystem {
-    const s = new StorySystem(scene, seed);
-    if (!data) return s;
-    s.stage = data.stage ?? 0;
-    s.discoveries = data.discoveries ?? 0;
-    for (const [cx, cz, thr] of data.found ?? []) {
-      const key = cx + ',' + cz;
-      s.beacons.set(key, { cx, cz, x: (cx * 12 + 6) * CELL, z: (cz * 12 + 6) * CELL, threshold: thr, found: true });
-    }
-    return s;
-  }
-
-  clearMeshes(): void {
-    for (const m of this.meshes.values()) m.mesh.dispose();
-    this.meshes.clear();
-  }
-}
 
 

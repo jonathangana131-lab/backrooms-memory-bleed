@@ -39,5 +39,4 @@ for (let round = 1; round <= 5; round++) {
   await page.evaluate(() => (window).__BMB__.game.continueGame());
   await page.waitForTimeout(1200);
 
-(Showing lines 1-40 of 56. Use offset=41 to continue.)
 

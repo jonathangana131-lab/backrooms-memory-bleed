@@ -29,7 +29,6 @@ const browser = await chromium.launch({
   headless: true,
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--disable-dev-shm-usage'],
 
-(Showing lines 1-30 of 110. Use offset=31 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -75,7 +74,6 @@ const results = await page.evaluate(async () => {
   }
 
 
-(Showing lines 44-73 of 131. Use offset=74 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -99,7 +97,6 @@ const results = await page.evaluate(async () => {
   fx.dispose();
   out.grainRemoved = !document.getElementById('bmb-grain-overlay');
 
-(Showing lines 80-94 of 110. Use offset=95 to continue.)
 
   fx.dispose();
   out.grainRemoved = !document.getElementById('bmb-grain-overlay');

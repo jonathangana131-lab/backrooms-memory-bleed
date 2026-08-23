@@ -29,5 +29,4 @@
   // Peak gain: the loudest linear ramp target.
   const peaks = g.gain.events.filter((e) => e[0] === 'lin').map((e) => e[1]);
 
-(Showing lines 130-159 of 217. Use offset=160 to continue.)
 

@@ -88,7 +88,6 @@ export class Flashlight {
     }
 
 
-(Showing lines 76-89 of 127. Use offset=90 to continue.)
 
       this.light.position.set(0, -50, 0);
       this.beam.setEnabled(false);

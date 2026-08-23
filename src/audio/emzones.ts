@@ -44,5 +44,4 @@ const SIGMA = EM_RADIUS * 0.45;
 /** Zone core stays this fraction inside its chunk so it reads as "a spot". */
 const CORE_MIN = 0.3;
 
-(Showing lines 1-45 of 193. Use offset=46 to continue.)
 

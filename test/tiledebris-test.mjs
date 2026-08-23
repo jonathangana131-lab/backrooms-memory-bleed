@@ -39,5 +39,4 @@ function clusterSizes(quads) {
     const qs = td.generateForChunk(cx, cz, 4, bigSeeds.map((s, k) => ({
       x: cx * CHUNK + 4 + k * 3.5, z: cz * CHUNK + 4 + k * 2.9, rotY: (k % 4) * Math.PI / 2,
 
-(Showing lines 130-169 of 285. Use offset=170 to continue.)
 

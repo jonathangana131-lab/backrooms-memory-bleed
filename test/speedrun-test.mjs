@@ -14,7 +14,6 @@
   assert.equal(seen[0].time, r.time);
   assert.equal(typeof r.isPB, 'boolean');
 
-(Showing lines 155-169 of 378. Use offset=170 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -145,5 +144,4 @@ check('T key toggles overlay visibility via document listener', () => {
   assert.equal(setup.handle.isVisible(), true);
   doc.dispatch('keydown', { key: 'T', target: { tagName: 'DIV' } });
 
-(Showing lines 266-297 of 379. Use offset=298 to continue.)
 

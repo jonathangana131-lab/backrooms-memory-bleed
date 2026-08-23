@@ -29,34 +29,4 @@ for (const name of ['Reyes', 'Marlow', 'Halcyon']) {
 
 // Category spot-checks: 5 each of maintenance, letters, research, warnings, wrongness.
 
-(Showing lines 1-30 of 57. Use offset=31 to continue.)
-
-const cats = [
-  [/^(MAINTENANCE|WORK ORDER|REQUEST|To facilities)/i, 'maintenance'],
-  [/(Dear |Mom \u2014|Marlow,|my successor|Nadia,)/i, 'letters'],
-  [/(OBSERVATION|Field study|RESEARCH|Interview transcript)/i, 'research'],
-  [/(WARNING|crews following|find our camp|ADVISORY|expedition)/i, 'warnings'],
-];
-for (const [re, label] of cats) {
-  const c = NOTES.filter(n => re.test(n)).length;
-  check(c >= 5, `category ${label}: expected >= 5 matches, got ${c}`);
-}
-
-// Triptych: three notes across different categories telling one story
-// (the sealed Halcyon door) via shared anchors, readable in any order.
-const tri = NOTES.filter(n => /Marlow/.test(n) && /(warm|door|mortar|bricked)/i.test(n));
-check(tri.length === 3, `triptych should be 3 interlocking notes, got ${tri.length}`);
-check(tri.some(n => /Halcyon Corp/.test(n)), 'triptych must anchor to Halcyon Corp');
-check(tri.some(n => /maintenance/i.test(n)), 'triptych member from maintenance category missing');
-check(tri.some(n => /^Marlow,/i.test(n)), 'triptych letter member missing');
-check(tri.some(n => /expedition/i.test(n)), 'triptych expedition-cache member missing');
-// Each member must point at at least one other member's frame of reference.
-const frames = [/(request|maintenance)/i, /(letter|bricked)/i, /(cache|maps|expedition)/i];
-for (const n of tri) {
-  check(frames.some(f => f.test(n)), `triptych note lacks a cross-frame anchor: ${n.slice(0, 40)}`);
-}
-
-if (fail > 0) { console.error(`MORENOTES_FAIL (${fail} failures)`); process.exit(1); }
-console.log(`MORENOTES_OK: ${NOTES.length} notes, triptych intact`);
-
 

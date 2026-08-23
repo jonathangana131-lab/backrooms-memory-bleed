@@ -119,5 +119,4 @@ export class DoorFrameMesher {
     this.orientation = o;
     return this;
 
-(Showing lines 1-120 of 166. Use offset=121 to continue.)
 

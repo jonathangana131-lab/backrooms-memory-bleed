@@ -39,5 +39,4 @@
 }
 
 
-(Showing lines 50-89 of 137. Use offset=90 to continue.)
 

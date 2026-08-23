@@ -59,5 +59,4 @@ try {
       // stains/graffiti band
       stains: [{ x: 101, z: -46, r: 0.8 }],
 
-(Showing lines 1-60 of 181. Use offset=61 to continue.)
 

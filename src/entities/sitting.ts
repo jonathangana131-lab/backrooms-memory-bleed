@@ -39,5 +39,4 @@ export interface SittingFigureState {
 export interface SittingResult {
   /** True from the moment the figure starts settling into the seat. */
 
-(Showing lines 1-40 of 274. Use offset=41 to continue.)
 

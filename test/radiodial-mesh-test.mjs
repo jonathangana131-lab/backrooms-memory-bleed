@@ -39,7 +39,6 @@ writeFileSync(
 const STUB_SRC = [
   'export class Color3 {',
 
-(Showing lines 20-59 of 235. Use offset=60 to continue.)
 
   '  constructor(r, g, b) { this.r = r; this.g = g; this.b = b; }',
   '}',
@@ -87,5 +86,4 @@ const { createDialTexture, createDialLitTexture, createDialMaterial } = mod;
 const {
   dialCanvasSize, dialBrandFor, dialRestFreq, needleXFor, DIAL_BRANDS,
 
-(Showing lines 55-104 of 232. Use offset=105 to continue.)
 

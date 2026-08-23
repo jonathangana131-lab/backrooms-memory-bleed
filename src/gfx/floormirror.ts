@@ -9,5 +9,4 @@ export const DARK_RIM_FRACTION = 0.4;
 /** Radial sectors in the main disc fan (jitter picks within the range). */
 export const MIN_SECTORS = 6;
 
-(Showing lines 44-53 of 255. Use offset=54 to continue.)
 

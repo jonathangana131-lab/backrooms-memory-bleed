@@ -13,7 +13,6 @@
   assert.equal(GracefulDespawn.shouldInstantDespawn(fwd(0), cam, { x: 0, z: -10 }), true);
   console.log('PASS gaze cone');
 
-(Showing lines 16-29 of 133. Use offset=30 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -30,5 +29,4 @@
   assert.equal(GracefulDespawn.shouldInstantDespawn(fwd(0), { x: 1, z: 1 }, { x: 1, z: 1 }), false);
   console.log('PASS threshold + geometry');
 
-(Showing lines 32-43 of 133. Use offset=44 to continue.)
 

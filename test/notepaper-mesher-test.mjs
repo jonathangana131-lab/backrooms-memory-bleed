@@ -119,5 +119,4 @@ const { NotePaperMesher, wrapText } = mesherMod;
   check('no words lost or changed', joined.replace(/\s+/g, ' ').trim() === 'aaaa bb cccc');
 }
 
-(Showing lines 1-120 of 241. Use offset=121 to continue.)
 

@@ -15,7 +15,6 @@
   ok(fired === 0, 'no sustained breach before the 10s window has ~full coverage');
 }
 
-(Showing lines 196-211 of 267. Use offset=212 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -44,7 +43,6 @@
   ok(!pb.report().heapBreach, 'heap flag clears once growth recedes');
 }
 
-(Showing lines 218-237 of 267. Use offset=238 to continue.)
 
 
 // ---- 8. misc API contract ----------------------------------------------------
@@ -65,7 +63,6 @@
     'report exposes all four section snapshots');
 
 
-(Showing lines 238-255 of 267. Use offset=256 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]

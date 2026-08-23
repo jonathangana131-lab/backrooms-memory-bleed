@@ -24,5 +24,4 @@ function parsePool(text, name) {
   if (body === null) throw new Error('pool not found: ' + name);
   return (body.match(/'((?:\\.|[^'\\])*)'/g) || []).map(decode);
 
-(Showing lines 1-25 of 103. Use offset=26 to continue.)
 

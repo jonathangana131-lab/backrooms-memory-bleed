@@ -19,7 +19,6 @@ check('nearestFixtureIndex picks the closest fixture to the spawn point', () => 
 
 function freshIntro(storage, slot = 'auto') {
 
-(Showing lines 118-137 of 255. Use offset=138 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -54,5 +53,4 @@ check('slots are independent: another save still gets its own intro', () => {
 });
 
 
-(Showing lines 150-169 of 255. Use offset=170 to continue.)
 

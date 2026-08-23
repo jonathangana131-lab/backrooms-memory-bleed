@@ -49,5 +49,4 @@ const dlg = await page.evaluate(() => {
 await page.waitForTimeout(800);
 const dlgState = await page.evaluate(() => {
 
-(Showing lines 1-50 of 56. Use offset=51 to continue.)
 

@@ -39,5 +39,4 @@ ok(/659\.25/.test(src) && /880/.test(src), 'E5 and A5 present');
 // ---- part 2: behavioural (needs Node >= 22.6 type stripping) ----
 console.log('[behavioural]');
 
-(Showing lines 1-40 of 214. Use offset=41 to continue.)
 

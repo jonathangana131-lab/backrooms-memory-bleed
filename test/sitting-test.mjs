@@ -24,7 +24,6 @@ const STEP = 1 / 30;
 function drive(b, state, seconds) {
   const frames = [];
 
-(Showing lines 1-25 of 263. Use offset=26 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -131,7 +130,6 @@ function drive(b, state, seconds) {
   const seats = Array.from({ length: 3 }, (_, i) => ({ x: 2 + i * 2, z: 0, yaw: 0 }));
   const figures = [];
 
-(Showing lines 90-129 of 264. Use offset=130 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]

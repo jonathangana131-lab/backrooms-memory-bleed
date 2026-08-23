@@ -59,5 +59,4 @@ check('torch icon is an SVG flashlight', /<svg viewBox="0 0 24 24"/.test(src));
 check('icon dims when torch off (lit class toggle)', /torchIcon\.classList\.toggle\('lit',\s*this\.torchOn && v > 0\)/.test(src));
 check('lit state carries glow filter', /drop-shadow/.test(src));
 
-(Showing lines 1-60 of 66. Use offset=61 to continue.)
 

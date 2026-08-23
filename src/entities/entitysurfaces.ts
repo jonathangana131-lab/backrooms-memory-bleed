@@ -44,5 +44,4 @@ const DISTRICT_SURFACE: Record<number, 'carpet' | 'tile' | 'metal'> = {
   [DISTRICT_OPEN_OFFICE]: 'tile',
   [DISTRICT_HONEYCOMB]: 'tile',
 
-(Showing lines 1-45 of 120. Use offset=46 to continue.)
 

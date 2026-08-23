@@ -59,5 +59,4 @@ function makeRig(keys = new Set()) {
   player.teleport(0, 6, Math.PI);
   return { player, camera, keys };
 
-(Showing lines 1-60 of 219. Use offset=61 to continue.)
 

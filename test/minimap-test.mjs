@@ -59,5 +59,4 @@ check('public toggle() method', /toggle\(\): void/.test(src));
 check('toggle flips display block/none', /visible \? 'block' : 'none'/.test(src));
 
 
-(Showing lines 1-60 of 61. Use offset=61 to continue.)
 

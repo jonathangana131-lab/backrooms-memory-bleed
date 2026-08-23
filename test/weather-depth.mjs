@@ -13,5 +13,4 @@
   const sc = { kind: 0, intensity: 0.2 };
   w.apply(sc, w.front.cx, w.front.cz, 'corridor');     // corridor
 
-(Showing lines 88-101 of 175. Use offset=102 to continue.)
 

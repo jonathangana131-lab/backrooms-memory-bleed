@@ -79,5 +79,4 @@ for (const b of BEATS) {
   const text = step(sb, 91, { playtimeSec: 400, notesRead: 8, discoveries: 2, landmarksSeen: new Set(['a', 'b']) });
   check('a beat fires when new conditions hold after cooldown', typeof text === 'string');
 
-(Showing lines 1-80 of 132. Use offset=81 to continue.)
 

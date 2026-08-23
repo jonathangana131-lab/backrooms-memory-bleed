@@ -39,5 +39,4 @@ export class BatteryCues {
   private fullAnnounced = false;
   /** True after stop(); every cue becomes a no-op. */
 
-(Showing lines 1-40 of 145. Use offset=41 to continue.)
 

@@ -56,7 +56,6 @@ export interface FixtureRef {
 // ---- materials ---------------------------------------------------------------
 
 
-(Showing lines 44-57 of 552. Use offset=58 to continue.)
 
 function roachMat(scene: Scene): StandardMaterial {
   const existing = scene.getMaterialByName('roachMat') as StandardMaterial | null;

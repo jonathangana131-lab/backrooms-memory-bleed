@@ -74,7 +74,6 @@ const result = await esbuild.build({
       });
     },
 
-(Showing lines 70-75 of 188. Use offset=76 to continue.)
 
   }],
 });

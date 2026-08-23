@@ -19,5 +19,4 @@
   assert.equal(idA, noteIdFor('same text', 10, 20));
   assert.notEqual(idA, noteIdFor('same text', 10.5, 20));
 
-(Showing lines 15-34 of 86. Use offset=35 to continue.)
 

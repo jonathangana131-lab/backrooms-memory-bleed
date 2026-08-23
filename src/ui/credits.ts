@@ -49,7 +49,6 @@
   }
 
 
-(Showing lines 330-379 of 445. Use offset=380 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]

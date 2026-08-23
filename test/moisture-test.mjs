@@ -39,5 +39,4 @@ emit('src/core/rng.ts', 'core/rng.mjs');
 const mod = await import(pathToFileURL(path.join(tmp, 'gfx', 'moisture.mjs')).href);
 const {
 
-(Showing lines 1-40 of 187. Use offset=41 to continue.)
 

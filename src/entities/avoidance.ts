@@ -39,5 +39,4 @@ const CHECK_RANGE = 8;
 /** Weight of the desired direction in the steering blend. */
 const WEIGHT_DESIRED = 0.6;
 
-(Showing lines 1-40 of 154. Use offset=41 to continue.)
 

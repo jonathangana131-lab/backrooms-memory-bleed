@@ -199,5 +199,4 @@ export class WallWear {
         const alphaBase = 0.10 + traffic * 0.12 + doorProximity * 0.06;
         const alphaJit = ((hash2i(wx - i, wz + i * 29, SALT_FACE) % 100) / 100) * 0.06;
 
-(Showing lines 1-200 of 256. Use offset=201 to continue.)
 

@@ -149,5 +149,4 @@ export class HorrorDirector {
    * PHENOMENON — Breathing Walls.
    * During peak phase the registered walls subtly expand/contract:
 
-(Showing lines 1-150 of 299. Use offset=151 to continue.)
 

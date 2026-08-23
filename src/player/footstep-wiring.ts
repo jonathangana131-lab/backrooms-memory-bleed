@@ -11,5 +11,4 @@
     this.footsteps.play(surface, sprinting);
     this.lastStepMs = nowMs;
 
-(Showing lines 50-61 of 79. Use offset=62 to continue.)
 

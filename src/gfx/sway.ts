@@ -89,5 +89,4 @@ export class FixtureSway {
   /**
    * Start swaying a hanging fixture. `light` is the pooled PointLight that
 
-(Showing lines 1-90 of 200. Use offset=91 to continue.)
 

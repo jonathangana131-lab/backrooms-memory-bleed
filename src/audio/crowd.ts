@@ -119,5 +119,4 @@ export class CrowdAmbience {
   /** Silence everything and release nodes; the instance will not restart. */
   stop(): void {
 
-(Showing lines 1-120 of 277. Use offset=121 to continue.)
 

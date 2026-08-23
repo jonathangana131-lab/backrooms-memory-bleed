@@ -39,5 +39,4 @@ export interface FadeMaterial {
   /** Optional display name, echoed into the clone's name. */
   name?: string;
 
-(Showing lines 1-40 of 140. Use offset=41 to continue.)
 

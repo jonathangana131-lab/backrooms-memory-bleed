@@ -39,5 +39,4 @@ interface ToneSpec {
   readonly type: OscillatorType;
   /** frequency in Hz */
 
-(Showing lines 1-40 of 194. Use offset=41 to continue.)
 

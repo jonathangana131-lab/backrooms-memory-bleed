@@ -9,7 +9,6 @@ import { strict as assert } from 'node:assert';
 class FakeCtx {
   constructor(canvas) { this.canvas = canvas; this.ops = []; }
 
-(Showing lines 1-10 of 212. Use offset=11 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -43,7 +42,6 @@ function fireWhiteout() { observerCallback([], null); }
 globalThis.__BMB__ = undefined;
 
 
-(Showing lines 24-41 of 212. Use offset=42 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -74,7 +72,6 @@ check('stamp line contains marker, seed and ISO-ish date', () => {
   const line = formatStampLine(3735928559, new Date(2026, 7, 23));
   assert.match(line, /THRESHOLD CROSSED/);
 
-(Showing lines 60-69 of 212. Use offset=70 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -129,5 +126,4 @@ check('compositing degrades to null on missing context or zero size', () => {
 
 check('blobFromFrame resolves null when toBlob throws', async () => {
 
-(Showing lines 108-121 of 211. Use offset=122 to continue.)
 

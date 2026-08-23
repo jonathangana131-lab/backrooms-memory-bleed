@@ -39,5 +39,4 @@ check('district constants match world/constants values', () => {
 check('MAZE and CORRIDOR_GRID default to carpet', () => {
   const d = new SurfaceDetector();
 
-(Showing lines 1-40 of 217. Use offset=41 to continue.)
 

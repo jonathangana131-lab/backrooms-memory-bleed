@@ -9,5 +9,4 @@
         warbleRate: u(9, 13),
         warbleDepth: u(1, 3),
 
-(Showing lines 130-139 of 461. Use offset=140 to continue.)
 

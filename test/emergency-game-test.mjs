@@ -69,5 +69,4 @@ check('beginRun resets the emergency wiring in try/catch', resetIdx !== -1);
 check('reset lives inside beginRun', beginRunIdx !== -1 && resetIdx > beginRunIdx);
 const pulseIdx = gameSrc.indexOf('blackoutPulse: (sec)', Math.max(resetIdx, 0));
 
-(Showing lines 1-70 of 168. Use offset=71 to continue.)
 

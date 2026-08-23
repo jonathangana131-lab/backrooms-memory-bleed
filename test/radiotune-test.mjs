@@ -79,5 +79,4 @@ check('pool mixes coordinates, corridor warnings, personal mail', () => {
 /* ------------------------------------------------------------------ */
 
 
-(Showing lines 100-179 of 419. Use offset=180 to continue.)
 

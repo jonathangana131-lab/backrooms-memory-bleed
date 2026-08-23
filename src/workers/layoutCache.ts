@@ -14,7 +14,6 @@
       warn("put(): structured-clone round-trip mismatch, skipping cache write");
       return;
 
-(Showing lines 205-219 of 377. Use offset=220 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]

@@ -59,5 +59,4 @@ await test('createCheckpoint rejects invalid names without storing', async () =>
 await test('listCheckpoints sorts newest first and reports discoveries', async () => {
   const m = new CheckpointManager();
 
-(Showing lines 150-209 of 367. Use offset=210 to continue.)
 

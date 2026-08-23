@@ -68,7 +68,6 @@ export interface PosterPlacement {
 }
 
 
-(Showing lines 50-69 of 613. Use offset=70 to continue.)
 
 export interface AgingProfile {
   /** Overall ink opacity multiplier applied to every paint op. */
@@ -181,7 +180,6 @@ export function getPostersForChunk(
     }
   };
 
-(Showing lines 100-179 of 613. Use offset=180 to continue.)
 
 
   const bx = cx * N;
@@ -244,7 +242,6 @@ export function getPostersForChunk(
 
 /** Minimal 2D-context surface paintPoster needs (real canvas or test stub). */
 
-(Showing lines 180-239 of 613. Use offset=240 to continue.)
 
 export interface PosterCtx {
   save(): void;

@@ -32,7 +32,6 @@ export const FanMeshVar = {
     switch (style) {
       case 'plain': return plainHub(tint);
 
-(Showing lines 228-257 of 298. Use offset=258 to continue.)
 
       case 'stacked': return stackedHub(tint);
       default: return fail('hub style', style);
@@ -57,5 +56,4 @@ export const FanMeshVar = {
  * fan's world offset inside its own addBox closure (mirroring how props
  * pass p.x/p.z through). Optional per-box tint hooks mirror the mesher's
 
-(Showing lines 225-279 of 298. Use offset=280 to continue.)
 

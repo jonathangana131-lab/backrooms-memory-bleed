@@ -93,7 +93,6 @@ function makeShim() {
           dbs.set('bmb', db);
           req.result = db; // real IDB sets result before upgrade callbacks
 
-(Showing lines 65-94 of 229. Use offset=95 to continue.)
 
           if (req.onupgradeneeded) req.onupgradeneeded({ target: req });
           req._ok(db);

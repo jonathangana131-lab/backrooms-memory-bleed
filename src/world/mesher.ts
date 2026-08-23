@@ -118,6 +118,8 @@ function addProp(g: ChunkGeometry, p: PropInstance): void {
       box(0.3, 0.48, 0.98, 1.98);
       break;
     case 'bedframe':
+
+
       box(0, 0.28, 1.0, 2.0);
       break;
     case 'locker':
@@ -128,6 +130,8 @@ function addProp(g: ChunkGeometry, p: PropInstance): void {
       box(0, 0.8, 0.5, 1.6);
       break;
     case 'bench':
+
+
       box(0.43, 0.51, 1.7, 0.48);
       break;
     case 'planter':
@@ -218,9 +222,6 @@ function newArray(): MeshArrays {
 }
 
 /**
-
-(Showing lines 1-220 of 946. Use offset=221 to continue.)
-
  * Fill a vertex-color channel with a per-chunk tint multiplier.
  * Districts read at slightly different temperatures without new materials.
  */
@@ -320,6 +321,8 @@ function addFloor(g: ChunkGeometry, cx: number, cz: number): void {
   for (let lz = 0; lz < N; lz++) {
     for (let lx = 0; lx < N; lx++) {
       const x0 = bx + lx * CELL, z0 = bz + lz * CELL;
+
+
       const x1 = x0 + CELL, z1 = z0 + CELL;
       quad(f,
         [x0, 0, z1], [x1, 0, z1], [x1, 0, z0], [x0, 0, z0],
@@ -330,6 +333,8 @@ function addFloor(g: ChunkGeometry, cx: number, cz: number): void {
         [x0 * CARPET_SCALE, z0 * CARPET_SCALE]);
       jitterCell(f, bx + lx, bz + lz, 0.05);
     }
+
+
   }
 }
 
@@ -350,6 +355,8 @@ function addFloorWear(g: ChunkGeometry, layout: ChunkLayout): void {
       if (hash2i(wx, wz, 4242) % 100 >= 55) continue;
       const cxw = (wx + 0.5) * CELL + ((hash2i(wx, wz, 91) % 60) / 100 - 0.3);
       const czw = (wz + 0.5) * CELL + ((hash2i(wx, wz, 92) % 60) / 100 - 0.3);
+
+
       const rBase = 0.45 + ((wx * 3 + wz * 7 + hash2i(wx, wz, 93)) % 40) / 100;
       // irregular pentagon fan around the patch center
       const pts: [number, number][] = [];
@@ -668,14 +675,8 @@ function addFixtures(g: ChunkGeometry, layout: ChunkLayout): void {
       [1, 0, 0], [0, 0], [1, 0], [1, 1], [0, 1]);
   };
 
-
-(Showing lines 298-667 of 946. Use offset=668 to continue.)
-
   // twin-tube fixture: two narrow emissive strips + dark housings
   const emitTubes = (f: MeshArrays, l: { x: number; z: number }) => {
-
-(Showing lines 540-669 of 946. Use offset=670 to continue.)
-
     const y = WALL_H - 0.06;
     for (const s of [-1, 1]) {
       quad(f,
@@ -720,7 +721,6 @@ function addFixtures(g: ChunkGeometry, layout: ChunkLayout): void {
 function addCeilingStains(g: ChunkGeometry, layout: ChunkLayout): void {
   const s = g.stains;
 
-(Showing lines 643-712 of 960. Use offset=713 to continue.)
 
   for (const st of layout.stains) {
     const y = WALL_H - 0.004;
@@ -928,6 +928,20 @@ export function buildChunkGeometry(
       }
     }
   }
+  // contact shadows: full-corner quads generated at build time
+  if (layout.shadowQuads) {
+    for (const q of layout.shadowQuads) {
+      const p = q.positions;
+      g.debris.positions.push(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11]);
+      g.debris.normals.push(q.normal[0], q.normal[1], q.normal[2], q.normal[0], q.normal[1], q.normal[2], q.normal[0], q.normal[1], q.normal[2], q.normal[0], q.normal[1], q.normal[2]);
+      g.debris.uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+      const t = q.tints;
+      if (!g.debris.colors) g.debris.colors = [];
+      for (let v = 0; v < 4; v++) g.debris.colors.push(t[v*3], t[v*3+1], t[v*3+2], 1);
+      const bi = g.debris.indices.length;
+      g.debris.indices.push(bi, bi+1, bi+2, bi, bi+2, bi+3);
+    }
+  }
   // LOD 1+: notes and landmark dressing quads are skipped too
   if (lod < 1) {
     addNotes(g, layout);
@@ -942,22 +956,6 @@ export function buildChunkGeometry(
     addCeilingStains(g, layout);
   }
   // vertex-budget debug aid: one console line per 50 chunks built
-  lodChunksBuilt++;
-  const verts = totalVerts(g);
-  lodVertsBuiltTotal += verts;
-  if (lod > 0) lodVertsSkippedTotal += estimateSkippedVerts(layout, lod);
-  if (lodChunksBuilt % 50 === 0) {
-    const full = lodVertsBuiltTotal + lodVertsSkippedTotal;
-    const pct = full > 0 ? ((lodVertsSkippedTotal / full) * 100).toFixed(1) : '0.0';
-    console.log(
-      `[lod] ${lodChunksBuilt} chunks built: ${lodVertsBuiltTotal} verts emitted, ` +
-      `~${lodVertsSkippedTotal} skipped by distance LOD (~${pct}% reduction)`);
-  }
-  return g;
-}
-type ChunkGeometryInput = import('./architect').ChunkLayout;
-
-
   lodChunksBuilt++;
   const verts = totalVerts(g);
   lodVertsBuiltTotal += verts;

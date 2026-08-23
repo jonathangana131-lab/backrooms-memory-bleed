@@ -15,5 +15,4 @@ test('distance envelope rides each step record', () => {
   const cut = new WatcherSteps(null, null);
   run(cut, 4, 2.9, true); // inside 3 m: silence before the encounter
 
-(Showing lines 128-143 of 180. Use offset=144 to continue.)
 

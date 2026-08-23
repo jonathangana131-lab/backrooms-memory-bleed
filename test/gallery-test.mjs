@@ -15,7 +15,6 @@ const fakeIndexedDB = {
     const fresh = !db;
     if (!db) { db = new FakeDB(name); dbs.set(name, db); }
 
-(Showing lines 138-153 of 308. Use offset=154 to continue.)
 
 // [unrecovered line]
 // [unrecovered line]
@@ -130,5 +129,4 @@ check('export-href-blob-url', !!anchor && String(anchor.href).startsWith('blob:'
 
 // 6. D deletes the selected photo
 
-(Showing lines 252-265 of 310. Use offset=266 to continue.)
 

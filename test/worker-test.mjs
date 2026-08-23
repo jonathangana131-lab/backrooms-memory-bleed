@@ -59,5 +59,4 @@ async function main() {
     entryPoints: [path.join(root, 'src/workers/layout.worker.ts')],
     bundle: true,
 
-(Showing lines 1-60 of 172. Use offset=61 to continue.)
 
