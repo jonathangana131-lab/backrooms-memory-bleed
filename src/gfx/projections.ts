@@ -1,3 +1,29 @@
+import { hash32 } from '../core/rng';
+import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { Constants } from '@babylonjs/core/Engines/constants';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import type { Scene } from '@babylonjs/core/scene';
+
+/** One wall-text placement consumed by makeProjectionMesh. */
+export interface ProjectionPlacement {
+  /** World X of the wall edge carrying the text. */
+  x: number;
+  /** World Z of the wall edge carrying the text. */
+  z: number;
+  /** Yaw facing into the open corridor side (radians). */
+  rotY: number;
+  /** The projected line itself. */
+  text: string;
+}
+
+/** Height of the projected quad above the floor, in meters. */
+export const PROJECTION_Y = 1.55;
+
+/** Distance the quad floats off its wall along the facing normal, in meters. */
+export const PROJECTION_OFFSET = 0.02;
 
 export type ProjectionMesh = Mesh & { setFlicker(tMs: number): void };
 
