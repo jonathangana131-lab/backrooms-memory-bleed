@@ -60,45 +60,41 @@ function settle(g, seconds, px, pz, fx, fz, bodyYaw) {
   const pos = (dist) => [Math.sin(50 * DEG) * dist, Math.cos(50 * DEG) * dist];
 
 
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
+  // full lock inside ~5 m
+  const gNear = new GazeController();
+  settle(gNear, 3, ...pos(3), 0, 0, 0);
+  assert.ok(gNear.state.weight > 0.95, 'close player locks the gaze fully');
+
+  // mid-fade: tracking weakens but stays meaningful
+  const gMid = new GazeController();
+  const offMid = settle(gMid, 4, ...pos(12), 0, 0, 0);
+  assert.ok(gMid.state.weight > 0.3 && gMid.state.weight < 0.8,
+    'mid-distance weight sits in the fade band, got ' + gMid.state.weight.toFixed(3));
+  // offset tracks the weighted target angle (50 deg off-axis, inside the clamp)
+  assert.ok(Math.abs(offMid - rawAt(50, 12) * gMid.state.weight) < 0.05,
+    'offset equals raw angle scaled by weight');
+
+  // gentle bias at the fade edge
+  const gFar = new GazeController();
+  settle(gFar, 6, ...pos(20), 0, 0, 0);
+  assert.ok(gFar.state.weight > 0.05 && gFar.state.weight < 0.35,
+    'far bias is weak-but-present, got ' + gFar.state.weight.toFixed(3));
+
+  // beyond FADE_END the head does not track at all
+  const gOut = new GazeController();
+  settle(gOut, 6, ...pos(30), 0, 0, 0);
+  assert.ok(gOut.state.weight < 0.01, 'tracking dies beyond the fade end');
+  console.log('PASS proximity weight');
+}
+
+// --- 4. watcher stare vs glance-away ---
+{
+  // watchers hold unbroken eye contact: 6 s of close mutual gaze without flinch
+  const w = new GazeController({ watcher: true });
+  settle(w, 6, 0, 3, 0, 0, 0);
+  assert.ok(!w.state.averting, 'a watcher never glances away');
+  // only non-watchers run the mutual-gaze clock; watchers are exempt from it
+  assert.ok(w.state.mutualGazeTime === 0, 'watcher is exempt from the gaze clock');
   assert.ok(w.state.weight > 0.95, 'watcher stays locked');
 
   // non-watchers across seeds: first aversion lands within 2-4s of contact
@@ -113,8 +109,14 @@ function settle(g, seconds, px, pz, fx, fz, bodyYaw) {
     assert.ok(!isNaN(firstAvert), 'seed ' + seed + ': non-watcher must glance away');
     assert.ok(firstAvert >= 2 - 1e-9 && firstAvert <= 4 + 1e-9,
       'seed ' + seed + ': first aversion at ' + firstAvert.toFixed(2) + 's, want 2-4s');
-    // during aversion the head points well clear of the player
-    assert.ok(Math.abs(g.headYawOffset) > 0.4, 'averted gaze must leave the player');
+    // during aversion the head points well clear of the player; the 90 deg/s
+    // cap needs a few frames to travel there from a settled straight-ahead pose
+    let cleared = false;
+    for (let f = 0; f < Math.round(2 / STEP) && g.state.averting; f++) {
+      g.update(STEP, 0, 3, 0, 0, 0);
+      if (Math.abs(g.headYawOffset) > 0.4) { cleared = true; break; }
+    }
+    assert.ok(cleared, 'seed ' + seed + ': averted gaze must leave the player');
   }
 
   // after looking away it comes back
@@ -137,7 +139,42 @@ function settle(g, seconds, px, pz, fx, fz, bodyYaw) {
   // teleport the player to +80 deg off-axis at 3m
   const px = Math.sin(80 * DEG) * 3, pz = Math.cos(80 * DEG) * 3;
   const maxStep = 90 * DEG * STEP;
-  let prev = before, totalMoved = 0;
+  let prev = before, totalMoved = 0, worst = 0;
   const frames = Math.round(4 / STEP);
+  for (let i = 0; i < frames; i++) {
+    const cur = g.update(STEP, px, pz, 0, 0, 0);
+    const moved = Math.abs(cur - prev);
+    if (moved > worst) worst = moved;
+    totalMoved += moved;
+    prev = cur;
+  }
+  // whatever happens, no frame may snap past the turn-rate cap
+  assert.ok(worst <= maxStep * (1 + 1e-9),
+    'per-frame turn exceeded the cap: ' + (worst / STEP * 180 / Math.PI).toFixed(1) + ' deg/s');
+  // +80 deg is outside the +/-60 deg cone: tracking dies out entirely -- only a
+  // brief transient remains while the old proximity weight drains away
+  assert.ok(Math.abs(prev) < 1 * DEG,
+    'head must relax off an out-of-cone player, got ' + (prev * 180 / Math.PI).toFixed(3) + ' deg');
+
+  // same rate limit on a real traversal: jump INSIDE the cone to +55 deg at 3 m
+  // (watcher, so glance-away never interrupts the measurement)
+  const g2 = new GazeController({ watcher: true });
+  settle(g2, 2, 0, 10, 0, 0, 0);
+  const px2 = Math.sin(55 * DEG) * 3, pz2 = Math.cos(55 * DEG) * 3;
+  let prev2 = g2.headYawOffset, worst2 = 0;
+  for (let i = 0; i < frames; i++) {
+    const cur = g2.update(STEP, px2, pz2, 0, 0, 0);
+    worst2 = Math.max(worst2, Math.abs(cur - prev2));
+    prev2 = cur;
+  }
+  assert.ok(worst2 <= maxStep * (1 + 1e-9),
+    'traversal exceeded the cap: ' + (worst2 / STEP * 180 / Math.PI).toFixed(1) + ' deg/s');
+  assert.ok(Math.abs(prev2 - 55 * DEG) < 0.02,
+    'head must arrive at the player despite the cap, got '
+      + (prev2 * 180 / Math.PI).toFixed(2) + ' deg, want ~55');
+  console.log('PASS rate-limited smoothing');
+}
+
+console.log('\nALL gaze tests passed.');
 
 
