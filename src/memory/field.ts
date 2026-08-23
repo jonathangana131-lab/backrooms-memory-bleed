@@ -44,9 +44,17 @@ export function regionKeyOf(x: number, z: number): string {
   return Math.floor(x / REGION_SIZE) + ',' + Math.floor(z / REGION_SIZE);
 }
 
-
-
 const SECTOR_LETTERS = 'KMRVTSHDWQN';
+
+/** Stable human-readable sector name for a position, e.g. "SECTOR K-7". */
+export function sectorName(seed: number, x: number, z: number): string {
+  const gx = Math.floor(x / (REGION_SIZE * 4));
+  const gz = Math.floor(z / (REGION_SIZE * 4));
+  const h = hash2i(gx, gz, seed ^ 0x5ec70);
+  return 'SECTOR ' + SECTOR_LETTERS[h % SECTOR_LETTERS.length] + '-' + ((h % 19) + 1);
+}
+
+function baseKindAt(seed: number, x: number, z: number): MemoryKind {
   const n = fbm2(x * 0.008, z * 0.008, 3, 2, 0.6, seed ^ 0x5eed);
   const m = fbm2(x * 0.033, z * 0.033, 2, 2, 0.5, seed ^ 0xbeef);
   let idx: number;
