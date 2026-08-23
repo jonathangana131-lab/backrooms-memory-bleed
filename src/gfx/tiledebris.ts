@@ -1,3 +1,91 @@
+/**
+ * TileDebris -- broken floor-tile fragments clustered at wall-floor corners.
+ *
+ * Wherever a wall crack has split the glazing, tiles shed shards: small,
+ * flat, triangular-to-irregular quads lying proud of the carpet in tight
+ * scatter patterns (3-8 fragments per cluster). Clusters spawn
+ * preferentially beside wall cracks -- callers pass the chunk's
+ * CrackInstance anchors as seeds -- plus sparse ambient clusters keyed by
+ * district, densest in STORAGE back rooms and CORRIDOR_GRID halls whose
+ * baseboards take the most abuse.
+ *
+ * Visual spec: LIGHT quads. The mesher's floor is dark; each fragment
+ * carries bright tint multipliers (the pale ceramic of an original tile)
+ * with slight per-corner noise so shards catch the flashlight differently.
+ * Output uses CornerAO's QuadInstance decal pattern (positions + normal +
+ * per-corner RGB multipliers), so it drops straight into quad() on the
+ * debris material group plus a tintVerts pass -- no new materials.
+ *
+ * DETERMINISM
+ * Everything is hash/RNG driven from (seed, chunk, district, crackSeeds):
+ * identical inputs always rebuild byte-identical quads, in any chunk
+ * order, in workers or tests. No Math.random, no engine dependency.
+ */
+import { CELL, CHUNK_CELLS, District } from '../world/constants';
+import { hash3i, RNG } from '../core/rng';
+import type { QuadInstance } from './cornerao';
+
+/** Private salt so tile-debris hashes never correlate with other features. */
+export const TILE_DEBRIS_SALT = 0x71eb;
+
+/** Height above the carpet where shard quads sit (above CRACK_Y = 0.004). */
+export const TILE_DEBRIS_Y = 0.006;
+
+/** Fragment count range per cluster: tight scatter, never a single shard. */
+export const FRAGMENTS_MIN = 3;
+export const FRAGMENTS_MAX = 8;
+
+/** Scatter radius around a cluster anchor, in meters. */
+export const CLUSTER_RADIUS = 0.45;
+
+/** Hard cap on emitted quads per chunk (safety valve, mirrors floorcracks). */
+export const MAX_QUADS_PER_CHUNK = 128;
+
+/** Crack-seeded cluster slots evaluated per chunk before ambient slots. */
+export const MAX_CRACK_CLUSTERS = 6;
+
+/** Chance (percent) that one crack seed hosts a debris cluster. */
+export const CRACK_CLUSTER_CHANCE_PCT = 55;
+
+/** Ambient district clusters evaluated per chunk regardless of cracks. */
+export const AMBIENT_SLOTS = 6;
+
+/** Per-slot activation chance keyed by District ordinal (densest STORAGE). */
+export const DISTRICT_DEBRIS_CHANCE: readonly number[] = [
+  0.10, // MAZE
+  0.04, // OPEN_OFFICE -- pristine open floors
+  0.08, // HONEYCOMB
+  0.18, // CORRIDOR_GRID -- heavy footfall
+  0.30, // STORAGE -- abused back rooms
+];
+
+/**
+ * One wall-crack anchor a caller forwards as cluster bait. Shape-compatible
+ * subset of cracks.ts CrackInstance ({ x, z, rotY, stage }); only finite
+ * coordinates are honored, and rotY stays optional.
+ */
+export interface TileDebrisSeed {
+  x: number;
+  z: number;
+  /** Wall-face rotation in radians when the caller knows it. */
+  rotY?: number;
+}
+
+/** Deterministic hash-range: uniform float in [min, max) from chunk keys. */
+function range(min: number, max: number, cx: number, cz: number, k: number, salt: number): number {
+  return min + (hash3i(cx, cz, k, salt) % 65536) / 65536 * (max - min);
+}
+
+/** Clamp v into [lo, hi]. */
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * Stateless generator: construct once per session (or per worker), then
+ * call generateForChunk for any chunk in any order - output depends only
+ * on the constructor seed and the arguments.
+ *
  * Integrate-ready for the mesher: for each returned q, call
  * quad(debris, cornerA..cornerD, [0,1,0], ...standard uv quartet), then
  * multiply the four fresh vertices' color channels by q.tints.
@@ -181,6 +269,18 @@ export class TileDebris {
 
 
     for (let k = 0; k < 4; k++) {
+      xs[k] = clamp(xs[k], loX, hiX);
+      zs[k] = clamp(zs[k], loZ, hiZ);
+    }
+
+    // --- tints: light ceramic, brighter than the dark floor -----------------
+    const tone = rng.range(1.04, 1.24);
+    const duller = rng.chance(0.22) ? 0.82 : 1.0; // occasional grubbier shard
+    const tr = clamp(tone * duller * rng.range(0.99, 1.03), 0.7, 1.35);
+    const tg = clamp(tone * duller * rng.range(0.99, 1.03), 0.7, 1.35);
+    const tb = clamp(tone * duller * rng.range(0.96, 1.0), 0.7, 1.35);
+    const tints: number[] = [];
+    for (let k = 0; k < 4; k++) {
       const n = rng.range(-0.05, 0.05); // per-corner catch-the-light noise
       tints.push(
         clamp(tr + n, 0.65, 1.4),
@@ -201,5 +301,3 @@ export class TileDebris {
     };
   }
 }
-
-
