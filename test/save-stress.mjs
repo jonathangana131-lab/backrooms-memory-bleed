@@ -40,3 +40,22 @@ for (let round = 1; round <= 5; round++) {
   await page.waitForTimeout(1200);
 
 
+  const ok = await page.evaluate((r2) => {
+    const g = (window).__BMB__.game;
+    // position survived (any axis naming: read back via the same teleport axes)
+    const p = g.player;
+    const px = p.x ?? p.position?.x;
+    const py = p.z ?? p.position?.z ?? p.y ?? p.position?.y;
+    const posOk = Math.abs(px - r2 * 10) < 2 && Math.abs(py - -r2 * 5) < 2;
+    const flashOk = !g.flashlight || (g.flashlight.has === true);
+    return posOk && flashOk && g.consumedBatteries.has('9:9:' + r2)
+      && g.seenLandmarks.has('CHAPEL');
+  }, round);
+  if (!ok) allOk = false;
+  console.log('round ' + round + ': ' + (ok ? 'state intact' : 'STATE CORRUPT'));
+}
+
+await browser.close();
+if (allOk && pageErrs === 0) console.log('ALL SAVE STRESS ROUNDS INTACT');
+else console.log('FAILURES: allOk=' + allOk + ' pageErrors=' + pageErrs);
+process.exit(allOk && pageErrs === 0 ? 0 : 1);
