@@ -102,8 +102,24 @@ export function fadeIn(mesh: Mesh | null | undefined, durationSec = 0.8): void {
     }
     return false;
   });
+}
 
-
+/**
+ * Dissolve a mesh back into nothing: clones its material, lerps alpha from
+ * the original value to 0 while drifting the mesh upward DISSOLVE_DRIFT
+ * meters over DISSOLVE_DURATION seconds, then restores the original
+ * material, invokes onComplete and disposes the temporary clone. onComplete
+ * fires exactly once, including when the mesh vanishes mid-transition.
+ * No-ops without a mesh/scene/material.
+ *
+ * @param mesh       mesh being despawned
+ * @param onComplete called once the transition finishes or aborts
+ */
+export function dissolveOut(
+  mesh: Mesh | null | undefined,
+  onComplete?: () => void,
+): void {
+  if (!mesh || mesh.isDisposed()) return;
   const scene = mesh.getScene();
   const original = mesh.material as Material | null;
   if (!scene || !original) return;
@@ -113,15 +129,6 @@ export function fadeIn(mesh: Mesh | null | undefined, durationSec = 0.8): void {
   const temp = original.clone(original.name + '_dissolve');
   if (!temp) return;
   mesh.material = temp;
-
-  let finished = false;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    if (!mesh.isDisposed()) mesh.material = original!;
-    onComplete && onComplete();
-    temp.dispose(false, false);
-  };
 
   let finished = false;
   const finish = () => {
