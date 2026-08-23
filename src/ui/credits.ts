@@ -42,11 +42,16 @@ function hasClassToken(el: MinimalElement, token: string): boolean {
  * Depth-first search for the first descendant whose class list contains
  * the given token. Returns null when the host markup has none.
  */
+/** Index a children list that may be array-like or an item()-collection. */
+function childAt(kids: MinimalElement['children'], i: number): MinimalElement | null {
+  return Array.isArray(kids) ? kids[i] ?? null : kids.item(i);
+}
+
 function findByClassToken(root: MinimalElement, token: string): MinimalElement | null {
   const kids = root.children;
   const count = kids.length;
   for (let i = 0; i < count; i++) {
-    const child = kids[i];
+    const child = childAt(kids, i);
     if (!child) continue;
     if (hasClassToken(child, token)) return child;
     const nested = findByClassToken(child, token);
@@ -239,7 +244,9 @@ export class CreditsRoll {
     const btn = this.makeAboutButton();
     if (!menu) return btn;
     let anchor: MinimalElement | null = null;
-    for (const child of menu.children) {
+    for (let ci = 0; ci < menu.children.length; ci++) {
+      const child = childAt(menu.children, ci);
+      if (!child) continue;
       const text = typeof child.textContent === 'string' ? child.textContent : '';
       const isButtonish =
         hasClassToken(child, 'btn') ||
