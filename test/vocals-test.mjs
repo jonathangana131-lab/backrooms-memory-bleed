@@ -78,8 +78,7 @@ async function behaviour() {
       const walk = (n, seen = new Set()) => {
         if (n === dest) return true;
         if (seen.has(n)) return false;
-
-
+        if (!Array.isArray(n.connections)) return true; // AudioParam side-chain terminal
         seen.add(n);
         const conns = Array.isArray(n.connections) ? n.connections : [];
         return conns.some((c) => walk(c, seen));
@@ -98,57 +97,35 @@ async function behaviour() {
     const v = new mod.EntityVocals(ctx, new FakeNode(ctx));
     for (const m of v.mutters) m.nextIn = 0;
     for (const h of v.hums) h.nextIn = 0;
-    for (let i = 0; i < 200; i++) v.update(1 / 30, [{ type: 'watcher', dist: 0.5 }]);
+    let fired = false;
+    for (let i = 0; i < 200; i++) {
+      if (v.update(1 / 30, [{ type: 'watcher', dist: 0.5 }])) fired = true;
+    }
+    ok(!fired, 'watcher proximity never fires a voice');
+    ok(v.mutters.every((m) => m.voiceEnv.gain.calls.length === 0),
+      'watcher proximity automates no mutter envelope');
+    ok(v.hums.every((h) => h.noteEnv.gain.calls.length === 0),
+      'watcher proximity automates no hum envelope');
+    ok(v.mutters.concat(v.hums).every((voice) => voice.distGain.gain.value === 0),
+      'distance gates stay fully closed for watchers');
+    v.stop();
+  }
+
+  // wanderer hum phrase: 3-5 notes, then the long 30-60s cadence reset
+  {
+    const ctx = new FakeCtx();
+    const v = new mod.EntityVocals(ctx, new FakeNode(ctx));
+    const h = v.hums[0];
+    h.nextIn = 0;
+    const mark = h.osc.frequency.calls.length;
+    let sawPhrase = false;
+    for (let i = 0; i < 120 && !sawPhrase; i++) {
+      if (v.update(1 / 30, [{ type: 'wanderer', dist: 2 }])) sawPhrase = true;
+    }
+    ok(sawPhrase, 'close wanderer begins humming');
+    const noteCount = h.osc.frequency.calls.length - mark;
 
 
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
     ok(noteCount >= 3 && noteCount <= 5, 'phrase contains 3-5 notes (' + noteCount + ')');
     // every note frequency sits on the seeded base's pentatonic grid (any octave-free degree)
     const ratios = h.osc.frequency.calls.map(([, freq]) => freq / h.baseFreqFor ?? null);
@@ -187,6 +164,7 @@ async function behaviour() {
 
   // unknown types are simply ignored
   {
+    const ctx = new FakeCtx();
     const v = new mod.EntityVocals(ctx, new FakeNode(ctx));
     let threw = false;
     try {
@@ -203,13 +181,13 @@ async function behaviour() {
     const v2 = new mod.EntityVocals(ctx2, new FakeNode(ctx2));
     for (const m of v2.mutters) m.nextIn = 20;
     for (const h of v2.hums) h.nextIn = 30;
-    let lastM = 0, lastH = 0;
     for (let i = 0; i < 45 * 30; i++) {
-      for (const m of v2.mutters) if (m.busyRemaining > lastM + 0.01) mutters++;
-      for (const h of v2.hums) if (h.busyRemaining > lastH + 0.01) hums++;
+      const beforeM = v2.mutters.map((m) => m.busyRemaining);
+      const beforeH = v2.hums.map((h) => h.busyRemaining);
       v2.update(1 / 30, [{ type: 'believer', dist: 6 }, { type: 'wanderer', dist: 7 }]);
-      lastM = Math.max(...v2.mutters.map((m) => m.busyRemaining));
-      lastH = Math.max(...v2.hums.map((h) => h.busyRemaining));
+      // a burst shows up as one voice's remaining time jumping up this frame
+      v2.mutters.forEach((m, j) => { if (m.busyRemaining > beforeM[j] + 0.01) mutters++; });
+      v2.hums.forEach((h, j) => { if (h.busyRemaining > beforeH[j] + 0.01) hums++; });
     }
     ok(mutters >= 1 && mutters <= 3, 'one believer mutters about once per 20-40s (' + mutters + ' in 45s)');
     ok(hums >= 1 && hums <= 2, 'one wanderer hums about once per 30-60s (' + hums + ' in 45s)');
