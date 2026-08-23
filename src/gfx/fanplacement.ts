@@ -1,3 +1,30 @@
+import { hash2i, rand2 } from '../core/rng';
+
+/** Room families that host ceiling fans. */
+export type FanContext = 'office' | 'medical' | 'storage' | 'chapel';
+
+/** All fan contexts, in table order. */
+export const FAN_CONTEXTS: readonly FanContext[] = ['office', 'medical', 'storage', 'chapel'];
+
+/** Blade-count menu and base sweep diameter for one room family. */
+interface FamilyDef {
+  bladeCounts: number[];
+  baseSizeM: number;
+}
+
+/** Per-family standards: office uniform, chapel a real mix of big blades. */
+const FAMILIES: Record<FanContext, FamilyDef> = {
+  office:  { bladeCounts: [4],       baseSizeM: 1.32 },
+  medical: { bladeCounts: [3],       baseSizeM: 1.52 },
+  storage: { bladeCounts: [6],       baseSizeM: 2.40 },
+  chapel:  { bladeCounts: [5, 6, 8], baseSizeM: 1.80 },
+};
+
+/** Independent lottery salt per concern so decisions never correlate. */
+const BLADE_SALT = 0xb1ad;
+const DIR_SALT = 0xd121;
+const SIZE_SALT = 0x51e7;
+
 /** Relative sweep jitter applied per fan (+/-8% of the family base). */
 const SIZE_JITTER = 0.08;
 
