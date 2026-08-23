@@ -40,3 +40,79 @@ export class BatteryCues {
   /** True after stop(); every cue becomes a no-op. */
 
 
+  private stopped = false;
+
+  constructor(ctx: AudioContext, destination: AudioNode) {
+    this.ctx = ctx;
+    this.out = destination;
+  }
+
+  /**
+   * Per-frame tick driven by the torch battery.
+   * @param batteryPct charge as a fraction (0..1) or a percentage (0..100)
+   * @param recharging true while the pack is on charge (warnings suppressed)
+   */
+  update(batteryPct: number, recharging: boolean): void {
+    if (this.stopped) return;
+    // Accept either a 0..1 fraction or a 0..100 percentage.
+    const pct = batteryPct <= 1 ? batteryPct * 100 : batteryPct;
+    const t = this.ctx.currentTime;
+
+    if (recharging) {
+      if (pct >= 99.5 && !this.fullAnnounced) {
+        this.fullAnnounced = true;
+        this.tone(660, t, 0.09, 0.05);
+        this.tone(880, t + 0.11, 0.14, 0.05);
+      }
+      return;
+    }
+    if (pct < 99.5) this.fullAnnounced = false;
+
+    if (pct < CRITICAL_PCT) {
+      if (t >= this.nextCriticalAt) {
+        this.nextCriticalAt = t + CRITICAL_INTERVAL;
+        this.nextLowAt = Math.max(this.nextLowAt, t + LOW_INTERVAL); // never double up
+        this.tone(1200, t, 0.12, 0.07);
+      }
+    } else if (pct < LOW_PCT) {
+      if (t >= this.nextLowAt) {
+        this.nextLowAt = t + LOW_INTERVAL;
+        this.tone(880, t, 0.06, 0.04);
+        this.tone(880, t + 0.15, 0.06, 0.04);
+      }
+    }
+  }
+
+  /** Ascending three-note arpeggio confirming a collected battery cell. */
+  pickupSound(): void {
+    if (this.stopped) return;
+    const t = this.ctx.currentTime;
+    this.tone(520, t, 0.07, 0.05);
+    this.tone(660, t + 0.08, 0.07, 0.05);
+    this.tone(880, t + 0.16, 0.11, 0.05);
+  }
+
+  /** Silence everything; every later cue becomes a no-op. */
+  stop(): void {
+    this.stopped = true;
+  }
+
+  /** One soft sine blip through a short gain envelope into the bus. */
+  private tone(freq: number, at: number, dur: number, peak: number): void {
+    try {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(peak, at + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      osc.connect(g);
+      g.connect(this.out);
+      osc.start(at);
+      osc.stop(at + dur + 0.02);
+    } catch (err) {
+      console.warn('[bmb] battery cue failed', err);
+    }
+  }
+}
