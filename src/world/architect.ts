@@ -38,8 +38,6 @@ export interface SignInstance {
   /** wall normal direction: 0=-z 1=+z 2=-x 3=+x */
   face: 0 | 1 | 2 | 3;
   y: number;
-
-
   kind: MemoryKind;
 }
 
@@ -169,8 +167,6 @@ export const NOTE_TEXTS: string[] = [
   'Inventory: 3 torches, 2 pens, 47m of string, one memory of a beach we all share.',
   'The hospital ward smells right but the plan is mirrored. I keep reaching left for doors.',
   'Day ??: we voted to stop naming rooms. The names kept arriving without us.',
-
-
   'Found a child\u2019s drawing of this exact corridor. Signed with my name, in her hand.',
   'The mall directory lists a store called EVERYTHING WE BROUGHT. It is on every level.',
   'Protocol amendment: if a room feels fully familiar, mark it. Recognition is how it learns.',
@@ -210,8 +206,6 @@ export const NOTE_TEXTS: string[] = [
   'Last personal inventory: name intact, mother\u2019s face intact, the smell of our first car gone. Fair trade. Fair trade.',
   'Ada says the space is not stealing our memories. It is practicing them. I liked it better as a thief.'
 ];
-
-
 
 export interface ChunkLayout {
   cx: number;
@@ -268,7 +262,6 @@ function decideEdge(
   if (spawnSafe) return EdgeCode.OPEN;
   const district = districtAt(seed, wx, wz);
   let pClose = edgeDensity(seed, district, wx, wz);
-
 
   const lat = 7;
   const gx = ((wx % lat) + lat) % lat;
@@ -456,7 +449,100 @@ function generateLights(seed: number, layout: ChunkLayout): void {
   const baseZ = layout.cz * N;
   const deadBias = layout.memIntensity * 0.35;
   for (let lz = 0; lz < N; lz++) {
-    for (let lx = 0; lx < N; lx+ice corridor cells clear so canyons stay walkable
+    for (let lx = 0; lx < N; lx++) {
+      const wx = baseX + lx;
+      const wz = baseZ + lz;
+      const r = rand2(wx, wz, seed ^ SALTS.light);
+      const gx = ((wx % 7) + 7) % 7;
+      const gz = ((wz % 7) + 7) % 7;
+      const corridor = (gx === 3 || gx === 4) !== (gz === 3 || gz === 4);
+      // landmark rooms are fully lit
+      if (landmarkLit) {
+        layout.lights.push({ x: (wx + 0.5) * CELL, z: (wz + 0.5) * CELL, flicker: r * 100 | 0, alive: true });
+        continue;
+      }
+      const distOrigin = Math.hypot(wx + 0.5, wz + 0.5);
+      // district-specific lighting grammar
+      let cellLit: boolean;
+      switch (layout.district) {
+        case District.OPEN_OFFICE:
+          // regular bright grid with occasional gaps
+          cellLit = (gx % 2 === 0 && gz % 2 === 0) || r < 0.12;
+          break;
+        case District.HONEYCOMB:
+          // rooms lit from within: lit cells cluster near room centers
+          cellLit = corridor ? r < 0.85 : r < 0.22;
+          break;
+        case District.CORRIDOR_GRID:
+          cellLit = corridor || r < 0.15;
+          break;
+        default:
+          cellLit = corridor ? r < 0.9 : r < 0.26;
+      }
+      if (distOrigin > 3.5 && !cellLit) continue;
+      let alive = !inBlackout(seed, wx, wz);
+      const storageDeadBias = layout.district === District.STORAGE ? 0.3 : 0;
+      if (alive && rand2(wx, wz, seed ^ 0xd34d) < deadBias + storageDeadBias) alive = false;
+      const flickerSeed = hash2i(wx, wz, seed ^ SALTS.flicker) % 100;
+      const flicker = alive && rand2(wx, wz, seed ^ 0xf11) < layout.memIntensity * 0.5
+        ? flickerSeed % 12
+        : flickerSeed;
+      layout.lights.push({ x: (wx + 0.5) * CELL, z: (wz + 0.5) * CELL, flicker, alive: alive || landmarkLit });
+    }
+  }
+}
+
+const KIND_PROPS: Record<number, PropKind[]> = {
+  [MemoryKind.OFFICE]: ['desk', 'chair', 'cabinet', 'stacked_chairs', 'tv', 'crate', 'whiteboard', 'cooler'],
+  [MemoryKind.RESIDENCE]: ['sofa', 'bed', 'bedframe', 'tv', 'cabinet'],
+  [MemoryKind.HOSPITAL]: ['gurney', 'cabinet', 'bench', 'shelf'],
+  [MemoryKind.SCHOOL]: ['locker', 'desk', 'stacked_chairs', 'bench', 'vending', 'shelf'],
+  [MemoryKind.MALL]: ['bench', 'planter', 'crate', 'couch_l', 'vending'],
+  [MemoryKind.TRANSIT]: ['bench', 'turnstile', 'crate'],
+  [MemoryKind.NONE]: ['crate'],
+  [MemoryKind.PERSONAL]: ['chair', 'tv'],
+};
+
+/** Sparse torch batteries: 1-2 per chunk, ~40% of chunks. */
+function generateBatteries(seed: number, layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  if ((hash2i(layout.cx, layout.cz, seed ^ 0xba77) % 100) >= 40) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0xba77));
+  const count = 1 + rng.int(0, 2);
+  for (let i = 0; i < count; i++) {
+    const lx = rng.int(1, N - 1);
+    const lz = rng.int(1, N - 1);
+    layout.props.push({
+      kind: 'battery',
+      x: (layout.cx * N + lx + rng.range(0.3, 0.7)) * CELL,
+      z: (layout.cz * N + lz + rng.range(0.3, 0.7)) * CELL,
+      rot: 0,
+      variant: rng.int(0, 3),
+    });
+  }
+}
+
+function generateProps(seed: number, layout: ChunkLayout): void {
+  // landmark rooms carry their own furniture
+  if (layout.landmark) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ SALTS.prop));
+  let kinds = KIND_PROPS[layout.memKind] ?? ['crate'];
+  // STORAGE districts impose their own hoard regardless of memory kind
+  if (layout.district === District.STORAGE) {
+    kinds = ['shelf', 'shelf', 'crate', 'crate', 'cabinet', 'vending', 'stacked_chairs'];
+  }
+  const density = layout.district === District.STORAGE ? 0.09 : 0.02 + layout.memIntensity * 0.10;
+  const N = CHUNK_CELLS;
+  const baseX = layout.cx * N;
+  const baseZ = layout.cz * N;
+  for (let lz = 1; lz < N - 1; lz++) {
+    for (let lx = 1; lx < N - 1; lx++) {
+      const wx = baseX + lx;
+      const wz = baseZ + lz;
+      if (!rng.chance(density)) continue;
+      // keep spawn plaza clear
+      if (Math.hypot((wx + 0.5) * CELL, (wz + 0.5) * CELL) < 9) continue;
+      // STORAGE: keep lattice corridor cells clear so canyons stay walkable
       if (layout.district === District.STORAGE) {
         const gx2 = ((wx % 7) + 7) % 7;
         const gz2 = ((wz % 7) + 7) % 7;
@@ -900,43 +986,41 @@ function generateGraffiti(seed: number, layout: ChunkLayout): void {
     const lx = rng.int(1, N - 1);
     const lz = rng.int(1, N - 1);
     // find a solid wall to scrawl on (horizontal edges preferred)
-        rot: crng.next() * Math.PI * 2,
-        text: '[NOTE ' + (i + 1) + '/' + story.length + '] ' + story[i],
+    const heIdx = lz * N + lx;
+    const veIdx = lz * (N + 1) + lx;
+    const pool = KIND_GRAFFITI[layout.memKind] ?? GRAFFITI_TEXTS;
+    if (layout.hEdges[heIdx] === EdgeCode.SOLID) {
+      layout.graffiti.push({
+        x: (layout.cx * N + lx + rng.range(0.25, 0.75)) * CELL,
+        z: (layout.cz * N + lz) * CELL,
+        face: rng.chance(0.5) ? 0 : 1,
+        y: rng.range(1.2, 1.9),
+        text: pool[hash2i(layout.cx + i, layout.cz, seed) % pool.length],
+      });
+    } else if (layout.vEdges[veIdx] === EdgeCode.SOLID) {
+      layout.graffiti.push({
+        x: (layout.cx * N + lx) * CELL,
+        z: (layout.cz * N + lz + rng.range(0.25, 0.75)) * CELL,
+        face: rng.chance(0.5) ? 2 : 3,
+        y: rng.range(1.2, 1.9),
+        text: pool[hash2i(layout.cx, layout.cz + i, seed) % pool.length],
       });
     }
-    return;
   }
-  // otherwise: single ambient note ~1 per 4 chunks
-  if ((hash2i(layout.cx, layout.cz, seed ^ 0x0e7e) % 4) !== 0) return;
-  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x4e07));
-  const lx = rng.int(1, N - 1);
-  const lz = rng.int(1, N - 1);
-  layout.notes.push({
-    x: (layout.cx * N + lx + rng.range(0.3, 0.7)) * CELL,
-    z: (layout.cz * N + lz + rng.range(0.3, 0.7)) * CELL,
-    rot: rng.next() * Math.PI * 2,
-    text: NOTE_TEXTS[hash2i(layout.cx, layout.cz + 91, seed) % NOTE_TEXTS.length],
-  });
 }
 
-/** Damp floors in transit/hospital corridors: reflective puddles. */
-function generatePuddles(seed: number, layout: ChunkLayout): void {
-  const wet = layout.memKind === MemoryKind.TRANSIT || layout.memKind === MemoryKind.HOSPITAL;
-  if (!wet) return;
-  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x9d61));
-  const count = rng.int(2, 6);
+function generateSigns(seed: number, layout: ChunkLayout): void {
+  if (layout.memIntensity < 0.18) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x51a1));
+  const texts = SIGN_TEXTS[layout.memKind];
+  if (!texts || !texts.length) return;
+  const count = rng.chance(layout.memIntensity) ? rng.int(1, 3) : 0;
   const N = CHUNK_CELLS;
   for (let i = 0; i < count; i++) {
-    const lx = rng.int(0, N);
-    const lz = rng.int(0, N);
-    layout.puddles.push({
-      x: (layout.cx * N + lx + rng.range(0.15, 0.85)) * CELL,
-      z: (layout.cz * N + lz + rng.range(0.15, 0.85)) * CELL,
-      r: rng.range(0.35, 1.1),
-    });
-  }
-
-
+    // find an interior wall edge to hang the sign on
+    const lx = rng.int(1, N - 1);
+    const lz = rng.int(1, N - 1);
+    const heIdx = lz * N + lx;
     const veIdx = lz * (N + 1) + lx;
     if (layout.hEdges[heIdx] === EdgeCode.SOLID) {
       layout.signs.push({
@@ -959,5 +1043,3 @@ function generatePuddles(seed: number, layout: ChunkLayout): void {
     }
   }
 }
-
-
