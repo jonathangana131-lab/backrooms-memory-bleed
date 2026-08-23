@@ -91,4 +91,16 @@ interface EchoSite {
   murmur: MurmurVoice | null;
 }
 
+/**
+ * Structural minimum of a tier-3 murmur voice: a small formant bed bound
+ * to one echo site, eased per frame toward a target level. Implementations
+ * degrade silently; the site treats null as "voice not built yet".
+ */
+interface MurmurVoice {
+  /** Per-frame level/position update. */
+  update(dt: number, level: number): void;
+  /** Release all nodes; the instance never restarts. */
+  stop(): void;
+}
+
 
