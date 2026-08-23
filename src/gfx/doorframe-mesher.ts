@@ -118,5 +118,50 @@ export class DoorFrameMesher {
   setOrientation(o: Orientation): this {
     this.orientation = o;
     return this;
+  }
 
+  /** Across-wall depth override for subsequent emit() calls. */
+  setAcrossDepth(depth: number): this {
+    this.across = depth;
+    return this;
+  }
 
+  /**
+   * Emit one doorway's frame boxes through an addBox callback.
+   *
+   * Each BoxSpec's along-wall width lands in addBox's wall-run slot and the
+   * instance's across-depth in the other, per the current orientation. When
+   * tint hooks are supplied, every box's vertices are multiplied by the
+   * spec's RGB tint, mirroring how mesher.tintVerts colors its own frames.
+   *
+   * @param specs  frame boxes from DoorStyles.generateForDoorway()
+   * @param addBox argument-compatible with mesher.addBox
+   * @param mesh   target mesh arrays (positions at minimum)
+   * @param hooks  optional vertCount/tint pair enabling vertex colors
+   */
+  emit<M extends MeshLike>(
+    specs: readonly BoxSpec[],
+    addBox: AddBoxFn<M>,
+    mesh: M,
+    hooks?: TintHooks<M>,
+  ): void {
+    for (const spec of specs) {
+      const y0 = spec.y ?? 0;
+      const y1 = y0 + spec.h;
+      const fromVert = hooks ? hooks.vertCount(mesh) : 0;
+      if (this.orientation === 0) {
+        // Wall runs along X: spec.w is the X extent, across fills Z.
+        addBox(mesh, spec.x, spec.z, y0, y1, spec.w, this.across);
+      } else {
+        // Wall runs along Z: swap the two horizontal extents.
+        addBox(mesh, spec.x, spec.z, y0, y1, this.across, spec.w);
+      }
+      if (hooks) {
+        const toVert = hooks.vertCount(mesh);
+        if (toVert > fromVert && spec.tint) {
+          hooks.tint(mesh, fromVert, spec.tint[0], spec.tint[1], spec.tint[2]);
+        }
+      }
+    }
+  }
+}
