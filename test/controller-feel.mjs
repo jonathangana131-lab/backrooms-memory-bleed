@@ -47,6 +47,7 @@ function resolveDep(spec, fromFile) {
 }
 
 const { PlayerController } = loadModule('controller', 'src/player/controller.ts');
+const { EYE_STAND, EYE_CROUCH } = registry.get('controller');
 
 // ---- test scaffolding ----
 function makeRig(keys = new Set()) {
@@ -58,5 +59,119 @@ function makeRig(keys = new Set()) {
   player.enabled = true;
   player.teleport(0, 6, Math.PI);
   return { player, camera, keys };
+}
 
+let failures = 0;
+function check(name, ok, extra = '') {
+  console.log((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : ' :: ' + extra));
+  if (!ok) failures++;
+}
 
+const DT = 1 / 60;
+function run(rig, seconds) {
+  for (let i = 0; i < Math.round(seconds / DT); i++) rig.player.update(DT, []);
+}
+
+// ---- 1: head bob ---------------------------------------------------------------
+{
+  const rig = makeRig(new Set(['KeyW']));
+  const ys = [];
+  for (let i = 0; i < 180; i++) {
+    rig.player.update(DT, []);
+    ys.push(rig.camera.py);
+  }
+  const lo = Math.min(...ys);
+  const hi = Math.max(...ys);
+  check('walking bobs the camera around eye height', lo < EYE_STAND && hi > EYE_STAND,
+    'lo=' + lo.toFixed(4) + ' hi=' + hi.toFixed(4));
+  check('bob amplitude stays subtle (< 3 cm)', hi - lo > 0 && hi - lo < 0.03,
+    String(hi - lo));
+  check('bob carries the body forward', rig.camera.pz !== 6, String(rig.camera.pz));
+}
+
+// ---- 2: footstep hooks -----------------------------------------------------------
+{
+  const rig = makeRig(new Set(['KeyW']));
+  let steps = 0;
+  let lastRunning = null;
+  rig.player.onFootstep = (running) => { steps++; lastRunning = running; };
+  run(rig, 3);
+  check('footsteps fire at bob peaks while walking', steps >= 5 && steps <= 12,
+    String(steps));
+  check('walking strides are not sprint-flagged', lastRunning === false,
+    String(lastRunning));
+}
+{
+  const rig = makeRig();
+  let steps = 0;
+  rig.player.onFootstep = () => steps++;
+  run(rig, 2);
+  check('standing still is silent', steps === 0, String(steps));
+}
+{
+  const rig = makeRig(new Set(['KeyW', 'ShiftLeft']));
+  let sawRunning = false;
+  rig.player.onFootstep = (running) => { if (running) sawRunning = true; };
+  run(rig, 2);
+  check('sprint strides flag running', sawRunning);
+}
+
+// ---- 3: landing impact ------------------------------------------------------------
+{
+  // A ground clamp every frame is NOT a fall: no dip while idling.
+  const idle = makeRig();
+  let idleMin = Infinity;
+  for (let i = 0; i < 120; i++) {
+    idle.player.update(DT, []);
+    idleMin = Math.min(idleMin, idle.camera.py);
+  }
+  check('ground clamp alone never triggers the dip', idleMin >= EYE_STAND - 0.005,
+    String(idleMin));
+
+  const rig = makeRig();
+  rig.player.body.y = 3; // drop from three metres
+  let minY = Infinity;
+  for (let i = 0; i < 90; i++) {
+    rig.player.update(DT, []);
+    minY = Math.min(minY, rig.camera.py);
+  }
+  check('hard landing dips the camera a full LAND_DIP_DEPTH',
+    Math.abs(minY - (EYE_STAND - 0.05)) < 0.005, String(minY));
+  check('camera recovers to eye height after the dip',
+    Math.abs(rig.camera.py - EYE_STAND) < 1e-6, String(rig.camera.py));
+}
+
+// ---- 4: crouch smoothing -----------------------------------------------------------
+{
+  const rig = makeRig(new Set(['KeyC']));
+  run(rig, 1);
+  check('crouch settles at EYE_CROUCH after the lerp',
+    Math.abs(rig.camera.py - EYE_CROUCH) < 0.005, String(rig.camera.py));
+  check('crouching flag is set', rig.player.crouching === true);
+  rig.keys.delete('KeyC');
+  run(rig, 0.5);
+  check('standing back up restores EYE_STAND',
+    Math.abs(rig.camera.py - EYE_STAND) < 0.005, String(rig.camera.py));
+}
+
+// ---- 5: sprint FOV ease --------------------------------------------------------------
+{
+  const rig = makeRig(new Set(['KeyW', 'ShiftLeft']));
+  run(rig, 1);
+  check('sprint eases the FOV wider than stock',
+    rig.camera.fov > 1.29 && rig.camera.fov < 1.31, String(rig.camera.fov));
+  rig.keys.delete('ShiftLeft');
+  rig.keys.delete('KeyW');
+  run(rig, 0.5);
+  check('FOV eases back once sprinting ends',
+    Math.abs(rig.camera.fov - 1.25) < 0.001, String(rig.camera.fov));
+}
+{
+  const rig = makeRig(new Set(['ShiftLeft']));
+  run(rig, 1);
+  check('shift without movement leaves the FOV stock',
+    rig.camera.fov === 1.25, String(rig.camera.fov));
+}
+
+console.log(failures === 0 ? '\nALL PASS' : '\n' + failures + ' FAILURE(S)');
+process.exit(failures === 0 ? 0 : 1);
