@@ -78,23 +78,12 @@ try {
   // ---------- 4. flutter triggers inside trigger range ----------
   {
     const pf = new PaperFlutter();
-
-
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
-// [unrecovered line]
+    const m = fakeMesh(0.4, 0.2);
+    const baseY = 0.01;
+    pf.registerQuad(m, baseY);
+    // inside TRIGGER_DIST: the first update arms a flutter
+    pf.update(0.016, 0.4, 0.2);
+    check('flutter triggers within 1.2m', pf.activeCount === 1, String(pf.activeCount));
     let maxY = -Infinity;
     const dt = 1 / 240;
     for (let t = 0; t < FLUTTER_DURATION + 0.01; t += dt) {
@@ -138,12 +127,33 @@ try {
     }
     pf.update(0.016, 0, 0);
     check('cap respected with 30 nearby papers', pf.activeCount === MAX_ACTIVE, String(pf.activeCount));
+    pf.update(1 / 240, 0, 0); // trigger arms on this frame; motion starts next tick
     let moved = 0;
     for (const m of meshes) if (m.position.y !== 0) moved++;
     check('only capped subset is moving', moved === MAX_ACTIVE, String(moved));
     // slots free up again once flutters finish
     const step = FLUTTER_DURATION / 60 + 0.001;
-    for (let t = 0; t <= FLUTTER_DURATION + 0.05; t += step) pf.update(step, 0, 0);
+    for (let t = 0; t <= FLUTTER_DURATION + 0.05; t += step) pf.update(step, 50, 50);
     check('all flutters release their slot', pf.activeCount === 0, String(pf.activeCount));
+  }
+
+  // ---------- 8. registry hygiene ----------
+  {
+    const pf = new PaperFlutter();
+    const keep = fakeMesh(0.3, 0);
+    const gone = fakeMesh(0.4, 0);
+    pf.registerQuad(keep, 0.01);
+    pf.registerQuad(gone, 0.01);
+    check('both quads tracked', pf.trackedCount === 2, String(pf.trackedCount));
+    gone.disposed = true;
+    pf.update(0.016, 10, 10); // far enough to never trigger; prunes lazily
+    check('disposed quads are pruned from the registry', pf.trackedCount === 1, String(pf.trackedCount));
+    check('live quad survives the prune', pf.trackedCount === 1 && !keep.isDisposed());
+  }
+} finally {
+  await server.close();
+}
+console.log(failures === 0 ? '\nALL PAPERFLUTTER TESTS PASSED' : '\n' + failures + ' FAILURE(S)');
+process.exit(failures === 0 ? 0 : 1);
 
 
