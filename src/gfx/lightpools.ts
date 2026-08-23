@@ -24,7 +24,7 @@
  * any order.
  ********************************************************************/
 
-import { hash2i, rand2, fbm2 } from '../core/rng';
+import { hash2i, rand2, fbm2, RNG } from '../core/rng';
 
 /** Number of distinct pool variants (see VARIANT_* constants). */
 export const POOL_VARIANT_COUNT = 4;
