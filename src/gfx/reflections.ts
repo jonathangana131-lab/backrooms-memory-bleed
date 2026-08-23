@@ -192,10 +192,6 @@ export class WetReflections {
   private ensureMaterial(): void {
     if (this.mat) return;
     const mat = new StandardMaterial('wetReflMat', this.scene);
-
-  private ensureMaterial(): void {
-    if (this.mat) return;
-    const mat = new StandardMaterial('wetReflMat', this.scene);
     // Dimmed echo of the fluorescent tube color, heavily faded.
     mat.emissiveColor = new Color3(0.14, 0.13, 0.10);
     mat.diffuseColor = new Color3(0, 0, 0);
@@ -252,8 +248,11 @@ export class WetReflections {
   }
 
   /** Sine-wave y-offset on reflection vertices: fake water movement. */
-
-
+  private animate(): void {
+    const k = (Math.PI * 2) / RIPPLE_WAVELENGTH;
+    const t = this.time * RIPPLE_SPEED;
+    // Fixed diagonal wave direction keeps the math to one dot product.
+    const dirX = 0.70710678;
     const dirZ = 0.70710678;
     for (let ei = 0; ei < this.entries.length; ei++) {
       const e = this.entries[ei];
