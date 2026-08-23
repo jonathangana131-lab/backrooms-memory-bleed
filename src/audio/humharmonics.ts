@@ -38,8 +38,6 @@ export const ODD_HARMONICS = [
 /** Amplitude ratio for a level given in dB. */
 export function dbToGain(db: number): number {
   return Math.pow(10, db / 20);
-
-
 }
 
 /** Maximum pitch instability of a fully-aged fixture (+/-0.5%). */
@@ -110,15 +108,133 @@ export class HumHarmonics {
     this.ctx = ctx;
     this.out = ctx.createGain();
     this.out.gain.value = 1;
-    this.out.connect(destination);
 
-    this.voiceA = this.buildVoice(1);
-    this.voiceB = this.buildVoice(1 + this.beatDelta / HUM_FUNDAMENTAL);
+    this.voiceA = this.buildVoice(HUM_FUNDAMENTAL);
+    this.voiceB = this.buildVoice(HUM_FUNDAMENTAL + this.beatDelta);
 
     // Slow shared warble: one wobble generator feeding both fundamentals,
-    // because fixtures on the same circuit sag together.
+    // because fixtures on the same circuit sag together. The LFO runs into
+    // a depth gain whose gain parameter IS the warble depth in Hz.
     this.warble = ctx.createOscillator();
     this.warble.type = 'sine';
     this.warble.frequency.value = 0.07 + Math.random() * 0.06; // 0.07-0.13 Hz
+    this.warbleDepth = ctx.createGain();
+    this.warbleDepth.gain.value = 0;
+    this.warble.connect(this.warbleDepth);
+    this.warbleDepth.connect(this.voiceA.oscs[0].frequency);
+    this.warbleDepth.connect(this.voiceB.oscs[0].frequency);
 
+    // Twin sits a touch quieter than the lead.
+    this.voiceB.root.gain.value = 0;
+    void BEAT_MIX; // documented mix intent; the sqrt fixture curve carries level
 
+    this.warble.start();
+
+    // Wire the audible chain LAST so the graph reads cleanly end to end:
+    // partial -> voice root -> layer bus -> destination.
+    this.voiceA.root.connect(this.out);
+    this.voiceB.root.connect(this.out);
+    this.out.connect(destination);
+  }
+
+  /** District profile for the current district id (unknown ids fall back). */
+  private profile(): DistrictProfile {
+    return DISTRICT_PROFILES[this.district] ?? DEFAULT_PROFILE;
+  }
+
+  /** Relative weight of one odd-harmonic partial at the current district age. */
+  private harmonicWeight(db: number): number {
+    return dbToGain(db) * (1 + AGE_HARMONIC_BOOST * this.profile().age);
+  }
+
+  /** Build one fixture voice: fundamental + odd harmonics into a muted root. */
+  private buildVoice(fundamentalHz: number): Voice {
+    const root = this.ctx.createGain();
+    root.gain.value = 0; // silent until setFixtureCount speaks
+
+    const oscs: OscillatorNode[] = [];
+    const gains: GainNode[] = [];
+
+    const mk = (freq: number, weight: number): void => {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const g = this.ctx.createGain();
+      g.gain.value = weight;
+      osc.connect(g);
+      g.connect(root);
+      osc.start();
+      oscs.push(osc);
+      gains.push(g);
+    };
+
+    mk(fundamentalHz, 1);
+    for (const h of ODD_HARMONICS) mk(fundamentalHz * h.multiple, this.harmonicWeight(h.db));
+    return { root, oscs, gains };
+  }
+
+  /**
+   * Select the district character.
+   * @param district district ordinal from world/constants.ts
+   */
+  setDistrict(district: number): void {
+    this.district = district;
+    this.scheduleProfileTargets();
+  }
+
+  /**
+   * How many fixtures are currently lit nearby (drives loudness + beat twin).
+   * @param count lit fluorescent fixtures within earshot
+   */
+  setFixtureCount(count: number): void {
+    this.fixtureCount = Math.max(0, count);
+    this.scheduleLevels();
+    this.scheduleProfileTargets();
+  }
+
+  /** Per-frame tick: beat drift + refreshed smoothed targets. */
+  update(dt: number): void {
+    if (this.stopped) return;
+
+    this.driftIn -= dt;
+    if (this.driftIn <= 0) {
+      this.driftIn = 10 + Math.random() * 10;
+      this.beatDelta = BEAT_MIN + Math.random() * (BEAT_MAX - BEAT_MIN);
+      this.voiceB.oscs[0].frequency.setValueAtTime(HUM_FUNDAMENTAL + this.beatDelta, this.ctx.currentTime);
+    }
+    this.scheduleLevels();
+    this.scheduleProfileTargets();
+  }
+
+  /** Silence everything and release sources; the instance will not restart. */
+  stop(): void {
+    this.stopped = true;
+    for (const v of [this.voiceA, this.voiceB]) {
+      for (const o of v.oscs) { try { o.stop(); } catch { /* already stopped */ } }
+    }
+    try { this.warble.stop(); } catch { /* already stopped */ }
+  }
+
+  // ---------------------------------------------------------------------------
+
+  private scheduleLevels(): void {
+    const t = this.ctx.currentTime;
+    const lvl = Math.min(HUM_REF_LEVEL, (HUM_REF_LEVEL * Math.sqrt(Math.max(0, this.fixtureCount))) / 2);
+    const lead = this.fixtureCount > 0 ? lvl : 0;
+    const twin = this.fixtureCount >= 2 ? lvl : 0;
+    this.voiceA.root.gain.setTargetAtTime(lead, t, LEVEL_TAU);
+    this.voiceB.root.gain.setTargetAtTime(twin, t, LEVEL_TAU);
+  }
+
+  private scheduleProfileTargets(): void {
+    const t = this.ctx.currentTime;
+    const lit = this.fixtureCount > 0 ? 1 : 0;
+    const depth = lit ? this.profile().age * MAX_WARBLE * HUM_FUNDAMENTAL : 0;
+    for (const v of [this.voiceA, this.voiceB]) {
+      for (let i = 0; i < ODD_HARMONICS.length; i++) {
+        v.gains[i + 1].gain.setTargetAtTime(this.harmonicWeight(ODD_HARMONICS[i].db), t, LEVEL_TAU);
+      }
+    }
+    this.warbleDepth.gain.setTargetAtTime(depth, t, LEVEL_TAU);
+  }
+}
