@@ -211,9 +211,7 @@ export class CrowdAmbience {
     const env = ctx.createGain();   // syllable envelope (automated in update)
     env.gain.value = 0;
 
-    const pan = ctx.createStereoPannerNode ? undefined as never : (undefined as never);
-    void pan;
-    const panner = (ctx as AudioContext & { createStereoPanner(): StereoPannerNode }).createStereoPanner();
+    const panner = ctx.createStereoPanner();
     panner.pan.value = (rnd() * 1.6 - 0.8); // stereo spread
 
     for (const bp of formants) { osc.connect(bp); bp.connect(env); }
