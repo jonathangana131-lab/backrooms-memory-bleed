@@ -19,6 +19,12 @@ await page.evaluate(() => (window).__BMB__.startNew('stress'));
 await page.waitForTimeout(2500);
 
 // remember a fingerprint of the spawn area for the determinism check
+// (wait until chunk (0,0) is actually built first - an empty layout would
+// hash 0 and make every later comparison fail spuriously)
+await page.waitForFunction(() => {
+  const g = (window).__BMB__.game;
+  return !!g.chunks.layoutAt(0, 0);
+}, null, { timeout: 60000 });
 const fingerprint = () => page.evaluate(() => {
   const g = (window).__BMB__.game;
   const l = g.chunks.layoutAt(0, 0);
