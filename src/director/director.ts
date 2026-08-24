@@ -3,8 +3,19 @@
  * Controls pacing: long calm periods, slow builds, rare peaks.
  */
 import { RNG } from '../core/rng';
+import { Emitter } from '../core/events';
 
 export type Phase = 'calm' | 'build' | 'peak' | 'release';
+
+/**
+ * Payloads published on HorrorDirector.events under the 'directorEvent'
+ * key. A window opens when a build/peak phase begins and closes when the
+ * director moves on; the anomaly system (director/anomalies.ts) consumes
+ * these requests and decides deterministically what manifests.
+ */
+export type DirectorEventPayload =
+  | { kind: 'window-open'; phase: 'build' | 'peak' }
+  | { kind: 'window-close'; phase: 'build' | 'peak' };
 
 export interface DirectorHost {
   lightingStress(v: number): void;
@@ -37,6 +48,11 @@ export interface ScalableNode {
 }
 
 export class HorrorDirector {
+  /**
+   * Bus carrying 'directorEvent' window-open/window-close requests for
+   * the anomaly system. Emitted from enter() on every phase transition.
+   */
+  readonly events = new Emitter<{ directorEvent: DirectorEventPayload }>();
   phase: Phase = 'calm';
   private phaseT = 0;
   private phaseDur = 70 + Math.random() * 60;
@@ -124,10 +140,16 @@ export class HorrorDirector {
   }
 
   private enter(p: Phase, dur: number): void {
+    const prev = this.phase;
     if (p === 'peak') this.peaksUsed++;
     this.phase = p;
     this.phaseT = 0;
     this.phaseDur = dur;
+    if (p === 'build' || p === 'peak') {
+      this.events.emit('directorEvent', { kind: 'window-open', phase: p });
+    } else if (prev === 'build' || prev === 'peak') {
+      this.events.emit('directorEvent', { kind: 'window-close', phase: prev });
+    }
   }
 
   // ==================== PHENOMENA ====================
