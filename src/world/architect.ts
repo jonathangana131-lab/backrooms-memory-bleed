@@ -245,6 +245,21 @@ export interface ChunkLayout {
    * ambient-particle consumer and is exposed here for it.
    */
   seasonBleed?: import('./seasonrooms').SeasonDescriptor;
+  /**
+   * F51 mezzanine mount: staircase + interior descriptor when this chunk
+   * passes the ~1-in-25 rarity gate (see mezzanine.ts). DATA ONLY — the
+   * mesher does not consume it yet; full 3D geometry mounting (stair risers,
+   * balcony ring, upper floor) is a later render pass. Generation is cached
+   * by (worldSeed, chunkKey) in ChunkManager so rebuilds reuse one pair.
+   */
+  mezzanine?: import('./mezzanine').MezzaninePair;
+  /**
+   * F51 glimpse footprint: what this base chunk reserves of the upper level
+   * seen through ceilings. Seed- and interior-independent (derived from the
+   * chunk key alone); set on every streamed base chunk as ceiling-crack
+   * view-through metadata for whichever decal pass consumes it first.
+   */
+  mezzGlimpse?: import('./mezzanine').GlimpseFootprint;
   /** memory contamination sampled for this chunk */
   memKind: MemoryKind;
   memIntensity: number;

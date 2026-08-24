@@ -20,6 +20,8 @@ import { graffitiTilt, signGrimeRects } from './textureDressing';
 import { ChunkDeltas, applyDecorDrift } from './chunkDeltas';
 import { AgingLedger, decayStage, type AgingStageParams } from './aging';
 import { sessionSeasonBleeds } from './seasonrooms';
+import { generateMezzanine, mezzanineGate, glimpseFootprint } from './mezzanine';
+import type { MezzaninePair } from './mezzanine';
 import type { MaterialSet } from '../gfx/materials';
 import type { MemoryField } from '../memory/field';
 
@@ -92,6 +94,15 @@ export class ChunkManager {
 
   /** Key of the currently elected seasonal-bleed room, or null before any landmark builds. */
   private seasonWinner: string | null = null;
+
+  /**
+   * F51 mezzanine cache keyed "<seed>|<chunkKey>". generateMezzanine is a
+   * pure function of (worldSeed, chunkKey), so entries stay valid for the
+   * manager's lifetime — including across rebuilds and reset(). Null values
+   * mean the rarity gate is closed for that chunk; caching them keeps the
+   * gate a one-time draw instead of a per-rebuild recompute.
+   */
+  private mezzCache = new Map<string, MezzaninePair | null>();
 
   constructor(private scene: Scene, private mats: MaterialSet, public seed: number, aging?: AgingLedger) {
     this.aging = aging ?? new AgingLedger();
@@ -345,6 +356,22 @@ export class ChunkManager {
       // build path yet - ambient particle passes live game-side. The
       // descriptor rides on the layout for whoever renders it first.
     }
+    // F51 mezzanine mount: every streamed base chunk carries the
+    // seed-independent glimpse footprint (ceiling-crack view-through
+    // metadata; no consumer in the mesher yet), and ~1 chunk in 25 passes
+    // the rarity gate and gets its staircase + interior descriptor attached.
+    // DATA ONLY seam: the descriptor marks layout.mezzanine for the later
+    // render pass that mounts full 3D geometry (risers, balcony ring, upper
+    // floor) — nothing here forces that wiring. Generation is cached per
+    // (seed, chunkKey), so rebuilds reuse one byte-identical pair.
+    layout.mezzGlimpse = glimpseFootprint(k);
+    const mezzKey = this.seed + '|' + k;
+    let mezz = this.mezzCache.get(mezzKey);
+    if (mezz === undefined) {
+      mezz = mezzanineGate(this.seed, k) ? generateMezzanine(this.seed, k) : null;
+      this.mezzCache.set(mezzKey, mezz);
+    }
+    if (mezz) layout.mezzanine = mezz;
     // contact shadows: soft dark blobs under furniture (torch-lit realism)
     try {
       // ../gfx/shadowmesher does not exist yet; widening the specifier to a plain
