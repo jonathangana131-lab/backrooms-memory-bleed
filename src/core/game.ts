@@ -23,6 +23,7 @@ import { Flashlight } from '../player/flashlight';
 import { DustMotes } from '../gfx/dust';
 import type { HumanType } from '../entities/humans';
 import { AudioEngine } from '../audio/audio';
+import { SelfRadio, type FeedEntry } from '../audio/selfradio';
 import { PositionalHum } from '../audio/positional';
 import { WatcherSteps } from '../audio/approach';
 import { SurfaceDetector } from '../player/surfacedetect';
@@ -468,6 +469,10 @@ export class Game {
   private roachSpawnTimer = 0;
   /** F31: fixed-step accumulator for roach doTick(). */
   private roachAccumulatorSec = 0;
+  /** F34: this run's self-tuning receiver over the discovery feed. */
+  private radio: SelfRadio | null = null;
+  /** F34: session time of the last locked-station broadcast line (≥45 s apart). */
+  private radioLastLineSec = -1e9;
   private attract = { x: 8, z: 8, t: 0 };
   private loopArmedUntil = 0;
   /** Spatial-anomaly runtime; rebuilt with the director on every run. */
@@ -1173,6 +1178,16 @@ export class Game {
     this.roachEco = null;
     this.roachSpawnTimer = 0;
     this.roachAccumulatorSec = 0;
+    // F34: fresh receiver per run, grounded in the live discovery feed
+    // (landmarks seen + beacons contacted) and the equipment loadout.
+    try {
+      this.radio = new SelfRadio({
+        seed: (this.seed >>> 0).toString(16),
+        getFeed: () => this.radioFeed(),
+        getLoadout: () => this.radioLoadout(),
+      });
+    } catch (e) { console.warn('[bmb] self radio unavailable', e); this.radio = null; }
+    this.radioLastLineSec = -1e9;
     // F100: never carry a credits walk into a fresh expedition
     this.cancelCreditsWalk();
     // near-miss telemetry + adrenaline arming reset with the fresh run
@@ -2179,6 +2194,21 @@ export class Game {
           console.warn('[bmb] fauna update failed', e);
         }
       }
+      // ---- F34: advance the self-tuning receiver; when a grounded station
+      // locks in strongly enough, surface its deterministic broadcast body
+      // through ui.say, throttled to at most one line every 45 s.
+      if (this.radio) {
+        try {
+          this.radio.update(dt);
+          const air = this.radio.onAir();
+          if (air && air.clarity > 0.25 && this.playtimeSec - this.radioLastLineSec >= 45) {
+            this.radioLastLineSec = this.playtimeSec;
+            this.ui.say(air.script[1], 6);
+          }
+        } catch (e) {
+          console.warn('[bmb] self radio update failed', e);
+        }
+      }
       // ---- Mount batch G (F31): roach ecosystems on the adapted chunk
       // grid. Spawn defers until world data streams in; ticks run on a
       // ROACH_TICK_SEC fixed-step accumulator so population dynamics stay
@@ -3099,6 +3129,34 @@ export class Game {
       deepestM: Math.round(deepestM),
       discoveries: this.story.discoveries,
     };
+  }
+
+  // ---------- F34: self-tuning radio ----------
+
+  /**
+   * F34 discovery feed: one entry per landmark room entered this run
+   * (kind 'landmark') and one per beacon contacted (kind 'note'), both
+   * keyed by stable ids so the grounding model sees real discoveries.
+   */
+  private radioFeed(): readonly FeedEntry[] {
+    const entries: FeedEntry[] = [];
+    for (const name of this.seenLandmarks) {
+      entries.push({ id: 'landmark:' + name, kind: 'landmark', textSeed: name });
+    }
+    for (const [key, b] of this.story.beacons) {
+      if (!b.found) continue;
+      entries.push({ id: 'beacon:' + key, kind: 'note', textSeed: 'beacon ' + b.cx + ',' + b.cz });
+    }
+    return entries;
+  }
+
+  /** F34 loadout descriptors: the equipment actually carried this run. */
+  private radioLoadout(): readonly string[] {
+    const out: string[] = [];
+    if (this.flashlight.has) out.push('flashlight');
+    if (this.photoMode) out.push('camcorder');
+    if (this.nightvision) out.push('camcorder-ir');
+    return out;
   }
 
   // ---------- F31: roach ecosystems ----------
