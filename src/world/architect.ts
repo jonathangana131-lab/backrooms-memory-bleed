@@ -260,6 +260,14 @@ export interface ChunkLayout {
    * view-through metadata for whichever decal pass consumes it first.
    */
   mezzGlimpse?: import('./mezzanine').GlimpseFootprint;
+  /**
+   * F59 landmark echo registrations for this chunk's landmark room: the
+   * accepted (+/-7, +/-7) echo slots carrying the SAME descriptor object as
+   * the base registration (see landmarkecho.ts). DATA ONLY — echoes are
+   * registered here for consumers (minimap, journal, director); no geometry
+   * is generated at the echo chunks, which render their canonical generation.
+   */
+  landmarkEcho?: import('./landmarkecho').LandmarkEcho[];
   /** memory contamination sampled for this chunk */
   memKind: MemoryKind;
   memIntensity: number;

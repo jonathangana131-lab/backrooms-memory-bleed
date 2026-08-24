@@ -9,8 +9,11 @@ import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTextur
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Scene } from '@babylonjs/core/scene';
-import { CHUNK_CELLS, CELL, WALL_T, worldToChunk } from './constants';
-import { generateLayout, type Box2, type ChunkLayout, type LightFixture, type SignInstance } from './architect';
+import { CHUNK_CELLS, CELL, WALL_H, WALL_T, worldToChunk } from './constants';
+import {
+  generateLayout, landmarkFor,
+  type Box2, type ChunkLayout, type LightFixture, type SignInstance,
+} from './architect';
 import { getLayoutPool } from '../workers/layoutPool';
 import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
@@ -22,6 +25,8 @@ import { AgingLedger, decayStage, type AgingStageParams } from './aging';
 import { sessionSeasonBleeds } from './seasonrooms';
 import { generateMezzanine, mezzanineGate, glimpseFootprint } from './mezzanine';
 import type { MezzaninePair } from './mezzanine';
+import { echoPositions } from './landmarkecho';
+import type { LandmarkDescriptor } from './landmarkecho';
 import type { MaterialSet } from '../gfx/materials';
 import type { MemoryField } from '../memory/field';
 
@@ -355,6 +360,28 @@ export class ChunkManager {
       // Particle seam: layout.seasonBleed.particle has no consumer in the
       // build path yet - ambient particle passes live game-side. The
       // descriptor rides on the layout for whoever renders it first.
+      // F59 landmark echo mount: register this landmark's +/-7-chunk echo
+      // slots on the layout. Occupancy checks against the existing chunk
+      // map when the candidate is loaded; unbuilt candidates are predicted
+      // with the same pure landmarkFor draw the builder will apply, so the
+      // accepted set does not depend on stream order. Echoes carry the SAME
+      // descriptor object (reference-equal across the whole registration).
+      // DATA-ONLY seam: layout.landmarkEcho is registration metadata for
+      // consumers; echo chunks render their canonical generation, and any
+      // mirrored-room rendering is a later pass's decision.
+      const descriptor = this.landmarkDescriptor(layout);
+      const echoes = echoPositions(
+        { descriptor, baseChunkX: cx, baseChunkZ: cz },
+        {
+          canHost: (ex: number, ez: number): boolean => {
+            const built = this.chunks.get(this.key(ex, ez));
+            if (built) return !built.layout.landmark;
+            return landmarkFor(ex, ez, this.seed) === null;
+          },
+        },
+        this.seed,
+      );
+      if (echoes.length > 0) layout.landmarkEcho = echoes;
     }
     // F51 mezzanine mount: every streamed base chunk carries the
     // seed-independent glimpse footprint (ceiling-crack view-through
@@ -449,6 +476,30 @@ export class ChunkManager {
   }
 
   private signMats = new Map<string, StandardMaterial>();
+
+  /**
+   * Deterministic landmark identity for one built chunk, used as the F59
+   * echo descriptor: id/name from the landmark name, the prop manifest from
+   * the layout's distinct prop kinds (sorted), and lights mapped to
+   * room-local meters at the standard fixture hang height. Pure function of
+   * the built layout, so a rebuilt chunk re-derives a byte-identical value.
+   */
+  private landmarkDescriptor(layout: ChunkLayout): LandmarkDescriptor {
+    const name = layout.landmark as string;
+    const bx = layout.cx * ChunkManager.CELLS * CELL;
+    const bz = layout.cz * ChunkManager.CELLS * CELL;
+    return {
+      id: 'lm:' + name,
+      name,
+      props: [...new Set(layout.props.map((p) => p.kind))].sort(),
+      lights: layout.lights.map((l) => ({
+        kind: l.alive ? 'fluoro' : 'dead-tube',
+        x: l.x - bx,
+        y: WALL_H - 0.35,
+        z: l.z - bz,
+      })),
+    };
+  }
 
   private signMaterial(s: SignInstance, discoveredTick = false): StandardMaterial {
     const key = (s.kind.valueOf() % 2 === 1 ? 'i:' : 'n:') + s.text + (discoveredTick ? ':seen' : '');
