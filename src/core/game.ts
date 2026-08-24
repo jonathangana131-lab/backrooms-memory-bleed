@@ -115,6 +115,8 @@ import { createFogVariation } from '../gfx/fogvariation';
 import { EchoGeography } from '../story/echogeography';
 // F18: time slippage — clocks drift apart inside memory-saturated zones
 import { TimeSlippage } from '../story/timeslippage';
+// F21: memory residue — tagged props play prior-tenant ghost replays
+import { ResidueField, RESIDUE_KINDS, type ResidueKind } from '../memory/residue';
 
 export type GameState = 'menu' | 'playing' | 'paused';
 
@@ -234,6 +236,13 @@ export class Game {
   private slipZoneKey: string | null = null;
   /** true once the 60 s disagreement warning fired for the current visit */
   private slipWarned = false;
+
+  // ---- F21 memory residue: per-run field + one-beat frame queue ----
+  private residue: ResidueField | null = null;
+  /** beats waiting to play: due session-second + verbatim line */
+  private residueBeatQueue: { dueSec: number; text: string }[] = [];
+  /** session second of the last replay (one replay per 90 s of session time) */
+  private residueLastPlaySec = -1e9;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -846,6 +855,11 @@ export class Game {
     catch (e) { console.warn('[bmb] time slippage unavailable', e); this.timeSlip = null; }
     this.slipZoneKey = null;
     this.slipWarned = false;
+    // F21: fresh residue field + replay state per run
+    try { this.residue = new ResidueField(this.seed); }
+    catch (e) { console.warn('[bmb] residue field unavailable', e); this.residue = null; }
+    this.residueBeatQueue.length = 0;
+    this.residueLastPlaySec = -1e9;
     this.knownChunkKeys.clear();
     this.lastChunksBuiltSeen = 0;
     this.markedBeaconKeys.clear();
@@ -1739,6 +1753,12 @@ export class Game {
           console.warn('[bmb] time slippage failed', e);
         }
       }
+      // F21: residue beats play from the frame queue ~900 ms after the touch
+      while (this.residueBeatQueue.length > 0 && this.residueBeatQueue[0].dueSec <= this.playtimeSec) {
+        const beat = this.residueBeatQueue.shift()!;
+        try { this.ui.say(beat.text, 5); }
+        catch (e) { console.warn('[bmb] residue beat failed', e); }
+      }
       this.entityScheduler(dt);
       this.helperDialogue();
       // reality erosion / relocation
@@ -2238,6 +2258,34 @@ export class Game {
   private openNote: string | null = null;
   private notesRead = 0;
 
+  /**
+   * F21: a read note becomes a residue object tagged with a prior tenant;
+   * its deterministic first beat queues for playback ~900 ms out. Rate
+   * limited to one replay per 90 s of session time.
+   */
+  private touchResidue(note: { x: number; z: number }): void {
+    if (!this.residue) return;
+    try {
+      if (this.playtimeSec - this.residueLastPlaySec < 90) return;
+      const noteKey = 'note:' + Math.round(note.x * 10) + ':' + Math.round(note.z * 10);
+      const kinds = Object.keys(RESIDUE_KINDS) as ResidueKind[];
+      const kind = kinds[hash2i(Math.round(note.x * 10), Math.round(note.z * 10), this.seed) % kinds.length];
+      this.residue.add({
+        id: noteKey,
+        x: note.x,
+        z: note.z,
+        kind,
+        tenantSeed: hash2i(this.seed, hash2i(Math.round(note.x * 10), Math.round(note.z * 10), 0x7211)),
+      });
+      const script = this.residue.interact(noteKey);
+      if (!script || script.length === 0) return;
+      this.residueLastPlaySec = this.playtimeSec;
+      this.residueBeatQueue.push({ dueSec: this.playtimeSec + 0.9, text: script[0].text });
+    } catch (e) {
+      console.warn('[bmb] residue touch failed', e);
+    }
+  }
+
   private nearestBattery(): { x: number; z: number } | null {
     const p = this.chunks.nearestBattery(this.player.body.x, this.player.body.z);
     return p ? { x: p.x, z: p.z } : null;
@@ -2307,6 +2355,7 @@ export class Game {
       } catch (e) {
         console.warn('[bmb] echo geography memo feed failed', e);
       }
+      this.touchResidue(note);
     }
     // Wave A (A-2a): NoteReread ledger + bleed distortion on re-reads.
     else if (prompt === '[E] READ NOTE' && note && this.reread) {
