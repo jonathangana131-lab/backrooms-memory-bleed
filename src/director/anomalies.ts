@@ -16,6 +16,11 @@
  *                    the player's periphery, freezing while looked at dead-on.
  *   MIRROR STEPS     during rare bursts each footstep is duplicated 400 ms
  *                    late, panned just off-centre like someone matching you.
+ *   STAIRWELL LOOP   inside a stairwell, the flight loops only while the
+ *                    player's gaze is away for over LOOK_AWAY_SNAP_SEC;
+ *                    looking back freezes it mid-loop, progress advances
+ *                    discretely and position is recomputed from that
+ *                    counter, so nobody teleports through walls.
  *
  * Hard rules: anomalies fire only inside a director window (build/peak),
  * never during a blackout, never within MIN_SPAWN_DIST of the spawn point,
@@ -30,7 +35,8 @@ import type { Emitter } from '../core/events';
 import type { DirectorEventPayload } from './director';
 
 export type AnomalyKind =
-  | 'doorway-deja-vu' | 'corridor-stretch' | 'migrating-lights' | 'mirror-steps';
+  | 'doorway-deja-vu' | 'corridor-stretch' | 'migrating-lights' | 'mirror-steps'
+  | 'stairwell-loop';
 /** Plain-data surface the anomaly system needs from the running game. */
 export interface AnomalyHost {
   playerPosition(): { x: number; z: number };
@@ -48,6 +54,19 @@ export interface AnomalyHost {
   /** One duplicated footstep at stereo pan -1..1 with the given volume multiplier. */
   echoFootstep(pan: number, volumeMul: number): void;
   say(text: string, seconds: number): void;
+  /**
+   * Bounds of the stairwell block containing the player, or null when
+   * outside any stairwell. Optional: hosts without a stairwell never arm F20.
+   */
+  stairwellBounds?(): { minX: number; minZ: number; maxX: number; maxZ: number } | null;
+  /** Seconds the player's gaze has been continuously off the stairwell flight. */
+  gazeAwaySec?(): number;
+  /**
+   * Place the player at the landing indexed by discrete loop progress.
+   * Resolves collisions and builds destination chunks (same contract as
+   * teleportPlayer), so progress never lands anyone inside geometry.
+   */
+  repositionFromProgress?(progress: number): void;
 }
 // ---- tuning (fixed gameplay invariants, not deployment config) ----
 /** Anomalies never manifest this close to where the player woke up. */
@@ -59,6 +78,7 @@ export const CAPS: Record<AnomalyKind, number> = {
   'corridor-stretch': 3,
   'migrating-lights': 4,
   'mirror-steps': 8,
+  'stairwell-loop': 2,
 };
 
 /** Minimum seconds between two firings of the same anomaly. */
@@ -67,6 +87,7 @@ export const COOLDOWNS: Record<AnomalyKind, number> = {
   'corridor-stretch': 120,
   'migrating-lights': 100,
   'mirror-steps': 60,
+  'stairwell-loop': 150,
 };
 
 /** Share of doorways that remember being walked through. */
@@ -100,6 +121,8 @@ const MIGRANT_LIFE_MAX = 18;
 const MIGRANT_SPEED = 1.6;
 const MIGRANT_FREEZE_CONE = 0.28; // radians - looked-at-dead-on cone
 const MIGRANT_SOURCE_RANGE = 24;
+/** Salt for per-progress stairwell draws. */
+const STAIR_SALT = 0x57a10;
 // ---- pure gating math ----
 
 export interface GateCtx {
@@ -155,6 +178,7 @@ const SNAP_LINE = 'The hallway exhales. It is shorter than it was.';
 /** All kinds, stable order for resets and debug readouts. */
 export const ANOMALY_KINDS: readonly AnomalyKind[] = [
   'doorway-deja-vu', 'corridor-stretch', 'migrating-lights', 'mirror-steps',
+  'stairwell-loop',
 ];
 
 /** Bus shape the HorrorDirector exposes (see director.ts events). */
@@ -180,6 +204,18 @@ interface Migrant {
   wpDur: number;
   wx: number; wz: number; // current waypoint
 }
+
+/**
+ * Unobserved stairwell loop state (F20). progress is a discrete landing
+ * counter; consumedAway tracks how much gaze-away time has already been
+ * converted into advances so each extra LOOK_AWAY_SNAP_SEC buys exactly
+ * one more discrete loop.
+ */
+interface StairwellState {
+  active: boolean;
+  progress: number;
+  consumedAway: number;
+}
 /**
  * The anomaly runtime. Pure logic plus the injected host; owns no engine
  * objects, so it is fully unit-testable against a fake AnomalyHost.
@@ -188,14 +224,17 @@ export class AnomalySystem {
   private armed = false;
   private counts: Record<AnomalyKind, number> = {
     'doorway-deja-vu': 0, 'corridor-stretch': 0, 'migrating-lights': 0, 'mirror-steps': 0,
+    'stairwell-loop': 0,
   };
   private lastFired: Record<AnomalyKind, number> = {
     'doorway-deja-vu': -1, 'corridor-stretch': -1, 'migrating-lights': -1, 'mirror-steps': -1,
+    'stairwell-loop': -1,
   };
   private spawn = { x: 0, z: 0 };
   /** Crossings are ignored briefly after we move the player ourselves. */
   private suppressCrossUntil = -1;
   private corr: CorridorState = { active: false, axis: 0, dir: 1, run: 0, stretch: 0, lookAwaySec: 0 };
+  private stair: StairwellState = { active: false, progress: 0, consumedAway: 0 };
   private migrant: Migrant | null = null;
   private migrantRetryAcc = 0;
   private burstUntil = -1;
@@ -225,6 +264,7 @@ export class AnomalySystem {
     this.armed = false;
     this.suppressCrossUntil = -1;
     this.corr = { active: false, axis: 0, dir: 1, run: 0, stretch: 0, lookAwaySec: 0 };
+    this.stair = { active: false, progress: 0, consumedAway: 0 };
     this.migrant = null;
     this.migrantRetryAcc = 0;
     this.burstUntil = -1;
@@ -239,6 +279,7 @@ export class AnomalySystem {
       this.armed = false;
       // windows close while attention is elsewhere: collapse any stretch
       this.snapbackCorridor(false);
+      this.disarmStairwell();
       this.burstUntil = -1;
     }
   }
@@ -272,8 +313,9 @@ export class AnomalySystem {
   }
 
   /**
-   * Per-frame driver: fires due mirror echoes and advances the corridor
-   * and migrating-light state machines. dt is clamped by the caller.
+   * Per-frame driver: fires due mirror echoes and advances the corridor,
+   * stairwell-loop and migrating-light state machines. dt is clamped by
+   * the caller.
    */
   update(dt: number): void {
     if (!(dt > 0)) return;
@@ -284,6 +326,7 @@ export class AnomalySystem {
     }
     if (this.echoQueue.length > 64) this.echoQueue.length = 64;
     this.corridorUpdate(dt);
+    this.stairwellUpdate();
     this.migrantUpdate(dt);
   }
 
@@ -417,6 +460,70 @@ export class AnomalySystem {
     this.suppressCrossUntil = this.host.elapsed() + 0.6;
     // even a metre of returned ground is worth one quiet line
     if (announce && fwd >= 0.9) this.host.say(SNAP_LINE, 3.5);
+  }
+
+  // ---- unobserved stairwell loop ----
+
+  /** True while a stairwell episode is looping the player. */
+  inStairwellLoop(): boolean {
+    return this.stair.active;
+  }
+
+  /**
+   * F20 driver. Arming requires the player inside injected stairwell bounds
+   * during an open window; the loop then advances ONLY while the injected
+   * gaze-away timer exceeds LOOK_AWAY_SNAP_SEC. Every advance increments a
+   * discrete progress counter and recomputes position from it - nothing is
+   * interpolated and nobody is teleported through walls. Looking back (or
+   * leaving the bounds) freezes/resets the state machine untouched.
+   */
+  private stairwellUpdate(): void {
+    const st = this.stair;
+    const bounds = this.host.stairwellBounds ? this.host.stairwellBounds() : null;
+    if (!bounds) {
+      // stepping out of the stairwell lets go of the wrongness entirely
+      if (st.active) this.disarmStairwell();
+      return;
+    }
+    const away = this.host.gazeAwaySec ? this.host.gazeAwaySec() : 0;
+    // observed: the flight holds perfectly still, mid-loop or not; the
+    // unobserved-time meter restarts so a fresh absence owes its own 2 s
+    if (away <= LOOK_AWAY_SNAP_SEC) {
+      if (st.active) st.consumedAway = 0;
+      return;
+    }
+    if (!st.active) {
+      const verdict = this.gate('stairwell-loop', this.host.elapsed());
+      if (!verdict.allowed) return;
+      this.markFired('stairwell-loop', this.host.elapsed());
+      st.active = true;
+      st.progress = 0;
+      st.consumedAway = away - LOOK_AWAY_SNAP_SEC;
+      // crossing the threshold IS the first wrong landing
+      this.advanceStairwell(st);
+    }
+    // one discrete landing per full unobserved interval past what we spent
+    while (away - st.consumedAway > LOOK_AWAY_SNAP_SEC) {
+      st.consumedAway += LOOK_AWAY_SNAP_SEC;
+      this.advanceStairwell(st);
+    }
+  }
+
+  /**
+   * One discrete loop: draw how many flights this landing steals (seeded,
+   * so replays of the same timeline loop identically), bump the progress
+   * counter, and recompute the player's position from that counter alone.
+   */
+  private advanceStairwell(st: StairwellState): void {
+    const pos = this.host.playerPosition();
+    const rr = new RNG(hash2i(st.progress, Math.round((pos.x + pos.z) * 8), this.seed ^ STAIR_SALT));
+    st.progress += rr.chance(0.35) ? 2 : 1;
+    if (this.host.repositionFromProgress) this.host.repositionFromProgress(st.progress);
+  }
+
+  /** End the episode; geometry returns to its honest arrangement. */
+  private disarmStairwell(): void {
+    this.stair = { active: false, progress: 0, consumedAway: 0 };
   }
 
   // ---- migrating lights ----
