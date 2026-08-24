@@ -45,7 +45,9 @@ import { HumanManager } from '../entities/manager';
 import { StorySystem } from '../story/story';
 // Wave A: pure logic modules (no Scene, no AudioContext)
 import { SettingsManager, type GameSettings } from '../ui/settings';
-import { AccessibilityManager, AccessibilityController, type A11yDocumentLike } from '../ui/accessibility';
+import { ACCESSIBILITY_KEY, AccessibilityManager, AccessibilityController, type A11yDocumentLike } from '../ui/accessibility';
+// F99: colorblind pattern language for anomaly captions
+import { anomalySignal, type SeverityClass } from '../ui/colorblindSignals';
 import {
   buildSettingsPanel,
   compositeStore,
@@ -888,10 +890,50 @@ export class Game {
     };
   }
 
+  /**
+   * F99: caption-kind -> anomaly severity class. Kinds outside this table
+   * are not classified anomalies and keep their plain color-only cue.
+   */
+  private static readonly CAPTION_SEVERITY: Record<string, SeverityClass> = {
+    THUNDER: 'info',
+    HUNGER: 'info',
+    FOOTSTEPS: 'warning',
+    'IR STATIC': 'warning',
+    SCREAM: 'critical',
+    IMPACT: 'critical',
+  };
+
+  /**
+   * F99: colorblind pattern-language flag. Gap note:
+   * validateAccessibilityOptions() drops unknown keys, so until a
+   * colorblindMode field lands in the a11y schema the flag is read
+   * directly from the persisted accessibility JSON; default OFF.
+   */
+  private colorblindModeOn(): boolean {
+    try {
+      const raw = localStorage.getItem(ACCESSIBILITY_KEY);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return parsed['colorblindMode'] === true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Wave A (A-1b): route a loud-sound label through the caption layer. */
   private showAudioCaption(kind: string): void {
     if (!this.a11yCtl) return;
-    try { this.a11yCtl.showCaption(kind); }
+    try {
+      // F99: classified anomaly captions gain a geometric pattern + pulse
+      // tag when colorblind mode is on; unclassified kinds pass through.
+      let label = kind;
+      const sev = Game.CAPTION_SEVERITY[kind];
+      if (sev) {
+        const sig = anomalySignal(this.colorblindModeOn(), sev);
+        if (sig) label = `[PATTERN ${sig.patternId} ${sig.pulseHz}Hz] [${kind}]`;
+      }
+      this.a11yCtl.showCaption(label);
+    }
     catch (e) { console.warn('[bmb] caption failed', e); }
   }
 
