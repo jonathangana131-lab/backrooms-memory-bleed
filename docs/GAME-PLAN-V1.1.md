@@ -220,8 +220,14 @@ first-class v1.1 work: a deepening release lands on a complete foundation.
   `setHardcore(false)` ships default with its frames unused — awaits a
   settingspanel entry wired to FlickerBattery (src/ui/settingspanel.ts ← src/player/flickerbattery.ts).
 - Stomach audio stand-in: hunger pangs surface as throttled HUNGER captions
-  because the growl synth never landed — awaits a stomach audio layer
-  consuming `drainEvents()` (src/audio/hungerpangs-consumer ← src/core/game.ts caption path, src/player/hungerpangs.ts).
+  because the growl synth never landed — RESOLVED ✅ (2026-08-24): mounted
+  via `src/audio/hungerpangs-consumer.ts` (`StomachAudio` + pure
+  `planGrowl()`); game.ts drains `HungerPangs.drainEvents()` once per frame
+  into the synth (falling-pitch sawtooth rumble through a resonant lowpass,
+  intensity-graded peak/brightness, seeded gurgle dips) and keeps the >= 20 s
+  HUNGER caption as the muted/unavailable fallback. Evidence:
+  test/hungerpangs-consumer-test.mjs 43/0 ALL PASS, interaction-matrix 6/6
+  with the wiring live, console-audit errors=0, pnpm build green.
 - Season-bleed particle descriptor rides layouts with no consumer:
   `layout.seasonBleed.particle` is unread — awaits the game-side ambient
   particle pass that mounts it (src/core/game.ts particle passes ← src/world/chunkManager.ts, src/world/architect.ts).

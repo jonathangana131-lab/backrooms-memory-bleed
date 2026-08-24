@@ -96,6 +96,7 @@ import { StructureGroans } from '../audio/groans';
 import { CrowdAmbience } from '../audio/crowd';
 import { LoreStings } from '../audio/loresting';
 import { BatteryCues } from '../audio/batterycue';
+import { StomachAudio } from '../audio/hungerpangs-consumer';
 import { VentAudio } from '../audio/vents';
 import { ElevatorAmbience } from '../audio/elevator';
 import { ElectricPops } from '../audio/electricpop';
@@ -346,6 +347,7 @@ export class Game {
   private crowd: CrowdAmbience | null = null;
   private loreStings: LoreStings | null = null;
   private batteryCues: BatteryCues | null = null;
+  private stomachAudio: StomachAudio | null = null;
   private vents: VentAudio | null = null;
   private elevatorAmb: ElevatorAmbience | null = null;
   private electricPops: ElectricPops | null = null;
@@ -2363,6 +2365,9 @@ export class Game {
     catch (e) { console.warn('[bmb] LoreStings unavailable', e); this.loreStings = null; }
     try { this.batteryCues = new BatteryCues(ctx, dest); }
     catch (e) { console.warn('[bmb] BatteryCues unavailable', e); this.batteryCues = null; }
+    // ---- F73 v1.1 debt payoff: drained pang events drive a real growl ----
+    try { this.stomachAudio = new StomachAudio(ctx, dest); }
+    catch (e) { console.warn('[bmb] StomachAudio unavailable', e); this.stomachAudio = null; }
     try { this.electricPops = new ElectricPops(ctx, dest); }
     catch (e) { console.warn('[bmb] ElectricPops unavailable', e); this.electricPops = null; }
     try { this.fanAudio = new FanAudio(ctx, dest); }
@@ -2961,14 +2966,22 @@ export class Game {
           console.warn('[bmb] director learning failed', e);
         }
       }
-      // F73 hunger: absolute session clock in minutes; captions stand in for
-      // the stomach growl until that synth lands (>= 20 s between captions).
+      // F73 hunger: absolute session clock in minutes. Drained pangs feed
+      // the stomach growl synth; the HUNGER caption stays as the throttled
+      // (>= 20 s) visible fallback for muted/unavailable audio.
       if (this.hunger) {
         try {
           this.hunger.update(this.playtimeSec / 60);
-          if (this.hunger.drainEvents().length > 0 && this.playtimeSec - this.hungerCaptionLastSec >= 20) {
-            this.hungerCaptionLastSec = this.playtimeSec;
-            this.showAudioCaption('HUNGER');
+          const pangs = this.hunger.drainEvents();
+          if (pangs.length > 0) {
+            if (this.stomachAudio) {
+              try { this.stomachAudio.consume(pangs); }
+              catch (e) { console.warn('[bmb] stomach audio failed', e); }
+            }
+            if (this.playtimeSec - this.hungerCaptionLastSec >= 20) {
+              this.hungerCaptionLastSec = this.playtimeSec;
+              this.showAudioCaption('HUNGER');
+            }
           }
         } catch (e) {
           console.warn('[bmb] hunger pangs failed', e);
