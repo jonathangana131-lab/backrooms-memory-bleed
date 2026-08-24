@@ -76,14 +76,14 @@ with infinite possibility and no end.
 ### CATEGORY C — deeper wrongness
 
 - F15 Pocket dimensions — seeded doors open into interiors larger than the building. AC: interior byte-identical regen; exterior unchanged.
-- F16 Blackout rearrangement — props drift one slot, one door bricks after blackouts. AC: deltas reversible.
+- F16 Blackout rearrangement — props drift one slot, one door bricks after blackouts. AC: deltas reversible. SHIPPED ✅ (verified — evidence: test/blackoutdeltas-test.mjs 9/0 + test/anomalies-test.mjs F16 group ALL PASS; applyBlackoutShift/revertBlackoutShift fully reversible with deterministic per-(seed,ordinal) replay, bricked door's EdgeCode.SOLID override persisted in ChunkDeltas until next blackout; module-level in src/world/chunkDeltas.ts, not yet mounted in game.ts)
 - F17 Echo geography — halls return YOUR earlier footsteps/memos as distant echoes. AC: deterministic replay per site. SHIPPED ✅ (evidence: test/echogeography-test.mjs 4/0 ALL PASS; mounted — footstep bursts + memo moments recorded per site, re-entry replays ≤2 cues)
 - F18 Time slippage — clocks/camcorder/session timer disagree inside saturation zones. AC: offsets consistent per zone seed. SHIPPED ✅ (evidence: test/timeslippage-test.mjs 4/0; mounted on live memory-zone saturation, 60 s disagreement warning once per zone visit)
 - F19 Impossible windows — lit rooms visible where exterior should be. AC: registry + culling test.
-- F20 Unobserved stairwell loop — loops only while gaze-away >2s. AC: trigger iff condition (reuses stretch logic).
+- F20 Unobserved stairwell loop — loops only while gaze-away >2s. AC: trigger iff condition (reuses stretch logic). SHIPPED ✅ (verified — evidence: test/stairloop-test.mjs 6/0 + test/anomalies-test.mjs F20 group ALL PASS; arms strictly past LOOK_AWAY_SNAP_SEC shared with corridor-stretch, discrete seeded landings recomputed from progress counter, clean disarm on bounds-exit/window-close; mounted via AnomalySystem host providers)
 - F21 Memory residue touch — tagged objects play ghost replays of prior tenants. AC: one-shot per visit. SHIPPED ✅ (evidence: test/residue-test.mjs 4/0; mounted on note-read path with seeded tenant scripts + frame-queue playback, 1/90 s rate limit)
 - F22 Gravity ambivalence — saturation zones tilt balance ±5° with veering walk. AC: bounded, exits cleanly. SHIPPED ✅ (evidence: test/gravitytilt-test.mjs 7/0 adversarial bounds; mounted via baseline-trick roll after player.update, sum-clamped)
-- F23 Door/wall swaps — door opens into wall; adjacent wall becomes a door. AC: nav+collision+mesh atomic swap test.
+- F23 Door/wall swaps — door opens into wall; adjacent wall becomes a door. AC: nav+collision+mesh atomic swap test. SHIPPED ✅ (verified — evidence: test/doorswap-test.mjs 8/0 + test/anomalies-test.mjs F23 group ALL PASS; single bulk write flips mesher marker/nav flag/collision solid on both cells with assertSwapConsistent gate, rides ChunkDeltas via DeltasSwapGrid so revertAll restores canonical; module-level in src/world/doorswap.ts + src/world/chunkDeltas.ts, not yet mounted in game.ts)
 - F24 Aging corridors — revisits accumulate decay proportional to sessions since first seen. AC: persists via ChunkDeltas. SHIPPED ✅ (evidence: test/aging-test.mjs 8/0 ALL PASS; mounted ChunkManager build path — every chunk build records a visit and folds decayStage stain params into the mesher's stain set, exposed via agingAt(cx,cz))
 
 ### CATEGORY D — entities & society
@@ -119,9 +119,9 @@ with infinite possibility and no end.
 - F44 Save-file scarring — long-lived saves grow phantom cracks shaped like your routes. AC: determinism per save-id.
 - F45 New Game+ : the place remembers — prior-run graffiti appears in fresh runs. AC: provenance test.
 - F46 Expedition ledger — meta-archive of discovered notes/clusters between runs. AC: round-trip test.
-- F47 Daily rite — shared daily seed + discovery checklist overlay. AC: date-derived seed test.
+- F47 Daily rite — shared daily seed + discovery checklist overlay. AC: date-derived seed test. SHIPPED ✅ (evidence: src/ui/dailyrite.ts + game.ts title banner "TODAY'S RITE — SEED …" + milestone feed; test/ui-meta-v1-test.mjs F47 checks incl. rollover, ALL PASS)
 - F48 Director personalities — per-run temperament (patient/vindictive/theatrical) altering pacing curves. AC: differentiation test.
-- F49 Accessibility pack — motion-safety mode, speaker-tagged subtitles, high-contrast palette. AC: each toggle zeroes its effect.
+- F49 Accessibility pack — motion-safety mode, speaker-tagged subtitles, high-contrast palette. AC: each toggle zeroes its effect. SHIPPED ✅ (evidence: src/ui/accessibilitypack.ts effectors; GameSettings motionSafety/speakerTags + settingspanel toggles; controller bob/sway gate, shake/tilt gates, ui.say tagger, --bmb-hc-* token swap in game.ts applyAccessibilityPack; test/ui-meta-v1-test.mjs F49 zeroing checks, ALL PASS)
 - F50 The Exit that isn't — ultra-rare fire-exit into white void epilogue room. AC: ≤1 per 8h expected; flow test.
 
 ### CATEGORY H — second hundred (added by community directive)
@@ -168,11 +168,11 @@ with infinite possibility and no end.
 - F90 Director v2 learning — pauses/hesitations teach the director what scares YOU. AC: telemetry-to-pacing test.
 - F91 Staged wake cinematic — waking sequence procedurally staged per seed. AC: staging determinism test.
 - F92 Camcorder optics — photo-mode DOF + focal breathing matching the IR lens. AC: optic curve test.
-- F93 Diegetic menus — title/pause projected onto in-world walls. AC: projection raycast mount test.
+- F93 Diegetic menus — title/pause projected onto in-world walls. AC: projection raycast mount test. SHIPPED ✅ (evidence: diegmenus pure math + src/ui/wallmenu.ts textured plane; game.ts remountDiegeticMenus raycasts the camera ray and mounts via faceTowards on menu/paused states; test/ui-meta-v1-test.mjs F93 raycast/coplanarity checks, ALL PASS)
 - F94 Lying compass — needle bends toward memory wells under contamination. AC: bend-vs-well test. SHIPPED ✅ (evidence: test/lyingcompass-test.mjs LYINGCOMPASS ALL PASS 35 checks; mounted src/core/game.ts mount batch C — LyingCompass)
 - F95 Hardcore flicker battery UI — charge conveyed only by torch flicker (opt-in). AC: mode equivalence test. SHIPPED ✅ (evidence: test/flickerbattery-test.mjs FLICKERBATTERY ALL PASS 32 checks; mounted src/core/game.ts mount batch B — FlickerBattery)
 - F96 Evolving journal font — handwriting degrades with stage/sanity. AC: font-stage table test. SHIPPED ✅ (evidence: test/journalfont-test.mjs JOURNALFONT ALL PASS 17 checks; mounted src/core/game.ts mount batch C — degradationIndex/entryJournalFont)
-- F97 Bureaucratic achievements — toasts as stamped FORMS (approved/denied). AC: stamp routing test.
+- F97 Bureaucratic achievements — toasts as stamped FORMS (approved/denied). AC: stamp routing test. SHIPPED ✅ (evidence: src/ui/formtoasts.ts routeStamp/formNumber + ACHIEVEMENT_FORM_REQUESTS table wired to TrackerFeed unlocks in game.ts; test/ui-meta-v1-test.mjs F97 routing-table + burst-queue checks, ALL PASS)
 - F98 Local speedrun ghosts — per-seed ghost replays. AC: ghost determinism test.
 - F99 Colorblind anomaly signals — pattern language replaces color-only cues. AC: pattern coverage test.
 - F100 The credits walk — credits roll while walking an endless corridor of your own screenshots. AC: screenshot pipeline test.
