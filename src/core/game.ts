@@ -113,6 +113,8 @@ import { formatExtended, type ExtendedStats } from '../ui/endstatsext';
 import { createFogVariation } from '../gfx/fogvariation';
 // F17: echo geography — the halls record your sounds and give them back
 import { EchoGeography } from '../story/echogeography';
+// F18: time slippage — clocks drift apart inside memory-saturated zones
+import { TimeSlippage } from '../story/timeslippage';
 
 export type GameState = 'menu' | 'playing' | 'paused';
 
@@ -225,6 +227,13 @@ export class Game {
   private echoCueQueue: { dueSec: number; text?: string }[] = [];
   /** echoes played during the current site entry (capped at 2) */
   private echoPlaysThisEntry = 0;
+
+  // ---- F18 time slippage: per-run tracker + one-warning-per-visit state ----
+  private timeSlip: TimeSlippage | null = null;
+  /** zone key fed to the slippage tracker last frame */
+  private slipZoneKey: string | null = null;
+  /** true once the 60 s disagreement warning fired for the current visit */
+  private slipWarned = false;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -832,6 +841,11 @@ export class Game {
     this.echoSiteKey = null;
     this.echoCueQueue.length = 0;
     this.echoPlaysThisEntry = 0;
+    // F18: fresh clock-slippage tracker per run
+    try { this.timeSlip = new TimeSlippage(this.seed); }
+    catch (e) { console.warn('[bmb] time slippage unavailable', e); this.timeSlip = null; }
+    this.slipZoneKey = null;
+    this.slipWarned = false;
     this.knownChunkKeys.clear();
     this.lastChunksBuiltSeen = 0;
     this.markedBeaconKeys.clear();
@@ -1702,6 +1716,27 @@ export class Game {
           }
         } catch (e) {
           console.warn('[bmb] echo geography replay failed', e);
+        }
+      }
+      // F18: the occupied 12 m site is the slippage zone; its memory
+      // intensity is the saturation. A >60 s clock disagreement warns once
+      // per zone visit.
+      if (this.timeSlip) {
+        try {
+          const zk = Math.floor(this.player.body.x / 12) + ',' + Math.floor(this.player.body.z / 12);
+          if (zk !== this.slipZoneKey) {
+            this.slipZoneKey = zk;
+            this.slipWarned = false;
+          }
+          const sat = Math.max(0, Math.min(1, this.mem.sampleAt(this.player.body.x, this.player.body.z).intensity));
+          this.timeSlip.enterZone(zk, sat);
+          this.timeSlip.reading('session', this.playtimeSec);
+          if (!this.slipWarned && this.timeSlip.disagreementSec() >= 60) {
+            this.slipWarned = true;
+            this.ui.say('...the clocks down here disagree about you...', 4);
+          }
+        } catch (e) {
+          console.warn('[bmb] time slippage failed', e);
         }
       }
       this.entityScheduler(dt);
