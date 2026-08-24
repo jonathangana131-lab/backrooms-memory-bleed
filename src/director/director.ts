@@ -1,9 +1,21 @@
 /**
  * Horror Director.
  * Controls pacing: long calm periods, slow builds, rare peaks.
+ *
+ * Determinism: every pacing draw (phase durations, per-frame probability
+ * rolls) comes from one persistent stream derived from the run seed, so two
+ * directors built with the same seed take identical phase paths under an
+ * identical update(dt) timeline.
  */
 import { RNG } from '../core/rng';
 import { Emitter } from '../core/events';
+
+/**
+ * Salt separating the director's persistent phase/pacing stream from other
+ * seed-derived streams (echo footsteps, build-transition rolls) that hash
+ * the raw seed against elapsed time.
+ */
+const PHASE_STREAM_SALT = 0x0dd1f33d >>> 0;
 
 export type Phase = 'calm' | 'build' | 'peak' | 'release';
 
@@ -55,7 +67,7 @@ export class HorrorDirector {
   readonly events = new Emitter<{ directorEvent: DirectorEventPayload }>();
   phase: Phase = 'calm';
   private phaseT = 0;
-  private phaseDur = 70 + Math.random() * 60;
+  private phaseDur: number;
   tension = 0;
   peaksUsed = 0;
 
@@ -84,7 +96,19 @@ export class HorrorDirector {
   private echoCountdown = 0;
   private echoQueue: { at: number; running: boolean }[] = [];
 
-  constructor(private host: DirectorHost, private seed: number) {}
+  /** Persistent phase/pacing stream; identical seed ⇒ identical pacing. */
+  private readonly pacingRng: RNG;
+
+  /**
+   * @param host Pacing hooks the director drives.
+   * @param seed Run seed; all pacing derives from it deterministically.
+   * @param rng Optional injected stream (tests); defaults to one derived
+   *            from `seed` so same-seed replays are identical.
+   */
+  constructor(private host: DirectorHost, private seed: number, rng?: RNG) {
+    this.pacingRng = rng ?? new RNG((seed ^ PHASE_STREAM_SALT) >>> 0);
+    this.phaseDur = this.pacingRng.range(70, 130);
+  }
 
   notifyDiscovery(): void {
     this.tension = Math.min(1, this.tension + 0.15);
@@ -95,13 +119,13 @@ export class HorrorDirector {
     switch (this.phase) {
       case 'calm': {
         this.tension = Math.max(0, this.tension - dt * 0.05);
-        if (this.phaseT > this.phaseDur) this.enter('build', 35 + Math.random() * 55);
+        if (this.phaseT > this.phaseDur) this.enter('build', this.pacingRng.range(35, 90));
         break;
       }
       case 'build': {
         this.tension = Math.min(0.75, (this.phaseT / this.phaseDur) * 0.75);
-        if (Math.random() < dt * 0.06) this.host.killNearbyLight();
-        if (Math.random() < dt * 0.04) this.host.distantThreat();
+        if (this.pacingRng.chance(dt * 0.06)) this.host.killNearbyLight();
+        if (this.pacingRng.chance(dt * 0.04)) this.host.distantThreat();
         if (this.phaseT > this.phaseDur) {
           const rng = new RNG((this.seed ^ Math.floor(this.host.elapsed() * 1000)) >>> 0);
           if (rng.chance(0.55)) this.enter('peak', 12 + rng.next() * 14);
@@ -112,21 +136,21 @@ export class HorrorDirector {
       case 'peak': {
         this.tension = 0.85 + Math.sin(this.phaseT * 3) * 0.1;
         if (this.phaseT < dt * 2) {
-          const blackoutSec = 3 + Math.random() * 5;
+          const blackoutSec = this.pacingRng.range(3, 8);
           this.host.blackoutPulse(blackoutSec);
           // When this blackout lifts, the lights come back warm (falseDawn).
           this.falseDawnPendingAt = this.host.elapsed() + blackoutSec;
           this.host.requestEntitySpawn('watcher');
-          if (Math.random() < 0.35) this.host.nonEuclideanNudge();
-          if (Math.random() < 0.4) this.host.armDoorwayLoop(75);
+          if (this.pacingRng.chance(0.35)) this.host.nonEuclideanNudge();
+          if (this.pacingRng.chance(0.4)) this.host.armDoorwayLoop(75);
         }
-        if (Math.random() < dt * 0.2) this.host.whisperSurge();
-        if (this.phaseT > this.phaseDur) this.enter('release', 50 + Math.random() * 70);
+        if (this.pacingRng.chance(dt * 0.2)) this.host.whisperSurge();
+        if (this.phaseT > this.phaseDur) this.enter('release', this.pacingRng.range(50, 120));
         break;
       }
       case 'release': {
         this.tension = Math.max(0, 0.4 - this.phaseT * 0.05);
-        if (this.phaseT > this.phaseDur) this.enter('calm', 60 + Math.random() * 80);
+        if (this.phaseT > this.phaseDur) this.enter('calm', this.pacingRng.range(60, 140));
         break;
       }
     }
