@@ -24,6 +24,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bmb-vignettes-'));
 const SOURCES = [
   ['src/world/constants.ts', 'constants.mjs'],
   ['src/core/rng.ts', 'rng.mjs'],
+  ['src/world/placement-expansion.ts', 'placement-expansion.mjs'],
   ['src/world/vignettes.ts', 'vignettes.mjs'],
 ];
 for (const [rel, out] of SOURCES) {
@@ -34,13 +35,14 @@ for (const [rel, out] of SOURCES) {
   // rewrite relative specifiers for the flat output dir
   js = js
     .replace(/from '\.\/constants'/g, "from './constants.mjs'")
-    .replace(/from '\.\.\/core\/rng'/g, "from './rng.mjs'");
+    .replace(/from '\.\.\/core\/rng'/g, "from './rng.mjs'")
+    .replace(/from '\.\/placement-expansion'/g, "from './placement-expansion.mjs'");
   fs.writeFileSync(path.join(tmp, out), js);
 }
 const mod = await import(pathToFileURL(path.join(tmp, 'vignettes.mjs')).href);
 const rngMod = await import(pathToFileURL(path.join(tmp, 'rng.mjs')).href);
 const conMod = await import(pathToFileURL(path.join(tmp, 'constants.mjs')).href);
-const { VIGNETTES, VIGNETTE_CHANCE, abandonedMeal, makeshiftBed, researchStation, waitingRoom, signalShrine, placeVignette } = mod;
+const { VIGNETTES, VIGNETTE_CHANCE, abandonedMeal, makeshiftBed, researchStation, waitingRoom, signalShrine, bathroomStall, elevatorLobby, storageCage, breakRoom, janitorCloset, placeVignette } = mod;
 const { RNG, hash2i } = rngMod;
 const { District, EdgeCode, CELL, CHUNK_CELLS } = conMod;
 
@@ -75,11 +77,16 @@ const BUILDERS = [
   ['research_station', researchStation],
   ['waiting_room', waitingRoom],
   ['signal_shrine', signalShrine],
+  ['bathroom_stall', bathroomStall],
+  ['elevator_lobby', elevatorLobby],
+  ['storage_cage', storageCage],
+  ['break_room', breakRoom],
+  ['janitor_closet', janitorCloset],
 ];
 
 // --- catalog shape --------------------------------------------------------
-check('VIGNETTES holds all five scenes', VIGNETTES.length === 5, String(VIGNETTES.length));
-check('VIGNETTE ids unique', new Set(VIGNETTES.map((v) => v.id)).size === 5);
+check('VIGNETTES holds all ten scenes', VIGNETTES.length === 10, String(VIGNETTES.length));
+check('VIGNETTE ids unique', new Set(VIGNETTES.map((v) => v.id)).size === 10);
 check('exported builders match VIGNETTES entries',
   VIGNETTES.every((v) => BUILDERS.some(([id, fn]) => id === v.id && fn === v.build)));
 
@@ -162,7 +169,7 @@ console.log('       prop counts per scene: ' + VIGNETTES.map((v) => v.build(0, 0
   const rate = placedCount / TRIALS;
   check('placement rate lands near 2 percent (0.5..6)', rate > 0.005 && rate < 0.06, 'rate=' + rate.toFixed(4));
   console.log('       observed rate over ' + TRIALS + ' chunks: ' + (rate * 100).toFixed(2) + '%');
-  check('VIGNETTE_CHANCE constant is 0.02', VIGNETTE_CHANCE === 0.02);
+  check('VIGNETTE_CHANCE constant is 0.03', VIGNETTE_CHANCE === 0.03);
 }
 
 // --- unsuitable chunks never receive one -----------------------------------
