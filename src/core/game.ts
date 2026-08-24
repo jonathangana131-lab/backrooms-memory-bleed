@@ -34,6 +34,8 @@ import { SaveDB, type SaveSlot, type SettingsData } from '../save/db';
 import { MemoryField, MemoryKind, MEMORY_NAMES, sectorName } from '../memory/field';
 import { MemoryWeather } from '../memory/weather';
 import { HorrorDirector, type DirectorHost } from '../director/director';
+// F48: per-run director temperament — pacing personality selected from the seed
+import { pacingRngFor, temperamentForRun } from '../director/persona';
 import { AnomalySystem, type AnomalyHost } from '../director/anomalies';
 import { ChunkDeltas } from '../world/chunkDeltas';
 import { RealityErosion } from '../director/erosion';
@@ -130,6 +132,10 @@ import { BlinkScheduler } from '../player/blinks';
 import { AdrenalineSystem } from '../player/adrenaline';
 import { HungerPangs } from '../player/hunger';
 import { FlickerBattery } from '../player/flickerbattery';
+// Batch C mounts: grounded entity gossip + lying compass + journal hand decay
+import { GossipSource, type VisitedSite } from '../entities/gossip';
+import { LyingCompass, bearingDeg, signedDeltaDeg, type MemoryWell } from '../ui/lyingcompass';
+import { degradationIndex, entryJournalFont } from '../ui/journalfont';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -140,6 +146,21 @@ const SPAWN_X = 1.25;
 const SPAWN_Z = 1.25;
 /** F22: hard roll cap of the gravity tilt, in radians (GravityTilt.TILT_MAX_DEG). */
 const TILT_MAX_RAD = (5 * Math.PI) / 180;
+
+/** F29: per-run salt for the gossip RNG, so identical seeds replay identically. */
+const GOSSIP_SALT = 0x60a55;
+
+/** F94: seconds between coarse memory-well sweeps of the neighborhood. */
+const COMPASS_RESAMPLE_SEC = 2;
+/** F94: coarse sample-grid spacing in meters for well detection. */
+const COMPASS_WELL_GRID_M = 15;
+/** F94: minimum memory intensity for a grid sample to count as a well. */
+const COMPASS_WELL_MIN_INTENSITY = 0.25;
+
+/** F96: seconds between journal-hand restyles of an open note body. */
+const JOURNAL_RESTYLE_SEC = 1;
+/** F96: opacity lost per unit of glyph-break probability at full break. */
+const JOURNAL_OPACITY_LOSS_PER_BREAK = 0.15;
 
 /** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
 function presetToQualityNum(q: string): number {
@@ -313,6 +334,25 @@ export class Game {
   /** F95: opt-in hardcore flicker battery model; mode stays off until a
    * settings-schema toggle exists (see beginRun) */
   private flickerBattery: FlickerBattery | null = null;
+
+  // ---- Batch C mounts (F29/F94/F96) ----
+  /** F29: landmark visit ledger keyed by landmark name; entries are replaced
+   * on revisit so lastVisitedAt always carries the freshest occupancy tick. */
+  private gossipSites = new Map<string, VisitedSite>();
+  /** F29: bumped whenever the ledger content changes; drives lazy rebuilds. */
+  private gossipLedgerRev = 0;
+  /** F29: ledger revision the current GossipSource was built over. */
+  private gossipBuiltRev = -1;
+  /** F29: per-run grounded-line source over the visit ledger. */
+  private gossipSource: GossipSource | null = null;
+  /** F94: needle model fed wells + contamination from the memory field. */
+  private lyingCompass = new LyingCompass();
+  /** F94: seconds until the next coarse well resample (~2 s cadence). */
+  private compassWellTimer = 0;
+  /** F96: seconds until the next journal-hand restyle (throttled). */
+  private journalFontTimer = 0;
+  /** F96: stable page id (note coords) seeding the per-entry hand wobble. */
+  private journalEntryId = 'note:unread';
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -648,7 +688,13 @@ export class Game {
       playerPosition: () => ({ x: this.player.body.x, z: this.player.body.z }),
       elapsed: () => this.playtimeSec,
     };
-    this.director = new HorrorDirector(host, this.seed);
+    // F48: every run picks a temperament from the seed; the director routes
+    // phase durations, peak intensity, and window-event chances through it.
+    const temperament = temperamentForRun(this.seed);
+    this.director = new HorrorDirector(host, this.seed, undefined, {
+      temperament,
+      pacingRng: pacingRngFor(this.seed, temperament),
+    });
     this.anomalies?.dispose();
     this.anomalies = new AnomalySystem(this.anomalyHost(), this.seed, this.director.events);
     this.story = new StorySystem(this.scene, this.seed);
@@ -922,7 +968,7 @@ export class Game {
     this.mem.seed = this.seed;
     this.weather = new MemoryWeather(this.seed ^ 0x5179);
     this.mem.weather = this.weather;
-    this.director = new HorrorDirector({
+    const beginHost: DirectorHost = {
       lightingStress: (v) => { this.lighting.stressLevel = v; },
       killNearbyLight: () => this.killNearbyLight(),
       blackoutPulse: (sec) => { this.blackoutUntil = this.playtimeSec + sec; },
@@ -933,7 +979,14 @@ export class Game {
       requestEntitySpawn: (kind) => this.spawnEntity(kind),
       playerPosition: () => ({ x: this.player.body.x, z: this.player.body.z }),
       elapsed: () => this.playtimeSec,
-    }, this.seed);
+    };
+    // F48: fresh per-run persona so the temperament re-derives from the
+    // new seed and the pacing stream restarts with the run.
+    const runTemperament = temperamentForRun(this.seed);
+    this.director = new HorrorDirector(beginHost, this.seed, undefined, {
+      temperament: runTemperament,
+      pacingRng: pacingRngFor(this.seed, runTemperament),
+    });
     this.anomalies?.dispose();
     this.anomalies = new AnomalySystem(this.anomalyHost(), this.seed, this.director.events);
     this.deltas.revertAll(); // a fresh expedition finds the canonical world
@@ -1017,6 +1070,17 @@ export class Game {
     // settings section lands.
     this.flickerBattery = new FlickerBattery((this.seed ^ 0xf11c9) >>> 0);
     this.flickerBattery.setHardcore(false);
+    // F29: fresh visit ledger + gossip source per run (grounding is per-run)
+    this.gossipSites.clear();
+    this.gossipLedgerRev = 0;
+    this.gossipBuiltRev = -1;
+    this.gossipSource = null;
+    // F94: fresh needle model per run; wells repopulate on the next resample
+    this.lyingCompass = new LyingCompass();
+    this.compassWellTimer = 0;
+    // F96: journal hand reapplies on the next open note frame
+    this.journalFontTimer = 0;
+    this.journalEntryId = 'note:unread';
     // near-miss telemetry + adrenaline arming reset with the fresh run
     this.nearMisses = 0;
     this.nearMissArmed = true;
@@ -1335,14 +1399,118 @@ export class Game {
     'Put in the hours and eventually the walls let you home.',
   ];
 
+  /**
+   * F29: one grounded gossip line for a figure archetype, drawn over the
+   * landmark visit ledger. The GossipSource rebuilds lazily whenever the
+   * ledger changed since the last build (the revision bumps on every visit),
+   * so fresh discoveries join the pool without per-frame reconstruction.
+   * Returns null when nothing is groundable yet (empty ledger is
+   * silence-safe) or dedup concedes; callers fall back to their scripted
+   * pools. Draws flow through src/core/rng.ts keyed by (seed ^ GOSSIP_SALT)
+   * with recency weighted by playtimeSec — no Date.now, no Math.random.
+   */
+  private gossipLine(kind: 'helper' | 'believer'): string | null {
+    if (!this.gossipSource || this.gossipBuiltRev !== this.gossipLedgerRev) {
+      this.gossipSource = new GossipSource(
+        [...this.gossipSites.values()],
+        (this.seed ^ GOSSIP_SALT) >>> 0,
+      );
+      this.gossipBuiltRev = this.gossipLedgerRev;
+    }
+    const line = this.gossipSource.generate(kind, this.playtimeSec);
+    return line ? line.text : null;
+  }
+
+  /**
+   * F94: feed the lying-compass needle model from the memory field. Every
+   * COMPASS_RESAMPLE_SEC the neighborhood sweeps on a coarse grid and each
+   * sample at or above COMPASS_WELL_MIN_INTENSITY becomes a memory well
+   * with that intensity as pull strength; contamination tracks the zone
+   * saturation at the player's own position, so a saturated district bends
+   * the needle while clean halls read true (c = 0 is exact). Pure sampling
+   * of mem.sampleAt — deterministic per field state, no clock, no RNG.
+   *
+   * Seam: only the screen-edge beacon compass consumes the needle model.
+   * Its marker position rotates about the player by the signed true→needle
+   * bearing delta (≤ MAX_BEND_DEG × contamination), so the chevron misleads
+   * under saturation. The minimap stays truthful by design: it renders
+   * explored geometry, not guidance, so the lie bends the walk without
+   * corrupting the player's map record.
+   */
+  private updateLyingCompass(dt: number): void {
+    if (!(dt > 0)) return;
+    this.compassWellTimer -= dt;
+    if (this.compassWellTimer > 0) return;
+    this.compassWellTimer = COMPASS_RESAMPLE_SEC;
+    const px = this.player.body.x;
+    const pz = this.player.body.z;
+    const wells: MemoryWell[] = [];
+    for (let gx = -2; gx <= 2; gx++) {
+      for (let gz = -2; gz <= 2; gz++) {
+        const x = px + gx * COMPASS_WELL_GRID_M;
+        const z = pz + gz * COMPASS_WELL_GRID_M;
+        const s = Math.max(0, Math.min(1, this.mem.sampleAt(x, z).intensity));
+        if (s >= COMPASS_WELL_MIN_INTENSITY) wells.push({ x, z, strength: s });
+      }
+    }
+    this.lyingCompass.setWells(wells);
+    this.lyingCompass.setContamination(
+      Math.max(0, Math.min(1, this.mem.sampleAt(px, pz).intensity)),
+    );
+  }
+
+  /**
+   * F96: sanity has no dedicated stat, so the journal hand decays against a
+   * proxy: 1 − zone saturation, where saturation is the memory-field
+   * intensity at the player's position (the same reading the gravity tilt
+   * and the lying compass consume). A clean hallway reads as steady hands;
+   * standing inside a saturated zone shakes them, on top of the arc-stage
+   * term folded in from story.stage by degradationIndex().
+   */
+  private get sanityProxy(): number {
+    return 1 - Math.max(0, Math.min(1, this.mem.sampleAt(this.player.body.x, this.player.body.z).intensity));
+  }
+
+  /**
+   * F96: restyle the open note body with the degrading journal hand:
+   * entryJournalFont(degradationIndex(story.stage, sanityProxy), entryId)
+   * drives an italic slant skew and an opacity loss of
+   * JOURNAL_OPACITY_LOSS_PER_BREAK × glyph-break probability. entryId seeds
+   * the per-entry ±10% wobble, so one page's handwriting differs from the
+   * next while staying deterministic per (entryId, index).
+   */
+  private applyJournalHand(entryId: string): void {
+    try {
+      const body = document.querySelector('.note-paper p');
+      if (!(body instanceof HTMLElement)) return;
+      const index = degradationIndex(this.story.stage, this.sanityProxy);
+      const font = entryJournalFont(index, entryId);
+      body.style.transform = 'skewX(' + (-font.slantDeg).toFixed(2) + 'deg)';
+      body.style.opacity = String(Math.max(
+        0,
+        1 - JOURNAL_OPACITY_LOSS_PER_BREAK * font.glyphBreakProbability,
+      ));
+    } catch (e) {
+      console.warn('[bmb] journal hand restyle failed', e);
+    }
+  }
+
   private helperDialogue(): void {
     // F3: line picks are seeded draws (stable per run timeline)
     const rng = new RNG(hash2i(Math.floor(this.playtimeSec * 10), 1083, this.seed));
     const h = this.humans.nearestOf(this.player.body.x, this.player.body.z, ['helper']);
     if (h && !h.said) {
       h.said = true;
-      const i = rng.int(0, Game.HELPER_LINES.length);
-      this.ui.say(Game.HELPER_LINES[i], 5);
+      // F29: a quarter of helper vocals come out as grounded gossip about
+      // places the player actually visited; falls back to the scripted pool
+      // when the ledger is still empty or dedup concedes.
+      const gossiped = rng.chance(0.25) ? this.gossipLine('helper') : null;
+      if (gossiped !== null) {
+        this.ui.say(gossiped, 5);
+      } else {
+        const i = rng.int(0, Game.HELPER_LINES.length);
+        this.ui.say(Game.HELPER_LINES[i], 5);
+      }
     }
     const b = this.humans.nearestOf(this.player.body.x, this.player.body.z, ['believer']);
     if (b && performance.now() / 1000 - b.lastSpokeAt > 12) {
@@ -1355,7 +1523,13 @@ export class Game {
       } else if (this.story.discoveries >= 2) {
         line = 'You keep finding their beacons. They keep not finding you.';
       } else {
-        line = Game.BELIEVER_LINES[rng.int(0, Game.BELIEVER_LINES.length)];
+        // F29: same grounding pass over the believer pool pick; scripted
+        // context lines above stay verbatim because they answer the moment,
+        // not the place.
+        const gossiped = rng.chance(0.25) ? this.gossipLine('believer') : null;
+        line = gossiped !== null
+          ? gossiped
+          : Game.BELIEVER_LINES[rng.int(0, Game.BELIEVER_LINES.length)];
       }
       this.ui.say(line, 4.5);
     }
@@ -1694,9 +1868,23 @@ export class Game {
     if (active) {
       this.mem.recordPresence(this.player.body.x, this.player.body.z, dt);
       this.mem.tick(dt);
+      // F94: coarse well sweep + contamination refresh on its ~2 s cadence
+      try { this.updateLyingCompass(dt); }
+      catch (e) { console.warn('[bmb] lying compass feed failed', e); }
       // landmark discovery: one-time line per named room
       if (this.playerLandmark !== this.chunks.landmarkAtPos(this.player.body.x, this.player.body.z)) {
         this.playerLandmark = this.chunks.landmarkAtPos(this.player.body.x, this.player.body.z);
+        // F29: every landmark occupancy feeds the visit ledger — first
+        // discovery or revisit alike, since recency is what gossip weights.
+        if (this.playerLandmark) {
+          this.gossipSites.set(this.playerLandmark, {
+            siteKey: this.playerLandmark,
+            kind: 'landmark',
+            name: this.playerLandmark,
+            lastVisitedAt: this.playtimeSec,
+          });
+          this.gossipLedgerRev++;
+        }
         if (this.playerLandmark && !this.seenLandmarks.has(this.playerLandmark)) {
           this.seenLandmarks.add(this.playerLandmark);
           const lines: Record<string, string> = {
@@ -2439,11 +2627,38 @@ export class Game {
         const pan = Math.max(-1, Math.min(1, dx * Math.cos(this.player.yaw) - dz * Math.sin(this.player.yaw)));
         this.audio.beaconUpdate(nb, pan);
       }
-      // Wave B (B-3b): compass points at that same nearest unfound beacon
+      // Wave B (B-3b): compass points at that same nearest unfound beacon.
+      // F94: the chevron reads through the lying needle — under memory
+      // contamination its marker rotates about the player toward the
+      // dominant well (≤ MAX_BEND_DEG × contamination; exact at c = 0).
+      // The beacon audio pan above keeps the true bearing on purpose: the
+      // sound is the building, the needle is the theft. Minimap stays true
+      // too — seam rationale lives on updateLyingCompass().
       if (this.compass) {
+        let cx2 = nx2;
+        let cz2 = nz2;
+        try {
+          if (isFinite(nb)) {
+            const trueBearing = bearingDeg(nx2 - this.player.body.x, nz2 - this.player.body.z);
+            const needle = this.lyingCompass.needleAngle(this.player.body.x, this.player.body.z, trueBearing);
+            const bendRad = (signedDeltaDeg(trueBearing, needle) * Math.PI) / 180;
+            if (bendRad !== 0) {
+              const cos = Math.cos(bendRad);
+              const sin = Math.sin(bendRad);
+              const dx = nx2 - this.player.body.x;
+              const dz = nz2 - this.player.body.z;
+              cx2 = this.player.body.x + dx * cos - dz * sin;
+              cz2 = this.player.body.z + dx * sin + dz * cos;
+            }
+          }
+        } catch (e) {
+          console.warn('[bmb] lying compass bend failed', e);
+          cx2 = nx2;
+          cz2 = nz2;
+        }
         try {
           this.compass.update(this.player.body.x, this.player.body.z, this.player.yaw,
-            this.camera, nx2, nz2, isFinite(nb));
+            this.camera, cx2, cz2, isFinite(nb));
         } catch (e) { console.warn('[bmb] compass update failed', e); }
       }
     } else if (this.compass) {
@@ -2478,6 +2693,16 @@ export class Game {
     this.ui.setBattery(this.flashlight.has ? this.flashlight.battery : null);
     this.ui.torchOn = this.flashlight.on;
     this.ui.tickSubtitles(dt);
+    // F96: keep the open note's hand current as stage/saturation drift
+    if (active && this.ui.noteIsOpen) {
+      try {
+        this.journalFontTimer -= dt;
+        if (this.journalFontTimer <= 0) {
+          this.journalFontTimer = JOURNAL_RESTYLE_SEC;
+          this.applyJournalHand(this.journalEntryId);
+        }
+      } catch (e) { console.warn('[bmb] journal hand tick failed', e); }
+    }
     // Wave B (B-3a): minimap redraw at the live focus pose
     if (this.minimap) {
       try {
@@ -2693,6 +2918,9 @@ export class Game {
         console.warn('[bmb] echo geography memo feed failed', e);
       }
       this.touchResidue(note);
+      // F96: this page's hand wobbles by its own seeded entry draw
+      this.journalEntryId = 'note:' + Math.round(note.x * 10) + ':' + Math.round(note.z * 10);
+      this.applyJournalHand(this.journalEntryId);
     }
     // Wave A (A-2a): NoteReread ledger + bleed distortion on re-reads.
     else if (prompt === '[E] READ NOTE' && note && this.reread) {
