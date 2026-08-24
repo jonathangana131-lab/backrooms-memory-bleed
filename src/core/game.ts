@@ -36,6 +36,8 @@ import { MemoryWeather } from '../memory/weather';
 import { HorrorDirector, type DirectorHost } from '../director/director';
 // F48: per-run director temperament — pacing personality selected from the seed
 import { pacingRngFor, temperamentForRun } from '../director/persona';
+// F50: the exit that isn't — ultra-rare fire-exit door into a white epilogue room
+import { buildEpilogueRoom, enterEpilogue, ExitVoidTracker } from '../story/exitvoid';
 import { AnomalySystem, type AnomalyHost } from '../director/anomalies';
 import { ChunkDeltas } from '../world/chunkDeltas';
 import { RealityErosion } from '../director/erosion';
@@ -334,6 +336,14 @@ export class Game {
   /** F95: opt-in hardcore flicker battery model; mode stays off until a
    * settings-schema toggle exists (see beginRun) */
   private flickerBattery: FlickerBattery | null = null;
+
+  // ---- F50: the exit that isn't (per-run gate + one-shot latch) ----
+  /** Per-run fire-exit gate; rebuilt every run from the fresh seed. */
+  private exitVoid: ExitVoidTracker | null = null;
+  /** True once this run's exit was taken; the void spawns at most once. */
+  private exitVoidTaken = false;
+  /** Full-white epilogue veil (#bmb-void), created lazily on first take. */
+  private voidEl: HTMLDivElement | null = null;
 
   // ---- Batch C mounts (F29/F94/F96) ----
   /** F29: landmark visit ledger keyed by landmark name; entries are replaced
@@ -1081,6 +1091,9 @@ export class Game {
     // F96: journal hand reapplies on the next open note frame
     this.journalFontTimer = 0;
     this.journalEntryId = 'note:unread';
+    // F50: fresh fire-exit gate per run (one seeded roll chain, one latch)
+    this.exitVoid = new ExitVoidTracker(this.seed);
+    this.exitVoidTaken = false;
     // near-miss telemetry + adrenaline arming reset with the fresh run
     this.nearMisses = 0;
     this.nearMissArmed = true;
@@ -2351,6 +2364,11 @@ export class Game {
             const myaw = this.player.yaw;
             this.doorCreaks?.torchToward(Math.max(-1, Math.min(1, (mdx * Math.cos(myaw) - mdz * Math.sin(myaw)) / mlen)));
           } catch (e) { console.warn('[bmb] door creak aim failed', e); }
+          // F50: every real door crossing is a fire-exit candidate event.
+          // Gap note: handleInteraction() has no door branch in v1 (its
+          // interactions are beacons/batteries/notes), so the doorway
+          // crossing here is the door-interaction path the gate is fed from.
+          this.feedExitVoid();
         }
         if (code === 2 && this.playtimeSec < this.loopArmedUntil) {
           this.loopArmedUntil = 0;
@@ -2974,6 +2992,72 @@ export class Game {
       deepestM: Math.round(deepestM),
       discoveries: this.story.discoveries,
     };
+  }
+
+  /**
+   * F50: report one door crossing to the per-run fire-exit gate. The
+   * tracker rolls at most once per EXITVOID_CHECK_INTERVAL_SEC slot and
+   * latches after a manifest, so click rate cannot influence the outcome
+   * and the exit can never appear twice in one run.
+   */
+  private feedExitVoid(): void {
+    if (!this.exitVoid || this.exitVoidTaken) return;
+    if (!this.exitVoid.onDoorCandidate(this.playtimeSec)) return;
+    this.exitVoidTaken = true;
+    this.triggerExitVoid();
+  }
+
+  /**
+   * F50: take the fire exit. Whiteout through the #bmb-void full-white
+   * veil (postfx blackout-veil pattern), teleport far out via the epilogue
+   * descriptor's arrival hook, then surface the ending overlay whose
+   * RETURN TO TITLE button is the wake-to-title leave path (the descriptor's
+   * only documented exit; there is no in-world way back).
+   */
+  private triggerExitVoid(): void {
+    const room = buildEpilogueRoom(this.seed);
+    this.ui.say('...a fire exit. It was always there...', 6);
+    this.input.releaseLock();
+    if (typeof document !== 'undefined') {
+      if (!this.voidEl) {
+        const el = document.createElement('div');
+        el.id = 'bmb-void';
+        el.style.cssText =
+          'position:fixed;inset:0;pointer-events:none;z-index:40;' +
+          'background:#ffffff;opacity:0;transition:opacity 2.5s ease-in';
+        document.body.appendChild(el);
+        this.voidEl = el;
+      }
+      requestAnimationFrame(() => { this.voidEl?.style.setProperty('opacity', '1'); });
+    }
+    // Walk through: the descriptor's centerWorld sits near the origin by
+    // design, so the mount displaces the arrival by a fixed far offset —
+    // still seeded through room.centerWorld, still chunk-streamed so the
+    // player never lands in void geometry.
+    setTimeout(() => {
+      enterEpilogue(room, (x, z) => {
+        const fx = x + 4096;
+        const fz = z - 4096;
+        for (let i = 0; i < 4; i++) this.chunks.update(fx, fz);
+        this.player.teleport(fx, fz, this.player.yaw);
+      });
+      void this.saveNow();
+    }, 2600);
+    // Wake input = clicking RETURN TO TITLE on the existing ending overlay.
+    setTimeout(() => {
+      this.setState('menu');
+      this.story.clearMeshes();
+      this.humans.reset();
+      this.ui.showEnding([
+        'The push-bar clicks. The door was never on any floor plan.',
+        'You step into white. Not light — just white, patient and total.',
+        'Behind you, the corridors keep humming for someone else.',
+        'EXIT FOUND — the expedition ends where the plans end · seed ' + (this.seed >>> 0).toString(16),
+      ], () => {
+        this.voidEl?.style.setProperty('opacity', '0');
+        this.ui.showTitle(true);
+      });
+    }, 5200);
   }
 
   private triggerEnding(): void {
