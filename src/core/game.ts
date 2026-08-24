@@ -38,6 +38,9 @@ import { HorrorDirector, type DirectorHost } from '../director/director';
 import { pacingRngFor, temperamentForRun } from '../director/persona';
 // F50: the exit that isn't — ultra-rare fire-exit door into a white epilogue room
 import { buildEpilogueRoom, enterEpilogue, ExitVoidTracker } from '../story/exitvoid';
+// F100: the credits walk — rolling credits over an endless corridor of screenshots
+import { buildCreditsWalk, CreditsWalker, type CreditsWalkPlan, type ScreenshotRef } from '../story/creditswalk';
+import type { StoredPhoto } from '../ui/gallery';
 import { AnomalySystem, type AnomalyHost } from '../director/anomalies';
 import { ChunkDeltas } from '../world/chunkDeltas';
 import { RealityErosion } from '../director/erosion';
@@ -144,7 +147,7 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 
-export type GameState = 'menu' | 'playing' | 'paused';
+export type GameState = 'menu' | 'playing' | 'paused' | 'credits';
 
 const SPAWN_X = 1.25;
 const SPAWN_Z = 1.25;
@@ -346,6 +349,16 @@ export class Game {
   private exitVoidTaken = false;
   /** Full-white epilogue veil (#bmb-void), created lazily on first take. */
   private voidEl: HTMLDivElement | null = null;
+
+  // ---- F100: the credits walk (transient 'credits' state) ----
+  /** Playback cursor over the built walk plan; null when not walking. */
+  private creditsWalker: CreditsWalker | null = null;
+  /** Full-screen scroll overlay (reuses ending-overlay styling). */
+  private creditsEl: HTMLDivElement | null = null;
+  /** Translated inner column carrying the pre-rendered timeline. */
+  private creditsScrollerEl: HTMLDivElement | null = null;
+  /** Scroll speed of the credits column, px per walk-second. */
+  private static readonly CREDITS_PX_PER_SEC = 64;
 
   // ---- Batch C mounts (F29/F94/F96) ----
   /** F29: landmark visit ledger keyed by landmark name; entries are replaced
@@ -1136,6 +1149,8 @@ export class Game {
     // F50: fresh fire-exit gate per run (one seeded roll chain, one latch)
     this.exitVoid = new ExitVoidTracker(this.seed);
     this.exitVoidTaken = false;
+    // F100: never carry a credits walk into a fresh expedition
+    this.cancelCreditsWalk();
     // near-miss telemetry + adrenaline arming reset with the fresh run
     this.nearMisses = 0;
     this.nearMissArmed = true;
@@ -1854,6 +1869,9 @@ export class Game {
 
     const active = this.state === 'playing';
     if (active) this.playtimeSec += dt;
+
+    // F100: drive the credits walk while the transient credits state is held
+    if (this.state === 'credits') this.tickCreditsWalk(dt);
 
     // title-screen attract camera drifts through the world behind the menu
     if (this.state === 'menu') {
@@ -3140,8 +3158,13 @@ export class Game {
     setTimeout(() => {
       document.body.style.transition = '';
       document.body.style.background = '';
-      this.setState('menu');
+      // F100: hold the transient credits state while the walk scrolls under
+      // the ending overlay; the overlay's RETURN TO TITLE click cancels
+      // straight into the title (playthrough contract: one click to title).
+      this.setState('credits');
+      this.beginCreditsWalk();
       this.ui.showEnding(lines.filter((l) => l.length > 0), () => {
+        this.cancelCreditsWalk();
         // Wave A (A-3a): expedition debrief over the title screen.
         if (this.endstats) {
           try { this.endstats.show(this.buildExpeditionStats()); }
@@ -3155,6 +3178,122 @@ export class Game {
       });
     }, 1400);
     this.input.releaseLock();
+  }
+
+  /**
+   * F100: build the credits walk plan from the captured-screenshot gallery
+   * (empty gallery -> rolling credits only) and raise the scroll overlay.
+   * The plan is deterministic per (screenshots, seed); frames render as
+   * labeled cards — gap note: bitmap plumbing from gallery blobs into the
+   * scroll column is deferred, so shots appear as expedition-frame cards.
+   */
+  private beginCreditsWalk(): void {
+    if (this.creditsWalker) return;
+    const loadShots = async (): Promise<ScreenshotRef[]> => {
+      try {
+        const photos: StoredPhoto[] = (await this.gallery?.getAll()) ?? [];
+        return photos.map((p) => ({
+          id: String(p.id),
+          takenAtSec: Number.isFinite(p.timestamp) ? Math.max(0, Math.floor(p.timestamp / 1000)) : 0,
+        }));
+      } catch {
+        return []; // storage unavailable -> rolling credits only
+      }
+    };
+    void loadShots().then((shots) => { this.raiseCreditsOverlay(shots); });
+  }
+
+  /** Build the plan + DOM once the screenshot list resolves. */
+  private raiseCreditsOverlay(shots: ScreenshotRef[]): void {
+    if (this.creditsWalker || this.state !== 'credits') return;
+    let plan: CreditsWalkPlan;
+    try {
+      plan = buildCreditsWalk({ screenshots: shots, seed: this.seed });
+    } catch (e) {
+      console.warn('[bmb] credits walk build failed', e);
+      return;
+    }
+    this.creditsWalker = new CreditsWalker(plan);
+    if (typeof document === 'undefined') return;
+    const pxPerSec = Game.CREDITS_PX_PER_SEC;
+    const overlay = document.createElement('div');
+    overlay.id = 'bmb-creditswalk';
+    overlay.className = 'ending-overlay';
+    overlay.style.cssText =
+      'position:fixed;inset:0;z-index:60;pointer-events:none;display:block;' +
+      'overflow:hidden;background:linear-gradient(rgba(12,11,5,0.88), rgba(12,11,5,0.95));' +
+      'padding:0;';
+    const scroller = document.createElement('div');
+    scroller.style.cssText =
+      'position:absolute;left:0;right:0;top:' + window.innerHeight + 'px;will-change:transform;';
+    for (const entry of plan.timeline) {
+      const item = document.createElement('div');
+      item.style.cssText = 'position:absolute;left:0;right:0;text-align:center;';
+      item.style.top = (entry.atSec * pxPerSec) + 'px';
+      if (entry.kind === 'credit') {
+        const role = document.createElement('p');
+        role.style.setProperty('opacity', '1');
+        role.style.animation = 'none';
+        role.style.letterSpacing = '4px';
+        role.style.fontSize = '12px';
+        role.style.margin = '0 auto';
+        role.style.color = '#8f8354';
+        role.textContent = entry.credit.role.toUpperCase();
+        const name = document.createElement('p');
+        name.style.setProperty('opacity', '1');
+        name.style.animation = 'none';
+        name.style.fontSize = '20px';
+        name.style.margin = '4px auto 0';
+        name.textContent = entry.credit.name;
+        item.appendChild(role);
+        item.appendChild(name);
+      } else {
+        const card = document.createElement('p');
+        card.style.setProperty('opacity', '1');
+        card.style.animation = 'none';
+        card.style.fontSize = '12px';
+        card.style.margin = '0 auto';
+        card.style.color = '#c9bd85';
+        const t = entry.frame.takenAtSec;
+        const mm = String(Math.floor(t / 60)).padStart(2, '0');
+        const ss = String(Math.floor(t % 60)).padStart(2, '0');
+        card.textContent = '· EXPEDITION FRAME — ' + mm + ':' + ss + ' ·';
+        item.appendChild(card);
+      }
+      scroller.appendChild(item);
+    }
+    scroller.style.height = (plan.durationSec * pxPerSec + window.innerHeight) + 'px';
+    overlay.appendChild(scroller);
+    document.body.appendChild(overlay);
+    this.creditsEl = overlay;
+    this.creditsScrollerEl = scroller;
+  }
+
+  /** Per-frame scroll update from the walker clock; finishes into title. */
+  private tickCreditsWalk(dt: number): void {
+    if (!this.creditsWalker) return;
+    try {
+      this.creditsWalker.advance(dt);
+      if (this.creditsScrollerEl) {
+        const y = this.creditsWalker.elapsedSec * Game.CREDITS_PX_PER_SEC;
+        this.creditsScrollerEl.style.transform = 'translateY(-' + y.toFixed(1) + 'px)';
+      }
+      if (this.creditsWalker.finished) {
+        this.cancelCreditsWalk();
+        this.setState('menu');
+        this.ui.showTitle(true);
+      }
+    } catch (e) {
+      console.warn('[bmb] credits walk tick failed', e);
+    }
+  }
+
+  /** Tear down the credits overlay + cursor (cancel or natural finish). */
+  private cancelCreditsWalk(): void {
+    this.creditsWalker = null;
+    this.creditsEl?.remove();
+    this.creditsEl = null;
+    this.creditsScrollerEl = null;
   }
 
   /** Wave C (C-8): assemble the deeper debrief telemetry snapshot. */
