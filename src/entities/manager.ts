@@ -220,7 +220,6 @@ export class HumanManager {
       const dx = px - f.body.x;
       const dz = pz - f.body.z;
       const d = Math.hypot(dx, dz);
-      proximity.push({ figure: f, type: f.type, dist: d });
       const yawToPlayer = Math.atan2(dx, dz);
       let litByBeam = false;
       if (beam?.on && d < 14 && d > 0.5) {
@@ -232,6 +231,9 @@ export class HumanManager {
       if (litByBeam && !frozenBefore && f.isBeamFrozen()) {
         this.onBeamFreeze?.();
       }
+      // publish from the post-move position so entries stay consistent with
+      // nearestDist(), which reads the same final positions
+      proximity.push({ figure: f, type: f.type, dist: Math.hypot(px - f.body.x, pz - f.body.z) });
       let despawn = false;
       if (d > 62 || f.life > f.vanishAt) despawn = true;
       const closeVanish =
