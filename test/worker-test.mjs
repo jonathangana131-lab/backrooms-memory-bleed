@@ -308,28 +308,26 @@ async function main() {
       } catch { survivedUnknown = false; }
       check('replies with unknown ids are ignored', survivedUnknown);
 
-      // RECONSTRUCTION GAP: the surviving pool module documents a request
-      // cache but never writes it (no cache.set anywhere), so repeat requests
-      // re-dispatch. Assert the implemented behavior and route the reply so
-      // the slot bookkeeping stays clean.
+      // Completed layouts are cached by 'cx,cz' on resolve, so a repeat
+      // request is served from cache without re-dispatching to any worker.
       const beforeTraffic = POOL_WORKERS.map((w) => w.sent.length);
       const repeat = pool.requestLayout(SEED, 1, 2);
-      check('repeat requests re-dispatch (pool cache is declared but never filled)',
+      check('repeat requests are served from cache without re-dispatch',
         POOL_WORKERS.reduce((n, w) => n + w.sent.length, 0) ===
-          beforeTraffic.reduce((n, m) => n + m, 0) + 1,
+          beforeTraffic.reduce((n, m) => n + m, 0),
         JSON.stringify(POOL_WORKERS.map((w) => w.sent.length)));
-      const repeatWorker = POOL_WORKERS.find(
-        (w) => w.sent[w.sent.length - 1].cx === 1 && w.sent[w.sent.length - 1].cz === 2);
-      const repId = repeatWorker.sent[repeatWorker.sent.length - 1].id;
-      repeatWorker.onmessage({ data: { id: repId, layout: mkLayout('a2') } });
-      check('re-dispatched request resolves through its own correlation id',
-        (await repeat).tag === 'layout-a2');
-      check('peek reflects the never-filled cache (always empty)',
-        pool.peek(1, 2) === undefined);
+      check('repeat request resolves with the originally replied layout',
+        (await repeat).tag === 'layout-a');
+      const cached = pool.peek(1, 2);
+      check('peek returns the cached layout once resolved',
+        cached !== undefined && cached.tag === 'layout-a');
+      check('failed requests never enter the request cache',
+        pool.peek(5, 6) === undefined);
       let clearThrew = false;
       try { pool.clearCache(); } catch { clearThrew = true; }
       check('clearCache runs without touching workers',
         !clearThrew && POOL_WORKERS.every((w) => !w.terminated));
+      check('clearCache empties the request cache', pool.peek(1, 2) === undefined);
 
       // worker-level crash fails every outstanding request routed there
       const rCrash = pool.requestLayout(SEED, 7, 8);
