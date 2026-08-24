@@ -70,8 +70,15 @@ export class PlayerController {
   }
   /** F14: external control-damp multiplier applied to movement this frame. */
   inputScale = 1;
-  /** F8: external micro-timing scale on stride onset advance (1 = neutral). */
+  /** F10: external micro-timing scale on stride onset advance (1 = neutral). */
   strideRateScale = 1;
+  /**
+   * Base vertical FOV in radians for the per-frame camera write. Settings
+   * owners write this field (game.ts applySettings maps the user's FOV
+   * degrees here); sprint kick and stamina pulse are relative multipliers on
+   * top of it, so assigning it never disturbs that math.
+   */
+  baseFovRad = 1.25;
   /** F10: Q/E lean envelope with collision-safe lateral offset. */
   private readonly lean = new LeanPeek(LeanPeekMode.Hold);
   /** F9: FOV pulse oscillator phase (radians). */
@@ -263,8 +270,9 @@ export class PlayerController {
       this.idleTime = 0;
     }
     // sprint speed-feel: fov kick eased with smoothstep over FOV_EASE_TIME,
-    // plus F9 exertion pulse whose amplitude rises as stamina drains
-    const BASE_FOV = 1.25;
+    // plus F9 exertion pulse whose amplitude rises as stamina drains.
+    // Base FOV comes from this.baseFovRad — settings owners assign it, so the
+    // user's FOV choice survives this every-frame write.
     const MAX_FOV_KICK = 0.06;
     const FOV_PULSE_MAX = 0.022;
     this.pulsePhase += dt * 5.4;
@@ -274,8 +282,7 @@ export class PlayerController {
     if (desiredBlend > this.fovBlend) this.fovBlend = Math.min(desiredBlend, this.fovBlend + fovStep);
     else if (desiredBlend < this.fovBlend) this.fovBlend = Math.max(desiredBlend, this.fovBlend - fovStep);
     const camAny = this.camera as unknown as { fov: number };
-    if (camAny.fov === undefined) camAny.fov = BASE_FOV;
-    camAny.fov = BASE_FOV
+    camAny.fov = this.baseFovRad
       * (1 + MAX_FOV_KICK * smoothstep01(this.fovBlend)
         + FOV_PULSE_MAX * this.staminaEngine.fovPulseAmp * Math.sin(this.pulsePhase));
 
