@@ -2,13 +2,26 @@
  * Surface footstep tests — run with: node test/surfaces-test.mjs
  *
  * Part 1 is static structure checking (always runs).
- * Part 2 exercises SurfaceFootsteps against a mock AudioContext via
- * Node's TypeScript type-stripping, when this Node supports it.
+ * Part 2 exercises SurfaceFootsteps against a mock AudioContext.
+ * The TS module is bundled with esbuild so its '../core/rng' import
+ * resolves under plain Node (same loader as groans-test).
  */
-import { readFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+
+const require_ = createRequire(import.meta.url);
+function loadEsbuild() {
+  try {
+    return require_('esbuild');
+  } catch {
+    const pnpmDir = process.cwd() + '/node_modules/.pnpm';
+    const entry = readdirSync(pnpmDir).find((d) => d.startsWith('esbuild@'));
+    if (!entry) throw new Error('esbuild not found in node_modules');
+    return require_(pnpmDir + '/' + entry + '/node_modules/esbuild');
+  }
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const srcPath = path.join(here, '..', 'src', 'audio', 'surfaces.ts');
@@ -22,7 +35,7 @@ const ok = (cond, msg) => {
 
 console.log('[static]');
 ok(src.includes('export class SurfaceFootsteps'), 'exports SurfaceFootsteps');
-ok(src.includes("constructor(ctx: AudioContext, destination: AudioNode)"), 'constructor(ctx, destination) signature');
+ok(/constructor\(\s*ctx:\s*AudioContext,\s*destination:\s*AudioNode[^)]*\)/.test(src), 'constructor(ctx, destination[, seed]) signature');
 ok(/play\(\s*surface:\s*SurfaceKind\s*,\s*sprint[^)]*\)/.test(src), 'play(surface, sprint) signature');
 for (const s of ['carpet', 'tile', 'metal', 'splash']) ok(src.includes(`'${s}'`), `surface kind ${s}`);
 ok(/lowpass/.test(src) && /200 \* pitch/.test(src), 'carpet 200Hz lowpass');
@@ -30,13 +43,24 @@ ok(/bandpass/.test(src) && /1000 \* pitch/.test(src), 'tile 1kHz bandpass');
 ok(/0\.003/.test(src), 'tile 3ms click');
 ok(/800 \* pitch/.test(src), 'metal 800Hz resonance');
 ok(/highpass/.test(src) && /exponentialRampToValueAtTime/.test(src), 'splash highpass sweep');
-ok(/0\.10/.test(src), '\u00b110% variation factor present');
+ok(/range\(0\.9,\s*1\.1\)/.test(src), '\u00b110% variation factor present (rng.range(0.9, 1.1))');
 ok(src.includes('1.45'), 'sprint louder');
 ok(src.includes('1.06'), 'sprint higher pitch');
 ok(src.includes('0.78'), 'sprint faster');
 
-// ---- part 2: behavioural (needs Node >= 22.6 --experimental-strip-types) ----
+// ---- part 2: behavioural (esbuild-bundled module) ----
 console.log('[behavioural]');
+
+const esbuild = loadEsbuild();
+const BUILT = process.cwd() + '/test/.surfaces-build.mjs';
+const bundle = await esbuild.build({
+  entryPoints: [process.cwd() + '/src/audio/surfaces.ts'],
+  bundle: true,
+  format: 'esm',
+  target: 'es2022',
+  write: false,
+});
+writeFileSync(BUILT, bundle.outputFiles[0].text);
 
 class FakeParam {
   constructor(v = 1) { this.value = v; this.max = -Infinity; }
@@ -67,7 +91,7 @@ let seed = 42;
 Math.random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 
 async function behaviour() {
-  const mod = await import('../src/audio/surfaces.ts');
+  const mod = await import('./.surfaces-build.mjs');
   const ctx = new FakeCtx();
   const dest = new FakeNode(ctx);
   const steps = new mod.SurfaceFootsteps(ctx, dest);
@@ -128,15 +152,10 @@ async function behaviour() {
   ok(true, 'unknown surface does not throw');
 }
 
-const probe = spawnSync(process.execPath, ['--experimental-strip-types', '-e', 'process.exit(0)']);
-if (probe.status === 0 || probe.status === null) {
-  try {
-    await behaviour();
-  } catch (e) {
-    console.warn('  SKIP behavioural:', e.message);
-  }
-} else {
-  console.warn('  SKIP behavioural: this Node lacks --experimental-strip-types');
+try {
+  await behaviour();
+} catch (e) {
+  console.warn('  SKIP behavioural:', e.message);
 }
 
 console.log(failures === 0 ? 'ALL TESTS PASSED' : `${failures} FAILURE(S)`);

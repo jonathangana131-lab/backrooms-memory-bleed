@@ -10,7 +10,18 @@
  *
  * Each step gets ±10 % random pitch/volume so repeated steps never sound
  * identical, and sprinting makes steps faster, louder and slightly higher.
+ *
+ * Determinism: per-step jitter rolls and buffer start offsets draw from
+ * one seeded RNG stream (`(seed ^ SURFACE_SALT) >>> 0`, src/core/rng.ts);
+ * only the shared sample-data buffer fill keeps Math.random under the
+ * DSP carve-out.
  */
+import { RNG } from '../core/rng';
+
+/** Stream salt so footstep rolls never correlate with other seeded systems. */
+const SURFACE_SALT = 0x53223f01;
+/** Default stream seed used when no run seed reaches the constructor. */
+const DEFAULT_SURFACE_SEED = 0x1a9d4e77;
 
 export type SurfaceKind = 'carpet' | 'tile' | 'metal' | 'splash';
 
@@ -35,16 +46,18 @@ export class SurfaceFootsteps {
   private readonly ctx: AudioContext;
   private readonly out: AudioNode;
   private readonly noise: AudioBuffer;
+  /** Seeded stream driving per-step jitter and start offsets (determinism law). */
+  private readonly rng: RNG;
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = DEFAULT_SURFACE_SEED) {
     this.ctx = ctx;
-
-
     this.out = destination;
+    this.rng = new RNG((seed ^ SURFACE_SALT) >>> 0);
     // 1 s mono white-noise buffer, shared by every step voice
     const len = Math.max(1, Math.floor(ctx.sampleRate));
     this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = this.noise.getChannelData(0);
+    // audio DSP buffer fill (white noise source) — sim PRNG law carve-out
     for (let i = 0; i < len; i++) {
       data[i] = Math.random() * 2 - 1;
     }
@@ -61,7 +74,7 @@ export class SurfaceFootsteps {
     const profile = PROFILES[surface];
 
     // ±10 % variation so consecutive steps differ
-    const jit = () => 1 + (Math.random() * 2 - 1) * 0.10;
+    const jit = () => this.rng.range(0.9, 1.1);
     const pitchMul = jit() * (sprint ? 1.06 : 1); // sprint sits a touch higher
     const vol = profile.vol * jit() * (sprint ? 1.45 : 1);
     // sprint: snappier burst
@@ -102,7 +115,7 @@ export class SurfaceFootsteps {
     const g = this.env(vol, dur, t);
     const src = this.burst(pitch);
     src.connect(f).connect(g).connect(this.out);
-    src.start(t, Math.random() * 0.5, dur + 0.05);
+    src.start(t, this.rng.range(0, 0.5), dur + 0.05);
   }
 
   /** Click + tail: 3 ms wideband transient into a 1 kHz bandpass body. */
@@ -125,7 +138,7 @@ export class SurfaceFootsteps {
 
     src.connect(clickHp).connect(clickG).connect(this.out);
     src.connect(bp).connect(tailG).connect(this.out);
-    src.start(t, Math.random() * 0.5, dur + 0.02);
+    src.start(t, this.rng.range(0, 0.5), dur + 0.02);
   }
 
   /** Resonant ring: narrow 800 Hz band with a long metallic decay. */
@@ -145,7 +158,7 @@ export class SurfaceFootsteps {
     const pg = this.env(vol * 0.35, dur * 0.7, t);
     src.connect(bp).connect(g).connect(this.out);
     src.connect(partial).connect(pg).connect(this.out);
-    src.start(t, Math.random() * 0.5, dur + 0.05);
+    src.start(t, this.rng.range(0, 0.5), dur + 0.05);
   }
 
   /** Puddle: broadband slosh, highpass sweeping upward across the burst. */
@@ -159,7 +172,7 @@ export class SurfaceFootsteps {
     const g = this.env(vol, dur, t);
     const src = this.burst(pitch);
     src.connect(hp).connect(g).connect(this.out);
-    src.start(t, Math.random() * 0.5, dur + 0.05);
+    src.start(t, this.rng.range(0, 0.5), dur + 0.05);
   }
 }
 
