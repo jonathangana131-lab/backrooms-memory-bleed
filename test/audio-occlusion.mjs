@@ -99,41 +99,45 @@ try {
     // (2) acoustic — tap THAT panner directly so only the whisper under
     //     test reaches the analysers (the shared master bus carries the
     //     game's own random-pan whispers and the centered ambience bed).
+    // The interception covers ONLY the synchronous whisper() call: the live
+    // loop keeps creating unrelated StereoPanners (zone-event clatter,
+    // music voices) on timers, so any await with the hook installed lets
+    // one race in and get misattributed to the whisper under test.
     const origCreate = a.ctx.createStereoPanner.bind(a.ctx);
     const capturePanners = async (pan) => {
-      const made = [];
+      a.setWhisperPan(pan);
+      await new Promise((r2) => setTimeout(r2, 30));
+      let made = [];
       a.ctx.createStereoPanner = (...args) => {
         const n = origCreate(...args);
         made.push(n);
         return n;
       };
       try {
-        a.setWhisperPan(pan);
-        await new Promise((r2) => setTimeout(r2, 30));
-        a.whisper();
-        await new Promise((r2) => setTimeout(r2, 120));
-        const node = made[made.length - 1];
-        const split = a.ctx.createChannelSplitter(2);
-        node.connect(split);
-        const mk = () => { const x = a.ctx.createAnalyser(); x.fftSize = 2048; return x; };
-        const anL = mk(), anR = mk();
-        split.connect(anL, 0); split.connect(anR, 1);
-        const td = new Float32Array(2048);
-        let sl = 0, sr = 0;
-        const t0 = performance.now();
-        while (performance.now() - t0 < 1600) {
-          anL.getFloatTimeDomainData(td);
-          for (let i2 = 0; i2 < td.length; i2++) sl += td[i2] * td[i2];
-          anR.getFloatTimeDomainData(td);
-          for (let i2 = 0; i2 < td.length; i2++) sr += td[i2] * td[i2];
-          await new Promise((r2) => setTimeout(r2, 25));
-        }
-        node.disconnect(split);
-        const asym2 = (sl + sr) <= 0 ? 0 : (sl - sr) / (sl + sr);
-        return { pans: made.map((n2) => n2.pan.value), asym: asym2 };
+        a.whisper(); // synchronous: builds exactly one StereoPanner
       } finally {
         a.ctx.createStereoPanner = origCreate;
       }
+      await new Promise((r2) => setTimeout(r2, 120));
+      const node = made[made.length - 1];
+      const split = a.ctx.createChannelSplitter(2);
+      node.connect(split);
+      const mk = () => { const x = a.ctx.createAnalyser(); x.fftSize = 2048; return x; };
+      const anL = mk(), anR = mk();
+      split.connect(anL, 0); split.connect(anR, 1);
+      const td = new Float32Array(2048);
+      let sl = 0, sr = 0;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 1600) {
+        anL.getFloatTimeDomainData(td);
+        for (let i2 = 0; i2 < td.length; i2++) sl += td[i2] * td[i2];
+        anR.getFloatTimeDomainData(td);
+        for (let i2 = 0; i2 < td.length; i2++) sr += td[i2] * td[i2];
+        await new Promise((r2) => setTimeout(r2, 25));
+      }
+      node.disconnect(split);
+      const asym2 = (sl + sr) <= 0 ? 0 : (sl - sr) / (sl + sr);
+      return { pans: made.map((n2) => n2.pan.value), asym: asym2 };
     };
     res.panLeftCaptured = await capturePanners(-0.9);
     await new Promise((r2) => setTimeout(r2, 2400));
