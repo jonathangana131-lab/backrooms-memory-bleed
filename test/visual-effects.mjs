@@ -58,10 +58,12 @@ await shot('flicker-before.png');
 await page.evaluate(() => { const g = (window).__BMB__.game; g.lighting.flashHoldSec = 2; });
 // NOTE: timer polling, not rAF - under swiftshader the render loop can stall
 // for seconds, so rAF-driven polling never evaluates and would false-timeout.
-
-
-  null, { timeout: 20000 },
-);
+// [reconstructed head] wait for the dead-fixture emissive surge to arm.
+await page.waitForFunction(() => {
+  const c = (window).__BMB__.game.mats.fixtureDead.emissiveColor;
+  return c.r > 0.5 && c.g > 0.5;
+}, null, { timeout: 20000 });
+await page.waitForTimeout(300); // let the held surge frame actually render
 await shot('flicker-after.png');
 await page.evaluate(() => {
   const g = (window).__BMB__.game;
