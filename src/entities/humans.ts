@@ -326,4 +326,36 @@ export class HumanFigure {
   }
 }
 
+/**
+ * F26: clipboard prop for the Archivist figure — a small dark board with a
+ * pale paper sheet, held at chest height in front of the body (repo yaw
+ * convention: local +Z is forward). Purely visual; parented to the figure
+ * root so it rides every pose change, and disposed with the figure.
+ */
+export function attachClipboardProp(figure: HumanFigure, scene: Scene): TransformNode {
+  const clip = new TransformNode('clipboard', scene);
+  clip.parent = figure.root;
+
+  const board = MeshBuilder.CreateBox('clipboard_board', { width: 0.21, depth: 0.03, height: 0.28 }, scene);
+  board.parent = clip;
+  board.position.set(0.05, 0.86, 0.19);
+  board.rotation.x = -0.5; // tilted up toward the face
+
+  const paper = MeshBuilder.CreatePlane('clipboard_paper', { width: 0.16, height: 0.21 }, scene);
+  paper.parent = board;
+  paper.position.z = 0.017;
+
+  const boardMat = new StandardMaterial('clipboardBoardMat', scene);
+  boardMat.diffuseColor = new Color3(0.24, 0.18, 0.12);
+  boardMat.specularColor = new Color3(0.02, 0.02, 0.02);
+  board.material = boardMat;
+  const paperMat = new StandardMaterial('clipboardPaperMat', scene);
+  paperMat.diffuseColor = new Color3(0.87, 0.85, 0.78);
+  paperMat.emissiveColor = new Color3(0.08, 0.08, 0.07);
+  paperMat.specularColor = new Color3(0.02, 0.02, 0.02);
+  paper.material = paperMat;
+  for (const m of [board, paper]) m.isPickable = false;
+  return clip;
+}
+
 
