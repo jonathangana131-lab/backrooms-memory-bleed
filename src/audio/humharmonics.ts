@@ -69,7 +69,19 @@ const DISTRICT_PROFILES: Record<number, DistrictProfile> = {
   1: { age: 0.42, level: 0.94 },
   2: { age: 0.68, level: 0.88 },
   3: { age: 0.93, level: 0.8 },  // deep, dying levels
+  4: { age: 0.88, level: 0.82 }, // STORAGE canyons: hoarded, half-dead wiring
 };
+
+/**
+ * District ages align with the visual age ladder (fog density presets,
+ * dead-light bias, per-district tint dimming): STORAGE - visually the
+ * dustiest, dimmest district - carries an explicit near-end-of-life profile
+ * instead of silently falling back to DEFAULT_PROFILE's mid age. The table
+ * keys on district alone; contamination-proportional aging (memIntensity
+ * biases dead/flickering fixtures in architect.generateLights) has no audio
+ * hook yet - HumHarmonics.setDistrict() is the seam where a
+ * contamination-adjusted profile would enter.
+ */
 
 const DEFAULT_PROFILE: DistrictProfile = { age: 0.5, level: 0.95 };
 
