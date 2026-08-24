@@ -21,6 +21,11 @@
  * Audible ONLY in the OPEN_OFFICE district (district 1) while director
  * tension reads calm/build; the crowd fades out as tension climbs and
  * everywhere else stays silent.
+ *
+ * Determinism: graph-build rolls (swell rate, initial voice cursors) draw
+ * from a mulberry32 stream seeded by the optional constructor seed XOR a
+ * site salt; per-voice streams are seeded per index. Math.random appears
+ * ONLY inside the air-bed noise-buffer fill.
  */
 
 /** Deterministic PRNG (same construction as radio.ts). */
@@ -55,6 +60,11 @@ const AIR_LEVEL = 0.018;   // room-air/shuffle bed under the voices
 const CALM_FULL = 0.35;
 const CALM_END = 0.6;
 
+/** Default seed for the build stream when none is injected. */
+const DEFAULT_SEED = 0x3e06d1;
+/** Site salt separating the build stream from other consumers of a seed. */
+const BUILD_SALT = 0x25d7;
+
 /** One babbler in the crowd. */
 interface Voice {
   readonly osc: OscillatorNode;
@@ -86,11 +96,14 @@ export class CrowdAmbience {
 
   /** Current eased loudness 0..1 (before MASTER). */
   private level = 0;
+  /** Deterministic stream for graph-build rolls (swell rate, cursors). */
+  private readonly buildRng: () => number;
   stopped = false;
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = DEFAULT_SEED) {
     this.ctx = ctx;
     this.destination = destination;
+    this.buildRng = mulberry32(((seed >>> 0 || DEFAULT_SEED) ^ BUILD_SALT) >>> 0);
   }
 
   /**
@@ -159,7 +172,7 @@ export class CrowdAmbience {
     // small depth stage so the wave stays a gentle density modulation
     this.lfo = ctx.createOscillator();
     this.lfo.type = 'sine';
-    this.lfo.frequency.value = 1 / (20 + Math.random() * 20); // 0.025-0.05 Hz
+    this.lfo.frequency.value = 1 / (20 + this.buildRng() * 20); // 0.025-0.05 Hz
     this.lfoDepth = ctx.createGain();
     this.lfoDepth.gain.value = 0.22;
     this.lfo.connect(this.lfoDepth);
@@ -185,7 +198,7 @@ export class CrowdAmbience {
     for (let i = 0; i < VOICE_COUNT; i++) this.voices.push(this.buildVoice(i));
     // park cursors just ahead so the first audible frame speaks immediately
     const t = ctx.currentTime;
-    for (const v of this.voices) v.nextAt = t + 0.05 + Math.random() * 0.3;
+    for (const v of this.voices) v.nextAt = t + 0.05 + this.buildRng() * 0.3;
   }
 
   /** One glottal sawtooth through three parallel formants into a panned env. */
@@ -236,6 +249,7 @@ export class CrowdAmbience {
     const len = Math.floor(this.ctx.sampleRate * 2);
     const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const data = buf.getChannelData(0);
+    // audio DSP buffer fill — sim PRNG law carve-out
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     return buf;
   }
