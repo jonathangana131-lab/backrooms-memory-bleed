@@ -109,6 +109,14 @@ export class DayCycle {
   }
 
   /**
+   * Fraction 0..1 through the current lit-day cycle (0 dawn, ~0.5 midday,
+   * 1 dusk). Frozen during blackouts, matching update().
+   */
+  dayProgress(): number {
+    return this.clock / DAYCYCLE_LENGTH;
+  }
+
+  /**
    * Global fog-tint multiplier for the current instant.
    * Multiply the scene fog color by this.
    */

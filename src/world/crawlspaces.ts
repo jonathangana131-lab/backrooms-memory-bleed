@@ -250,7 +250,7 @@ function gapKey(cellX: number, cellZ: number): string {
  * floor is never forced into presence of a gap.
  * @returns The gap cell in world coordinates, or null.
  */
-function selectChunkGap(
+export function selectChunkGap(
   grid: FloorGrid,
   chunkX: number,
   chunkZ: number,

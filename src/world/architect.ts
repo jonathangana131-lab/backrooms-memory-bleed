@@ -16,6 +16,12 @@ import { STORY_ARCS } from '../content/clusters';
 import { GRAFFITI_POOL } from '../content/graffiti-pool';
 import { isEligible, pickEligible } from '../content/tags';
 import type { TaggedEntry } from '../content/tags';
+import { generatePocketInterior } from './pocketdim';
+import type { PocketInterior, DoorFace } from './pocketdim';
+import { createLongHall, rollLongHallChunk, HALL_LENGTH_M, DOOR_SPACING_M } from './longhall';
+import type { LongHallDescriptor } from './longhall';
+import { selectChunkGap } from './crawlspaces';
+import type { GapCell } from './crawlspaces';
 
 export interface Box2 {
   minX: number; minZ: number; maxX: number; maxZ: number;
@@ -268,6 +274,26 @@ export interface ChunkLayout {
    * is generated at the echo chunks, which render their canonical generation.
    */
   landmarkEcho?: import('./landmarkecho').LandmarkEcho[];
+  /**
+   * F15 pocket-dimension mount: set when this chunk hosts a seeded pocket
+   * door (~1-in-40 hash gate). Carries the door identity, the constant
+   * exterior footprint, and the interior laid out on its own offset sub-grid
+   * (see {@link PocketMount} for the coordinate-frame transform). The mesher
+   * renders the interior; the exterior edges of the chunk are untouched.
+   */
+  pocket?: PocketMount;
+  /** F19 impossible windows on this chunk's solid walls (rare hash gate). */
+  windows?: WindowInstance[];
+  /** F58 sub-floor crawlspace gap selected for this chunk, when any. */
+  crawlGap?: GapCell;
+  /**
+   * F54 Long Hall mount: set when this chunk lies inside a 300 m straight
+   * corridor spawned at a gated chunk up to HALL_CHUNK_SPAN segments away.
+   * Exit-door slots are carved as DOORWAY edges; which door identity hangs
+   * on each BEHIND slot cycles deterministically with walked distance (see
+   * longhall.ts + ChunkDeltas hall marks).
+   */
+  longHall?: LongHallMount;
   /** memory contamination sampled for this chunk */
   memKind: MemoryKind;
   memIntensity: number;
@@ -422,7 +448,367 @@ export function generateLayout(seed: number, cx: number, cz: number, mem?: Memor
   generateStains(seed, layout);
   generateGraffiti(seed, layout, ctx);
   generateBleedDecals(seed, layout);
+  applyLongHall(seed, layout);
+  applyPocketDoors(seed, layout);
+  applyWindows(seed, layout);
+  applyCrawlGap(seed, layout);
   return layout;
+}
+
+// ---- WORLD WRONGNESS PASSES (F15 / F19 / F54 / F58) ------------------------
+//
+// Each pass is a pure function of (seed, cx, cz) plus the freshly generated
+// layout: every draw flows through src/core/rng.ts hashes, so any chunk
+// regenerates byte-identically in any session order. Passes only ADD
+// mounts/instances - exterior edge structure decided above stays canonical
+// unless the pass itself carves documented exceptions (Long Hall corridor).
+
+/**
+ * Hash-gate denominator: roughly one chunk in {@link POCKET_CHUNK_GATE}
+ * hosts a seeded pocket door (F15).
+ */
+export const POCKET_CHUNK_GATE = 40;
+
+/** Salt isolating pocket-door gating from every other hashed feature. */
+const POCKET_GATE_SALT = 0x70d1;
+
+/** Salt isolating the interior sub-grid origin offset from other hashes. */
+const POCKET_ORIGIN_SALT = 0x0ff5;
+
+/**
+ * Base offset in world cells pushing a pocket's interior sub-grid clear of
+ * the exterior world, so interior geometry can never overlap facade chunks.
+ */
+export const POCKET_OFFSET_CELLS = 4096;
+
+/**
+ * F15 mount for one pocket dimension hanging off a seeded door.
+ *
+ * Coordinate-frame transform (documented contract for player entry):
+ * the interior lives on its OWN offset sub-grid. A local interior cell
+ * (lx, lz) maps to world coordinates as
+ *   wx = (originX + lx + 0.5) * CELL
+ *   wz = (originZ + lz + 0.5) * CELL
+ * Crossing the threshold re-bases the player frame by pure translation:
+ *   enter(p) = entryWorld + (p - doorWorld)
+ *   exit(p') = doorWorld + (p' - entryWorld)
+ * where doorWorld is the door-cell centre on the exterior face and
+ * entryWorld is the interior grid's border floor cell on the matching face
+ * ({@link pocketEntryWorld}). Translation only - no rotation - so the
+ * transform is exactly invertible for all four faces, and identical inputs
+ * always yield identical frames (determinism law).
+ */
+export interface PocketMount {
+  /** Door identity "<doorX>,<doorZ>:<face>" driving the interior stream. */
+  readonly doorKey: string;
+  /** Door cell along x (world cells). */
+  readonly doorX: number;
+  /** Door cell along z (world cells). */
+  readonly doorZ: number;
+  /** Exterior wall the door sits on. */
+  readonly face: DoorFace;
+  /** Interior layout: pure function of (worldSeed, doorKey). */
+  readonly interior: PocketInterior;
+  /** World-cell origin of the offset sub-grid hosting the interior. */
+  readonly originX: number;
+  readonly originZ: number;
+}
+
+/**
+ * Border floor cell of a pocket interior for the given mount face - the
+ * cell a player stands on just inside the pocket. Scans the matching border
+ * row/column in ascending coordinate order, so the answer is deterministic.
+ */
+export function pocketEntryCell(mount: PocketMount): { x: number; z: number } {
+  const it = mount.interior;
+  const borderCell = (x: number, z: number) =>
+    it.cells[z * it.width + x].kind === 'floor';
+  switch (mount.face) {
+    case 'n':
+      for (let x = 0; x < it.width; x++) if (borderCell(x, 0)) return { x, z: 0 };
+      break;
+    case 's':
+      for (let x = 0; x < it.width; x++) if (borderCell(x, it.depth - 1)) return { x, z: it.depth - 1 };
+      break;
+    case 'w':
+      for (let z = 0; z < it.depth; z++) if (borderCell(0, z)) return { x: 0, z };
+      break;
+    case 'e':
+      for (let z = 0; z < it.depth; z++) if (borderCell(it.width - 1, z)) return { x: it.width - 1, z };
+      break;
+  }
+  throw new Error('pocket mount has no walkable border cell on face ' + mount.face);
+}
+
+/** World-space centre of the interior entry cell (see PocketMount transform). */
+export function pocketEntryWorld(mount: PocketMount): { x: number; z: number } {
+  const e = pocketEntryCell(mount);
+  return { x: (mount.originX + e.x + 0.5) * CELL, z: (mount.originZ + e.z + 0.5) * CELL };
+}
+
+/**
+ * Re-base a world position through the pocket threshold onto the interior
+ * frame. Pure translation; see the PocketMount transform contract.
+ * @param mount The chunk's pocket mount.
+ * @param wx World x of the crossing position (near the exterior door).
+ * @param wz World z of the crossing position.
+ */
+export function pocketEnter(mount: PocketMount, wx: number, wz: number): { x: number; z: number } {
+  const door = { x: (mount.doorX + 0.5) * CELL, z: (mount.doorZ + 0.5) * CELL };
+  const entry = pocketEntryWorld(mount);
+  return { x: entry.x + (wx - door.x), z: entry.z + (wz - door.z) };
+}
+
+/**
+ * Inverse of {@link pocketEnter}: map an interior-frame position back to
+ * the exterior frame at the door. Exact float inverse (same translation).
+ */
+export function pocketExit(mount: PocketMount, wx: number, wz: number): { x: number; z: number } {
+  const door = { x: (mount.doorX + 0.5) * CELL, z: (mount.doorZ + 0.5) * CELL };
+  const entry = pocketEntryWorld(mount);
+  return { x: door.x + (wx - entry.x), z: door.z + (wz - entry.z) };
+}
+
+/**
+ * Seed and mount a pocket dimension when this chunk passes the ~1-in-40
+ * gate and hosts a doorway to hang it on. The interior generates as a pure
+ * function of (seed, doorKey); its furniture and lights are re-based onto
+ * the offset sub-grid and pushed into the regular prop/light lists so the
+ * existing mesher passes render them unchanged. Exterior edges never move.
+ */
+function applyPocketDoors(seed: number, layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  const baseX = layout.cx * N;
+  const baseZ = layout.cz * N;
+  if (hash2i(layout.cx, layout.cz, seed ^ POCKET_GATE_SALT) % POCKET_CHUNK_GATE !== 11) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x9d00));
+  const doors: Array<{ edge: 'h' | 'v'; lz: number; lx: number }> = [];
+  for (let lz = 0; lz <= N; lz++) {
+    for (let lx = 0; lx < N; lx++) {
+      if (layout.hEdges[lz * N + lx] === EdgeCode.DOORWAY) doors.push({ edge: 'h', lz, lx });
+    }
+  }
+  for (let lz = 0; lz < N; lz++) {
+    for (let lx = 0; lx <= N; lx++) {
+      if (layout.vEdges[lz * (N + 1) + lx] === EdgeCode.DOORWAY) doors.push({ edge: 'v', lz, lx });
+    }
+  }
+  if (!doors.length) return;
+  const d = doors[rng.int(0, doors.length)];
+  let face: DoorFace;
+  let doorX: number;
+  let doorZ: number;
+  if (d.edge === 'h') {
+    // horizontal edge (lz,lx) separates cell (lz-1,lx) from cell (lz,lx);
+    // face names which side the player approaches from
+    face = rng.chance(0.5) ? 'n' : 's';
+    doorX = baseX + d.lx;
+    doorZ = baseZ + d.lz + (face === 'n' ? -1 : 0);
+  } else {
+    face = rng.chance(0.5) ? 'w' : 'e';
+    doorX = baseX + d.lx + (face === 'w' ? -1 : 0);
+    doorZ = baseZ + d.lz;
+  }
+  const doorKey = doorX + ',' + doorZ + ':' + face;
+  const interior = generatePocketInterior(seed, doorKey);
+  const originX =
+    doorX + POCKET_OFFSET_CELLS + hash2i(doorX, doorZ, seed ^ POCKET_ORIGIN_SALT) % 2048;
+  const originZ =
+    doorZ + POCKET_OFFSET_CELLS + hash2i(doorZ, doorX, seed ^ (POCKET_ORIGIN_SALT ^ 1)) % 2048;
+  layout.pocket = { doorKey, doorX, doorZ, face, interior, originX, originZ };
+  // re-base furniture and lights onto the interior sub-grid so the regular
+  // prop/fixture passes render them without special-casing
+  for (const p of interior.props) {
+    layout.props.push({
+      kind: p.kind,
+      x: (originX + p.x) * CELL,
+      z: (originZ + p.z) * CELL,
+      rot: p.rot,
+      variant: p.variant,
+    });
+  }
+  for (const l of interior.lights) {
+    layout.lights.push({
+      x: (originX + l.x) * CELL,
+      z: (originZ + l.z) * CELL,
+      flicker: l.flicker,
+      alive: l.alive,
+    });
+  }
+}
+
+// ---- F19 IMPOSSIBLE WINDOWS ------------------------------------------------
+
+/** Hash-gate denominator: roughly one chunk in 12 shows impossible windows. */
+export const WINDOW_CHUNK_GATE = 12;
+
+/** Salt isolating window gating/placement from every other hashed feature. */
+const WINDOW_GATE_SALT = 0x51ad;
+
+/** Warm lit-interior tints seen through the windows. */
+const WINDOW_TINTS: readonly number[] = [
+  0xffdca0, 0xf7e6c4, 0xe8f0d8, 0xd8e8f0, 0xf0d8c0,
+];
+
+/** One wall window showing a lit room interior where exterior should be. */
+export interface WindowInstance {
+  /** Window centre in world metres, on the wall plane. */
+  readonly x: number;
+  readonly z: number;
+  /** Outward wall normal (SignInstance convention: 0=-z 1=+z 2=-x 3=+x). */
+  readonly face: 0 | 1 | 2 | 3;
+  /** Which edge array hosts the opening ('h' = hEdges, 'v' = vEdges). */
+  readonly edge: 'h' | 'v';
+  /** Local edge indices inside the chunk. */
+  readonly lz: number;
+  readonly lx: number;
+  /** Packed tint of the lit interior beyond the glass. */
+  readonly rgb: number;
+  /** Seeded phase for whichever flicker consumer drives the glow. */
+  readonly litPhase: number;
+}
+
+/**
+ * Pick impossible windows for this chunk: rare by hash gate, placed only on
+ * SOLID edges (a window never replaces a wall opening), at most two per
+ * chunk, never near the spawn plaza. Pure function of (seed, cx, cz).
+ */
+function applyWindows(seed: number, layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  if (hash2i(layout.cx, layout.cz, seed ^ WINDOW_GATE_SALT) % WINDOW_CHUNK_GATE !== 5) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x1abd));
+  const windows: WindowInstance[] = [];
+  const tryEdge = (edge: 'h' | 'v', lz: number, lx: number): void => {
+    if (windows.length >= 2) return;
+    if ((lx + 2) * CELL + (lz + 2) * CELL < 12) return; // spawn plaza margin
+    if (edge === 'h') {
+      if (layout.hEdges[lz * N + lx] !== EdgeCode.SOLID) return;
+      const face: 0 | 1 = rng.chance(0.5) ? 0 : 1;
+      windows.push({
+        x: ((layout.cx * N + lx) + 0.5) * CELL,
+        z: (layout.cz * N + lz) * CELL,
+        face,
+        edge, lz, lx,
+        rgb: WINDOW_TINTS[hash2i(lz, lx, seed ^ 0x71ab) % WINDOW_TINTS.length],
+        litPhase: hash2i(lx, lz, seed ^ 0x93b1) % 8,
+      });
+    } else {
+      if (layout.vEdges[lz * (N + 1) + lx] !== EdgeCode.SOLID) return;
+      const face: 2 | 3 = rng.chance(0.5) ? 2 : 3;
+      windows.push({
+        x: (layout.cx * N + lx) * CELL,
+        z: ((layout.cz * N + lz) + 0.5) * CELL,
+        face,
+        edge, lz, lx,
+        rgb: WINDOW_TINTS[hash2i(lz, lx, seed ^ 0x71ab) % WINDOW_TINTS.length],
+        litPhase: hash2i(lx, lz, seed ^ 0x93b1) % 8,
+      });
+    }
+  };
+  for (let attempt = 0; attempt < 24 && windows.length < 2; attempt++) {
+    tryEdge('h', rng.int(0, N), rng.int(0, N));
+    if (windows.length >= 2) break;
+    tryEdge('v', rng.int(0, N), rng.int(0, N));
+  }
+  if (windows.length) layout.windows = windows;
+}
+
+// ---- F58 SUB-FLOOR CRAWLSPACES ---------------------------------------------
+
+/**
+ * Select this chunk's crawlspace gap via crawlspaces.ts selection (same
+ * rate/salt as the model, so model queries agree with rendered gaps). The
+ * floor predicate treats a cell as floor when any of its four edges is not
+ * SOLID - sealed cells are never chosen. Gaps too close to the spawn plaza
+ * are discarded: falling at first spawn would be cruelty, not wrongness.
+ */
+function applyCrawlGap(seed: number, layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  const baseX = layout.cx * N;
+  const baseZ = layout.cz * N;
+  const isFloor = (wx: number, wz: number): boolean => {
+    const lx = wx - baseX;
+    const lz = wz - baseZ;
+    if (lx < 0 || lz < 0 || lx >= N || lz >= N) return false;
+    const top = lz > 0 ? layout.hEdges[lz * N + lx] : EdgeCode.SOLID;
+    const bot = lz < N - 1 ? layout.hEdges[(lz + 1) * N + lx] : EdgeCode.SOLID;
+    const left = lx > 0 ? layout.vEdges[lz * (N + 1) + lx] : EdgeCode.SOLID;
+    const right = lx < N - 1 ? layout.vEdges[lz * (N + 1) + lx + 1] : EdgeCode.SOLID;
+    return (
+      top !== EdgeCode.SOLID || bot !== EdgeCode.SOLID ||
+      left !== EdgeCode.SOLID || right !== EdgeCode.SOLID
+    );
+  };
+  const gap = selectChunkGap({ chunksX: 0, chunksZ: 0, isFloor }, layout.cx, layout.cz, seed);
+  if (!gap) return;
+  if (Math.hypot((gap.cellX + 0.5) * CELL, (gap.cellZ + 0.5) * CELL) < 9) return;
+  layout.crawlGap = gap;
+}
+
+// ---- F54 THE LONG HALL -----------------------------------------------------
+
+/** Chunk span of one Long Hall: 300 m straight corridor over 30 m chunks. */
+export const HALL_CHUNK_SPAN = HALL_LENGTH_M / (CELL * CHUNK_CELLS);
+
+/** Stable integer index feeding rollLongHallChunk for a spawn chunk. */
+function hallIndexFor(cx: number, cz: number): number {
+  return ((cx & 0xffff) | ((cz & 0xffff) << 16)) | 0;
+}
+
+/** F54 mount for the segment of a Long Hall passing through this chunk. */
+export interface LongHallMount {
+  /** Chunk whose rarity gate spawned the hall. */
+  readonly spawnCx: number;
+  readonly spawnCz: number;
+  /** This chunk's distance from the spawn chunk along the hall (0..span-1). */
+  readonly segment: number;
+  /** Halls run east-west across chunk rows. */
+  readonly axis: 'x';
+  /** Local row carrying the corridor inside this chunk. */
+  readonly rowLz: number;
+  /** Shared descriptor: seeded door order + fixed slots (see longhall.ts). */
+  readonly descriptor: LongHallDescriptor;
+}
+
+/**
+ * Detect and carve the Long Hall (F54). A gated spawn chunk extends a 300 m
+ * straight corridor east across up to {@link HALL_CHUNK_SPAN} chunks; every
+ * chunk in the span independently detects membership by probing the gates
+ * of the chunks west of it, so detection is order-free and rebuild-safe.
+ * Carving pins the corridor row's side walls SOLID, opens the row end to
+ * end, and cuts DOORWAY exits at each slot boundary - exit positions are
+ * eternal; which door identity hangs behind you cycles with walked distance
+ * (longhall.ts currentExits/cycleLog, high-water mark in ChunkDeltas).
+ */
+function applyLongHall(seed: number, layout: ChunkLayout): void {
+  const N = CHUNK_CELLS;
+  if (layout.landmark) return;
+  for (let k = 0; k < HALL_CHUNK_SPAN; k++) {
+    const scx = layout.cx - k;
+    const idx = hallIndexFor(scx, layout.cz);
+    if (!rollLongHallChunk(seed, idx)) continue;
+    const descriptor = createLongHall(seed, idx);
+    if (!descriptor) continue;
+    const rowLz = 3 + hash2i(scx, layout.cz, seed ^ 0x1a11) % (N - 6);
+    // pin side walls, open the corridor end to end
+    for (let lx = 0; lx < N; lx++) {
+      layout.hEdges[rowLz * N + lx] = EdgeCode.SOLID;
+      layout.hEdges[(rowLz + 1) * N + lx] = EdgeCode.SOLID;
+    }
+    for (let lx = 0; lx <= N; lx++) {
+      layout.vEdges[rowLz * (N + 1) + lx] = EdgeCode.OPEN;
+    }
+    // exit-door slots every DOOR_SPACING_M from the spawn chunk's west
+    // edge; slots landing on this chunk's boundary columns become DOORWAYs
+    const slotCellSpacing = Math.round(DOOR_SPACING_M / CELL);
+    for (let s = 0; s <= descriptor.slots.length; s++) {
+      const localLx = s * slotCellSpacing - k * N;
+      if (localLx !== 0 && localLx !== N) continue;
+      layout.vEdges[rowLz * (N + 1) + localLx] = EdgeCode.DOORWAY;
+    }
+    layout.longHall = { spawnCx: scx, spawnCz: layout.cz, segment: k, axis: 'x', rowLz, descriptor };
+    return;
+  }
 }
 
 function inBlackout(seed: number, wx: number, wz: number): boolean {

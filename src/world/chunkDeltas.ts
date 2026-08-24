@@ -7,9 +7,21 @@
  * counter into their decor RNG, so every rebuild of a drifted chunk shows
  * the SAME drifted decor while revertAll() restores the canonical world on
  * the next rebuild. The counter is the only extra input to generation.
+ *
+ * Two further reversible ledgers live here:
+ *   BRICKED EDGES   blackout rearrangement (F16) persists one EdgeCode.SOLID
+ *                   override per affected chunk for the door it bricked;
+ *                   builds consult it so the brick survives rebuilds and it
+ *                   is dropped at the NEXT blackout (clearBrickEdges) or by
+ *                   revertAll/revertBlackoutShift.
+ *   CELL OVERRIDES  door/wall swaps (F23) write their nav+collision+mesher
+ *                   markers through DeltasSwapGrid as one bulk putCellOverrides
+ *                   call; revertAll removes every override so rebuilds come
+ *                   out byte-identically canonical again.
  */
 import { RNG, hash2i, hash3i } from '../core/rng';
 import type { PropInstance } from './architect';
+import type { SwapCell, SwapGrid, CellWrite } from './doorswap';
 
 /** Salt so drift draws never correlate with any other per-chunk feature. */
 const DRIFT_SALT = 0x61d7;
@@ -29,6 +41,38 @@ export class ChunkDeltas {
   private steps = new Map<string, number>();
   /** Ordinals of blackout shifts already folded into each chunk. */
   private blackoutOrdinals = new Map<string, Set<number>>();
+  /** Bricked-door SOLID overrides, keyed like steps with the door edge id. */
+  private bricks = new Map<string, string>();
+  /** Door/wall-swap cell overrides keyed by grid coordinate "x,z". */
+  private cellOv = new Map<string, SwapCell>();
+  /**
+   * F54 Long Hall walked-distance high-water marks, keyed by spawn chunk
+   * "cx,cz". The door cycle behind the player is a pure function of this
+   * mark (longhall.ts currentExits/cycleLog), so keeping it here preserves
+   * the cycle timeline across chunk rebuilds. Progress is world state, not
+   * anomaly drift - revertAll() deliberately leaves these untouched.
+   */
+  private hallWalkedMarks = new Map<string, number>();
+
+  /**
+   * Walked-distance high-water mark recorded for the hall spawned at
+   * (spawnCx, spawnCz); 0 when the player has never entered it.
+   */
+  hallWalked(spawnCx: number, spawnCz: number): number {
+    return this.hallWalkedMarks.get(ChunkDeltas.key(spawnCx, spawnCz)) ?? 0;
+  }
+
+  /**
+   * Raise the hall's walked-distance mark to walkedM when that is further
+   * than the current mark; backtracking never rewinds the door cycle.
+   * @returns The stored mark after the call.
+   */
+  markHallWalked(spawnCx: number, spawnCz: number, walkedM: number): number {
+    const key = ChunkDeltas.key(spawnCx, spawnCz);
+    const next = Math.max(this.hallWalkedMarks.get(key) ?? 0, walkedM);
+    this.hallWalkedMarks.set(key, next);
+    return next;
+  }
 
   static key(cx: number, cz: number): string {
     return cx + ',' + cz;
@@ -54,7 +98,59 @@ export class ChunkDeltas {
     const n = this.steps.size;
     this.steps.clear();
     this.blackoutOrdinals.clear();
+    this.bricks.clear();
+    this.cellOv.clear();
     return n;
+  }
+
+  /** Persist one bricked-door EdgeCode.SOLID override for a chunk. */
+  brickEdge(cx: number, cz: number, doorId: string): void {
+    this.bricks.set(ChunkDeltas.key(cx, cz), doorId);
+  }
+
+  /** Whether the SOLID override for this door is currently in force. */
+  hasBrickEdge(cx: number, cz: number, doorId: string): boolean {
+    return this.bricks.get(ChunkDeltas.key(cx, cz)) === doorId;
+  }
+
+  /** The door currently bricked in a chunk, or null when none is. */
+  brickedDoorIn(cx: number, cz: number): string | null {
+    return this.bricks.get(ChunkDeltas.key(cx, cz)) ?? null;
+  }
+
+  /** Drop one door's SOLID override (blackout revert removes its own brick). */
+  unbrickEdge(cx: number, cz: number, doorId: string): void {
+    const key = ChunkDeltas.key(cx, cz);
+    if (this.bricks.get(key) === doorId) this.bricks.delete(key);
+  }
+
+  /**
+   * Drop every bricked-edge override; the director calls this when the NEXT
+   * blackout starts so bricks last exactly until then.
+   */
+  clearBrickEdges(): number {
+    const n = this.bricks.size;
+    this.bricks.clear();
+    return n;
+  }
+
+  /** The swap-cell override at a grid coordinate, or null when canonical. */
+  cellOverride(x: number, z: number): SwapCell | null {
+    const c = this.cellOv.get(x + ',' + z);
+    return c ? { marker: c.marker, nav: c.nav, solid: c.solid } : null;
+  }
+
+  /**
+   * Apply every cell write as one unit - all entries are in the ledger
+   * before this returns and before any later getCell observation, so a
+   * swap is never observably half-applied.
+   */
+  putCellOverrides(writes: readonly CellWrite[]): void {
+    for (const w of writes) {
+      this.cellOv.set(w.x + ',' + w.z, {
+        marker: w.cell.marker, nav: w.cell.nav, solid: w.cell.solid,
+      });
+    }
   }
 
   /** Whether a blackout shift with this ordinal already hit the chunk. */
@@ -83,6 +179,35 @@ export class ChunkDeltas {
 
   get size(): number {
     return this.steps.size;
+  }
+}
+
+/** Canonical cell lookup for one chunk region, injected from the architect layout. */
+export type CanonicalCellAt = (x: number, z: number) => SwapCell | undefined;
+
+/**
+ * SwapGrid view over a ChunkDeltas ledger (F23 seam): reads fall through to
+ * the injected canonical cells unless an override is in force, and writes go
+ * into the ledger so revertAll() restores canonical. Door/wall swaps run
+ * through doorswap.swapDoorWall against this adapter, so nav flags, collision
+ * solids and mesher markers all swap atomically inside one bulk write and
+ * remain swapped across chunk rebuilds until reverted.
+ */
+export class DeltasSwapGrid implements SwapGrid {
+  constructor(
+    private deltas: ChunkDeltas,
+    private canonicalAt: CanonicalCellAt,
+  ) {}
+
+  getCell(x: number, z: number): SwapCell | undefined {
+    const ov = this.deltas.cellOverride(x, z);
+    if (ov) return ov;
+    const c = this.canonicalAt(x, z);
+    return c ? { marker: c.marker, nav: c.nav, solid: c.solid } : undefined;
+  }
+
+  putCells(writes: readonly CellWrite[]): void {
+    this.deltas.putCellOverrides(writes);
   }
 }
 /**
@@ -151,7 +276,8 @@ export interface BlackoutShiftRecord {
  * same (seed, ordinal) replays identically. Applying twice with the same
  * ordinal is rejected (returns null), guarding against double-drift.
  * @param delta Chunk mutation ledger; the chunk's drift step is bumped so
- *   rebuilds fold the blackout in, and the ordinal mark guards re-application.
+ *   rebuilds fold the blackout in, the bricked door's SOLID edge override is
+ *   persisted, and the ordinal mark guards re-application.
  * @param input Chunk coordinates, props, and currently-open doors.
  * @param seed Master run seed.
  * @param ordinal Index of this blackout event within the run.
@@ -180,6 +306,9 @@ export function applyBlackoutShift(
     p.rot = ((p.rot + 1) % 4) as PropInstance['rot'];
   }
   const brickedDoor = input.openDoors[rr.int(0, input.openDoors.length)];
+  // persist the SOLID override so rebuilds keep the door bricked until the
+  // next blackout clears it (or revertAll restores canonical)
+  delta.brickEdge(input.cx, input.cz, brickedDoor);
   const priorStep = delta.step(input.cx, input.cz);
   delta.bump(input.cx, input.cz);
   return {
@@ -205,6 +334,7 @@ export function revertBlackoutShift(
   for (const prior of record.priorRots) {
     props[prior.index].rot = prior.rot;
   }
+  delta.unbrickEdge(record.cx, record.cz, record.brickedDoor);
   delta.unmarkBlackout(record.cx, record.cz, record.ordinal);
   delta.restore(record.cx, record.cz, record.priorStep);
   return record.brickedDoor;

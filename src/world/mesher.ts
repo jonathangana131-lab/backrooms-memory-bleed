@@ -10,6 +10,8 @@ import { CELL, CHUNK_CELLS, WALL_H, WALL_T, EdgeCode, District } from './constan
 import { hash2i, rand2 } from '../core/rng';
 import { MemoryKind } from '../memory/field';
 import type { ChunkLayout, PropInstance } from './architect';
+import { CRAWL_Y_OFFSET } from './crawlspaces';
+import type { WindowInstance } from './architect';
 
 // ---------------------------------------------------------------------------
 // Level of detail
@@ -371,8 +373,13 @@ function addFloor(g: ChunkGeometry, layout: ChunkLayout): void {
   const bx = cx * N * CELL;
   const bz = cz * N * CELL;
   const f = g.floor;
+  // F58 crawlspace gap: the surface tile is missing here (pit meshed below)
+  const gap = layout.crawlGap;
+  const gapLx = gap ? gap.cellX - cx * N : -1;
+  const gapLz = gap ? gap.cellZ - cz * N : -1;
   for (let lz = 0; lz < N; lz++) {
     for (let lx = 0; lx < N; lx++) {
+      if (lx === gapLx && lz === gapLz) continue;
       const x0 = bx + lx * CELL, z0 = bz + lz * CELL;
       const x1 = x0 + CELL, z1 = z0 + CELL;
       quad(f,
@@ -644,7 +651,16 @@ function addWalls(g: ChunkGeometry, layout: ChunkLayout): void {
       const x1 = x0 + CELL;
       const zc = (bz + lz) * CELL;
       if (code === EdgeCode.SOLID) {
-        wallBox(w, x0, zc - ht, x1, zc + ht);
+        if (windowOnEdge(layout, 'h', lz, lx)) {
+          const mid = (x0 + x1) / 2;
+          const ww = WINDOW_OPENING_W / 2;
+          wallBox(w, x0, zc - ht, mid - ww, zc + ht);
+          wallBox(w, mid + ww, zc - ht, x1, zc + ht);
+          wallBox(w, mid - ww, zc - ht, mid + ww, zc + ht, 0, WINDOW_Y0);      // sill
+          wallBox(w, mid - ww, zc - ht, mid + ww, zc + ht, WINDOW_Y1, WALL_H); // header
+        } else {
+          wallBox(w, x0, zc - ht, x1, zc + ht);
+        }
       } else {
         const mid = (x0 + x1) / 2;
         const dw = DOOR_W / 2;
@@ -665,7 +681,16 @@ function addWalls(g: ChunkGeometry, layout: ChunkLayout): void {
       const z1 = z0 + CELL;
       const xc = (bx + lx) * CELL;
       if (code === EdgeCode.SOLID) {
-        wallBox(w, xc - ht, z0, xc + ht, z1);
+        if (windowOnEdge(layout, 'v', lz, lx)) {
+          const mid = (z0 + z1) / 2;
+          const ww = WINDOW_OPENING_W / 2;
+          wallBox(w, xc - ht, z0, xc + ht, mid - ww);
+          wallBox(w, xc - ht, mid + ww, xc + ht, z1);
+          wallBox(w, xc - ht, mid - ww, xc + ht, mid + ww, 0, WINDOW_Y0);      // sill
+          wallBox(w, xc - ht, mid - ww, xc + ht, mid + ww, WINDOW_Y1, WALL_H); // header
+        } else {
+          wallBox(w, xc - ht, z0, xc + ht, z1);
+        }
       } else {
         const mid = (z0 + z1) / 2;
         const dw = DOOR_W / 2;
@@ -961,6 +986,172 @@ function addDetails(g: ChunkGeometry, layout: ChunkLayout): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// World-wrongness geometry (F15 / F19 / F58)
+// ---------------------------------------------------------------------------
+
+/** F19 window opening width in metres. */
+export const WINDOW_OPENING_W = 1.3;
+/** F19 window sill height (opening bottom). */
+export const WINDOW_Y0 = 0.95;
+/** F19 window header height (opening top). */
+export const WINDOW_Y1 = 2.05;
+/** Depth of the fake lit room built beyond a window. */
+const WINDOW_ROOM_DEPTH = 2.4;
+/** Width of the fake room box (wider than the opening, so no edge leaks). */
+const WINDOW_ROOM_W = 2.2;
+/** Ceiling height of the fake room box. */
+const WINDOW_ROOM_H = 2.35;
+
+/**
+ * The window mounted on this edge cell, if any. Windows are rare (at most
+ * two per chunk), so a linear scan beats an index.
+ */
+function windowOnEdge(
+  layout: ChunkGeometryInput, edge: 'h' | 'v', lz: number, lx: number,
+): WindowInstance | undefined {
+  return layout.windows?.find((wn) => wn.edge === edge && wn.lz === lz && wn.lx === lx);
+}
+
+/**
+ * F58 sub-floor crawlspace beneath a gap tile: four inward-facing pit walls
+ * down to CRAWL_Y_OFFSET and a dark crawl-layer floor. The shallow depth is
+ * what makes falling in survivable; climb-out points are seeded at the gap
+ * rim itself (see crawlspaces.ts canClimbOut).
+ */
+function addCrawlPit(g: ChunkGeometry, layout: ChunkLayout): void {
+  const gap = layout.crawlGap;
+  if (!gap) return;
+  const x0 = gap.cellX * CELL;
+  const x1 = x0 + CELL;
+  const z0 = gap.cellZ * CELL;
+  const z1 = z0 + CELL;
+  const yB = CRAWL_Y_OFFSET;
+  const w = g.walls;
+  const wStart = w.positions.length / 3;
+  quad(w, [x0, yB, z0], [x0, yB, z1], [x0, 0, z1], [x0, 0, z0], [1, 0, 0], ...uvBox());
+  quad(w, [x1, yB, z1], [x1, yB, z0], [x1, 0, z0], [x1, 0, z1], [-1, 0, 0], ...uvBox());
+  quad(w, [x0, yB, z0], [x1, yB, z0], [x1, 0, z0], [x0, 0, z0], [0, 0, 1], ...uvBox());
+  quad(w, [x1, yB, z1], [x0, yB, z1], [x0, 0, z1], [x1, 0, z1], [0, 0, -1], ...uvBox());
+  tintVerts(w, wStart, 0.10, 0.10, 0.12);
+  const fStart = g.floor.positions.length / 3;
+  quad(g.floor,
+    [x0, yB, z1], [x1, yB, z1], [x1, yB, z0], [x0, yB, z0],
+    [0, 1, 0], ...uvBox());
+  tintVerts(g.floor, fStart, 0.07, 0.07, 0.09);
+}
+
+/** Unit UV corners shared by untextured wrongness quads. */
+function uvBox(): [[number, number], [number, number], [number, number], [number, number]] {
+  return [[0, 0], [1, 0], [1, 1], [0, 1]];
+}
+
+/**
+ * F19 fake room beyond each impossible window: a shallow box sticking out
+ * of the wall's exterior face - floor, ceiling, side walls and back wall -
+ * plus an emissive panel on its back wall tinted by the window's seeded
+ * rgb. Looking through the opening shows a lit lived-in room where the
+ * building's outside should be.
+ */
+function addWindowRooms(g: ChunkGeometry, layout: ChunkLayout): void {
+  for (const win of layout.windows ?? []) {
+    const ht = WALL_T / 2;
+    const horiz = win.face === 0 || win.face === 1;
+    // outward normal sign along the wall normal axis
+    const s = win.face === 0 || win.face === 2 ? -1 : 1;
+    const near = (win.face === 0 || win.face === 1 ? win.z : win.x) + s * ht;
+    const far = near + s * WINDOW_ROOM_DEPTH;
+    const cAlong = win.face === 0 || win.face === 1 ? win.x : win.z;
+    const hw = WINDOW_ROOM_W / 2;
+    const a0 = cAlong - hw;
+    const a1 = cAlong + hw;
+    const P = (along: number, d: number, y: number): [number, number, number] =>
+      horiz ? [along, y, d] : [d, y, along];
+    const uv = uvBox();
+    const shell = g.walls;
+    const shStart = shell.positions.length / 3;
+    // back wall (faces the viewer, normal -n)
+    quad(shell, P(a0, far, 0), P(a1, far, 0), P(a1, far, WINDOW_ROOM_H), P(a0, far, WINDOW_ROOM_H),
+      horiz ? [0, 0, -s] : [-s, 0, 0], ...uv);
+    // side walls facing inward along the corridor axis
+    quad(shell, P(a0, near, 0), P(a0, far, 0), P(a0, far, WINDOW_ROOM_H), P(a0, near, WINDOW_ROOM_H),
+      horiz ? [1, 0, 0] : [0, 0, 1], ...uv);
+    quad(shell, P(a1, far, 0), P(a1, near, 0), P(a1, near, WINDOW_ROOM_H), P(a1, far, WINDOW_ROOM_H),
+      horiz ? [-1, 0, 0] : [0, 0, -1], ...uv);
+    // floor + ceiling of the fake room
+    quad(shell, P(a0, near, 0), P(a1, near, 0), P(a1, far, 0), P(a0, far, 0), [0, 1, 0], ...uv);
+    quad(shell, P(a0, far, WINDOW_ROOM_H), P(a1, far, WINDOW_ROOM_H),
+      P(a1, near, WINDOW_ROOM_H), P(a0, near, WINDOW_ROOM_H), [0, -1, 0], ...uv);
+    tintVerts(shell, shStart, 0.55, 0.50, 0.42); // dim shell; the panel glows
+    // emissive lit-interior panel just proud of the back wall
+    const inset = far - s * 0.03;
+    const pw = WINDOW_ROOM_W * 0.62;
+    const ph = WINDOW_ROOM_H * 0.62;
+    const py0 = (WINDOW_ROOM_H - ph) / 2;
+    const py1 = py0 + ph;
+    const fx = g.fixtures;
+    const fxStart = fx.positions.length / 3;
+    quad(fx,
+      P(cAlong - pw, inset, py0), P(cAlong + pw, inset, py0),
+      P(cAlong + pw, inset, py1), P(cAlong - pw, inset, py1),
+      horiz ? [0, 0, -s] : [-s, 0, 0], ...uv);
+    tintVerts(fx, fxStart,
+      ((win.rgb >> 16) & 255) / 255,
+      ((win.rgb >> 8) & 255) / 255,
+      (win.rgb & 255) / 255);
+  }
+}
+
+/**
+ * F15 pocket interior: meshes the offset sub-grid stored in layout.pocket -
+ * carpet under floor cells, full-height walls around wall cells, ceiling
+ * over every column - at the mount's world origin (see PocketMount for the
+ * coordinate-frame transform). Furniture and lights arrive through the
+ * regular prop/fixture passes, already re-based onto the sub-grid by the
+ * architect. A faint violet cast marks the interior as somewhere else.
+ */
+function addPocketInterior(g: ChunkGeometry, layout: ChunkLayout): void {
+  const pk = layout.pocket;
+  if (!pk) return;
+  const interior = pk.interior;
+  const W = interior.width;
+  const D = interior.depth;
+  const bxW = pk.originX * CELL;
+  const bzW = pk.originZ * CELL;
+  const f = g.floor;
+  const c = g.ceiling;
+  const w = g.walls;
+  const fStart = f.positions.length / 3;
+  const cStart = c.positions.length / 3;
+  const wStart = w.positions.length / 3;
+  for (let z = 0; z < D; z++) {
+    for (let x = 0; x < W; x++) {
+      const cell = interior.cells[z * W + x];
+      const x0 = bxW + x * CELL;
+      const x1 = x0 + CELL;
+      const z0 = bzW + z * CELL;
+      const z1 = z0 + CELL;
+      quad(c,
+        [x0, WALL_H, z0], [x1, WALL_H, z0], [x1, WALL_H, z1], [x0, WALL_H, z1],
+        [0, -1, 0],
+        [x0 * CEIL_SCALE, z0 * CEIL_SCALE], [x1 * CEIL_SCALE, z0 * CEIL_SCALE],
+        [x1 * CEIL_SCALE, z1 * CEIL_SCALE], [x0 * CEIL_SCALE, z1 * CEIL_SCALE]);
+      if (cell.kind === 'floor') {
+        quad(f,
+          [x0, 0, z1], [x1, 0, z1], [x1, 0, z0], [x0, 0, z0],
+          [0, 1, 0],
+          [x0 * CARPET_SCALE, z1 * CARPET_SCALE], [x1 * CARPET_SCALE, z1 * CARPET_SCALE],
+          [x1 * CARPET_SCALE, z0 * CARPET_SCALE], [x0 * CARPET_SCALE, z0 * CARPET_SCALE]);
+      } else {
+        wallBox(w, x0, z0, x1, z1);
+      }
+    }
+  }
+  tintVerts(f, fStart, 0.94, 0.92, 1.05);
+  tintVerts(c, cStart, 0.94, 0.92, 1.05);
+  tintVerts(w, wStart, 0.94, 0.92, 1.05);
+}
+
 export function buildChunkGeometry(
   layout: ChunkGeometryInput,
   camX: number = Infinity,
@@ -1025,6 +1216,9 @@ export function buildChunkGeometry(
   addPuddles(g, layout);
   addFloorWear(g, layout);
   addWires(g, layout);
+  addPocketInterior(g, layout);
+  addWindowRooms(g, layout);
+  addCrawlPit(g, layout);
   // LOD 2: also skip stains/graffiti quads
   if (lod < 2) {
     addGraffiti(g, layout);

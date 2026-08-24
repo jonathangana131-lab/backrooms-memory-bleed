@@ -6,6 +6,11 @@
  * Covers: trigger gating math, session caps + cooldowns, seeded doorway
  * selection, corridor stretch/snapback, mirror-step echoes, and
  * ChunkDeltas reversibility (drift is deterministic and revertible).
+ * Also covers the consolidated F20/F23/F16 gates: stairwell-loop
+ * trigger-iff-gaze-away gating with clean exits, atomic door/wall swaps
+ * whose nav + collision + mesher markers agree through the ChunkDeltas
+ * seam, and blackout rearrangement reversibility including the persisted
+ * SOLID brick override.
  * Run: node test/anomalies-test.mjs
  */
 import assert from 'node:assert/strict';
@@ -37,6 +42,7 @@ emit('src/world/constants.ts', 'src/world/constants.mjs');
 emit('src/director/persona.ts', 'src/director/persona.mjs');
 emit('src/director/director.ts', 'src/director/director.mjs');
 emit('src/world/chunkDeltas.ts', 'src/world/chunkDeltas.mjs');
+emit('src/world/doorswap.ts', 'src/world/doorswap.mjs');
 emit('src/director/anomalies.ts', 'src/director/anomalies.mjs');
 process.on('exit', () => { try { fsMod.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ } });
 
@@ -48,7 +54,11 @@ const {
   AnomalySystem, checkGate, isHauntedDoorway, facingDeviation,
   MIN_SPAWN_DIST, CAPS, COOLDOWNS, LOOK_AWAY_SNAP_SEC, MIRROR_ECHO_DELAY_SEC,
 } = await import(path.join(tmp, 'src/director/anomalies.mjs'));
-const { ChunkDeltas, applyDecorDrift } = await import(path.join(tmp, 'src/world/chunkDeltas.mjs'));
+const { ChunkDeltas, applyDecorDrift, DeltasSwapGrid, applyBlackoutShift, revertBlackoutShift } =
+  await import(path.join(tmp, 'src/world/chunkDeltas.mjs'));
+const {
+  swapDoorWall, assertSwapConsistent, doorCell, wallCell, openCell,
+} = await import(path.join(tmp, 'src/world/doorswap.mjs'));
 
 // ---- fake host -------------------------------------------------------------
 
@@ -409,4 +419,198 @@ test('drift step zero is a no-op and revertAll restores the canonical world', ()
   assert.equal(deltas.revertAll(), 1);
   manager.rebuild(9, 9);
   assert.deepStrictEqual(manager.builds[3].props, canonical, 'reverted world regenerates canonically');
+});
+
+// ---- stairwell loop gating (F20) ----
+
+/**
+ * Host standing inside a fixed stairwell block with all F20 providers as
+ * plain fields so each scenario can rewire gaze-away and bounds.
+ */
+function makeStairHost() {
+  const host = makeHost();
+  host.inside = true;
+  host.away = 0;
+  host.placements = [];
+  host.stairwellBounds = () =>
+    host.inside ? { minX: -5, minZ: -5, maxX: 5, maxZ: 5 } : null;
+  host.gazeAwaySec = () => host.away;
+  // deterministic landing map: progress k sits at z = k * 3 metres
+  host.repositionFromProgress = (progress) => {
+    host.placements.push(progress);
+    host.z = progress * 3;
+  };
+  return host;
+}
+
+test('stairwell loop arms only after LOOK_AWAY_SNAP_SEC of continuous gaze-away', () => {
+  const host = makeStairHost();
+  const bus = new Emitter();
+  const sys = makeSystem(host, bus);
+  openWindow(bus);
+  // exactly at the threshold the flight holds: trigger is strictly >2 s
+  host.away = LOOK_AWAY_SNAP_SEC;
+  sys.update(0.016);
+  assert.equal(sys.inStairwellLoop(), false, 'not armed at exactly the snap threshold');
+  assert.equal(sys.usage()['stairwell-loop'], 0);
+  host.away = LOOK_AWAY_SNAP_SEC + 0.01;
+  sys.update(0.016);
+  assert.equal(sys.inStairwellLoop(), true, 'armed just past the threshold');
+  assert.equal(sys.usage()['stairwell-loop'], 1);
+  assert.ok(host.placements.length >= 1, 'crossing the threshold IS the first wrong landing');
+  sys.dispose();
+});
+
+test('observed gaze freezes the loop; each further absence buys discrete landings', () => {
+  const host = makeStairHost();
+  const bus = new Emitter();
+  const sys = makeSystem(host, bus);
+  openWindow(bus);
+  host.away = LOOK_AWAY_SNAP_SEC + 4; // arms with 4 s banked past the threshold
+  sys.update(0.016);
+  assert.equal(host.placements.length, 1);
+  host.away += 4; // two more full unobserved intervals -> exactly two landings
+  sys.update(0.016);
+  assert.equal(host.placements.length, 3, 'one discrete landing per extra interval');
+  // looking back freezes mid-loop without resetting progress
+  host.away = 1;
+  sys.update(0.016);
+  assert.equal(sys.inStairwellLoop(), true, 'still inside the episode');
+  assert.equal(host.placements.length, 3, 'no movement while observed');
+  // a fresh absence owes its own full threshold before advancing again
+  host.away = LOOK_AWAY_SNAP_SEC + 0.5;
+  sys.update(0.016);
+  assert.equal(host.placements.length, 4);
+  for (let i = 1; i < host.placements.length; i++) {
+    assert.ok(host.placements[i] > host.placements[i - 1], 'progress advances discretely');
+  }
+  sys.dispose();
+});
+
+test('leaving the stairwell exits the loop cleanly and the session cap still applies', () => {
+  const host = makeStairHost();
+  const bus = new Emitter();
+  const sys = makeSystem(host, bus);
+  openWindow(bus);
+  host.away = LOOK_AWAY_SNAP_SEC + 4;
+  sys.update(0.016);
+  assert.equal(sys.inStairwellLoop(), true);
+  // stepping out lets go entirely
+  host.inside = false;
+  sys.update(0.016);
+  assert.equal(sys.inStairwellLoop(), false, 'exit disarms cleanly');
+  // re-entry refires only once more before the hard cap
+  host.t += COOLDOWNS['stairwell-loop'] + 1;
+  host.inside = true;
+  sys.update(0.016);
+  assert.equal(sys.usage()['stairwell-loop'], 2);
+  host.t += COOLDOWNS['stairwell-loop'] + 1;
+  host.inside = false;
+  sys.update(0.016);
+  host.inside = true;
+  sys.update(0.016);
+  assert.equal(sys.usage()['stairwell-loop'], CAPS['stairwell-loop'], 'capped');
+  assert.equal(sys.inStairwellLoop(), false, 'a refused gate never arms');
+  // closing the director window also ends any live episode
+  host.t += COOLDOWNS['stairwell-loop'];
+  closeWindow(bus);
+  sys.update(0.016);
+  assert.equal(sys.inStairwellLoop(), false);
+  sys.dispose();
+});
+
+// ---- door/wall swaps through ChunkDeltas (F23) ----
+
+function swapCanonical() {
+  return new Map([
+    ['4,4', doorCell()], // the doorway that will open into wall
+    ['5,4', wallCell()], // the adjacent solid wall that becomes a door
+    ['3,4', openCell()],
+    ['6,4', openCell()],
+  ]);
+}
+
+test('door/wall swap flips nav+collision+mesher markers atomically over ChunkDeltas', () => {
+  const canonicalCells = swapCanonical();
+  const deltas = new ChunkDeltas();
+  const grid = new DeltasSwapGrid(deltas, (x, z) => canonicalCells.get(x + ',' + z));
+  const rec = swapDoorWall(grid, { x: 4, z: 4 }, { x: 5, z: 4 }, SEED);
+  assertSwapConsistent(grid, rec);
+  for (const side of [rec.door, rec.wall]) {
+    const c = grid.getCell(side.x, side.z);
+    assert.deepEqual(c, side.after, 'observed cell equals the recorded post-swap state');
+    assert.equal(c.marker === 'wall', !c.nav, 'nav flag agrees with mesher marker');
+    assert.equal(c.marker === 'wall', c.solid, 'collision box agrees with mesher marker');
+  }
+  assert.equal(grid.getCell(4, 4).nav, false, 'former door now blocks movement');
+  assert.equal(grid.getCell(5, 4).nav, true, 'former wall edge is now passable');
+  // both halves ride ONE bulk write in the ledger - both present or neither
+  assert.ok(deltas.cellOverride(4, 4), 'door override committed');
+  assert.ok(deltas.cellOverride(5, 4), 'wall override committed');
+  // revertAll restores byte-identical canonical cells on every coordinate
+  deltas.revertAll();
+  for (const [key, cell] of canonicalCells) {
+    const [x, z] = key.split(',').map(Number);
+    assert.deepEqual(grid.getCell(x, z), cell, 'canonical restored at ' + key);
+  }
+});
+
+test('a rejected door/wall swap writes nothing to the ledger', () => {
+  const canonicalCells = swapCanonical();
+  const deltas = new ChunkDeltas();
+  const grid = new DeltasSwapGrid(deltas, (x, z) => canonicalCells.get(x + ',' + z));
+  // target is open floor, not solid wall - must fail loud before any write
+  assert.throws(() => swapDoorWall(grid, { x: 4, z: 4 }, { x: 6, z: 4 }, SEED));
+  for (const [key, cell] of canonicalCells) {
+    const [x, z] = key.split(',').map(Number);
+    assert.deepEqual(grid.getCell(x, z), cell, 'untouched at ' + key);
+  }
+  assert.equal(deltas.cellOverride(4, 4), null);
+  assert.equal(deltas.cellOverride(6, 4), null);
+});
+
+// ---- blackout rearrangement reversibility (F16) ----
+
+test('blackout shift bricks one door via a persisted SOLID override and fully reverts', () => {
+  const deltas = new ChunkDeltas();
+  const props = layoutProps();
+  const frozen = JSON.parse(JSON.stringify(props));
+  const openDoors = ['door-a', 'door-b', 'door-c'];
+  const rec = applyBlackoutShift(deltas, { cx: 2, cz: -3, props, openDoors }, SEED, 0);
+  assert.ok(rec, 'first application succeeds');
+  // movable props rotated EXACTLY one quarter-turn slot; fixed props untouched
+  for (let i = 0; i < props.length; i++) {
+    if (props[i].kind === 'battery') {
+      assert.equal(props[i].rot, frozen[i].rot, 'fixed prop keeps its slot');
+    } else {
+      assert.equal(props[i].rot, (frozen[i].rot + 1) % 4, 'movable drifted one slot');
+    }
+  }
+  assert.ok(openDoors.includes(rec.brickedDoor), 'exactly one previously-open door bricked');
+  assert.equal(deltas.hasBrickEdge(2, -3, rec.brickedDoor), true, 'SOLID override persisted in deltas');
+  assert.equal(deltas.brickedDoorIn(2, -3), rec.brickedDoor);
+  // deterministic per (seed, ordinal): identical replay bricks the same door
+  const replay = applyBlackoutShift(new ChunkDeltas(), { cx: 2, cz: -3, props: layoutProps(), openDoors }, SEED, 0);
+  assert.equal(replay.brickedDoor, rec.brickedDoor);
+  // revert restores props, drift step AND removes the brick override
+  assert.equal(revertBlackoutShift(deltas, rec, props), rec.brickedDoor, 'revert names the unbricked door');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(props)), frozen, 'props byte-identical after revert');
+  assert.equal(deltas.hasBrickEdge(2, -3, rec.brickedDoor), false, 'override dropped on revert');
+  assert.equal(deltas.step(2, -3), 0, 'drift step restored');
+});
+
+test('bricked-edge overrides persist until the next blackout clears them', () => {
+  const deltas = new ChunkDeltas();
+  const input = { cx: 7, cz: 1, props: layoutProps(), openDoors: ['door-a', 'door-b'] };
+  const rec = applyBlackoutShift(deltas, input, SEED, 0);
+  assert.ok(rec);
+  // the blackout ENDED but the brick survives rebuilds until the next one
+  assert.equal(deltas.hasBrickEdge(7, 1, rec.brickedDoor), true, 'persists past blackout end');
+  assert.equal(deltas.clearBrickEdges(), 1, 'next blackout drops stale bricks');
+  assert.equal(deltas.hasBrickEdge(7, 1, rec.brickedDoor), false);
+  // revertAll also wipes everything back to canonical
+  const rec2 = applyBlackoutShift(deltas, input, SEED, 1);
+  assert.ok(rec2);
+  assert.equal(deltas.revertAll() >= 1, true);
+  assert.equal(deltas.brickedDoorIn(7, 1), null, 'revertAll restores canonical edges');
 });
