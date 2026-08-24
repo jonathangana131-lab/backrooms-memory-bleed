@@ -218,6 +218,7 @@ export class WebAudioStatic implements RadioAudio {
     // ---- white noise bed ----
     const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 2), ctx.sampleRate);
     const data = buf.getChannelData(0);
+    // audio DSP buffer fill (static white noise) — sim PRNG law carve-out
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     const src = ctx.createBufferSource();
     src.buffer = buf;
