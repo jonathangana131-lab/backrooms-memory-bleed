@@ -75,6 +75,10 @@ const PIPELINE_FILES = [
   'src/content/clusters.ts',
   'src/content/graffiti-pool.ts',
   'src/world/architect.ts',
+  'src/world/pocketdim.ts',
+  'src/world/mezzanine.ts',
+  'src/world/longhall.ts',
+  'src/world/crawlspaces.ts',
   'src/workers/layout.worker.ts',
 ];
 
