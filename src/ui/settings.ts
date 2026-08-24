@@ -26,6 +26,13 @@ export interface GameSettings {
   subtitles: boolean;
   /** Whether the minimap overlay is visible. */
   showMinimap: boolean;
+  /**
+   * F49 accessibility pack: suppress camera bob/sway and anomaly
+   * displacement forces (controller + shake/tilt mounts read this flag).
+   */
+  motionSafety: boolean;
+  /** F49 accessibility pack: prefix subtitles with bracketed speaker tags. */
+  speakerTags: boolean;
 }
 
 /** Minimal storage contract - satisfied by DOM localStorage and test stubs. */
@@ -55,6 +62,8 @@ export const DEFAULT_SETTINGS: Readonly<GameSettings> = Object.freeze({
   fov: 90,
   subtitles: true,
   showMinimap: true,
+  motionSafety: false,
+  speakerTags: false,
 });
 
 const clamp = (v: number, min: number, max: number): number =>
@@ -88,6 +97,14 @@ export function validateSettings(raw: unknown): GameSettings {
       typeof src.showMinimap === 'boolean'
         ? src.showMinimap
         : DEFAULT_SETTINGS.showMinimap,
+    motionSafety:
+      typeof src.motionSafety === 'boolean'
+        ? src.motionSafety
+        : DEFAULT_SETTINGS.motionSafety,
+    speakerTags:
+      typeof src.speakerTags === 'boolean'
+        ? src.speakerTags
+        : DEFAULT_SETTINGS.speakerTags,
   };
 }
 
