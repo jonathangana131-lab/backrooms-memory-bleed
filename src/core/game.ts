@@ -24,6 +24,7 @@ import { DustMotes } from '../gfx/dust';
 import type { HumanType } from '../entities/humans';
 import { AudioEngine } from '../audio/audio';
 import { SelfRadio, type FeedEntry } from '../audio/selfradio';
+import { VoiceMemoStore, ZONE_GEN_MAX } from '../audio/voicememo';
 import { PositionalHum } from '../audio/positional';
 import { WatcherSteps } from '../audio/approach';
 import { SurfaceDetector } from '../player/surfacedetect';
@@ -473,6 +474,10 @@ export class Game {
   private radio: SelfRadio | null = null;
   /** F34: session time of the last locked-station broadcast line (≥45 s apart). */
   private radioLastLineSec = -1e9;
+  /** F35: this run's camcorder memo store (capture-only; playback deferred). */
+  private memoStore: VoiceMemoStore | null = null;
+  /** F35: per-run memo sequence number for stable capture ids. */
+  private memoSeq = 0;
   private attract = { x: 8, z: 8, t: 0 };
   private loopArmedUntil = 0;
   /** Spatial-anomaly runtime; rebuilt with the director on every run. */
@@ -643,6 +648,15 @@ export class Game {
       window.addEventListener('keydown', (ev) => {
         if (ev.code === 'KeyP' && this.state === 'playing' && !this.photoMode?.isOpen) {
           this.photoMode?.enter();
+        }
+      });
+      // F35: every PhotoMode capture (its own KeyC handler fires the frame
+      // grab) also records a voice-memo model entry — the capture moment,
+      // zone generation and seeded waveform are preserved even though
+      // bitmap/audio plumbing is deferred (see recordPhotoMemo).
+      window.addEventListener('keydown', (ev) => {
+        if (ev.code === 'KeyC' && !ev.repeat && this.photoMode?.isOpen) {
+          this.recordPhotoMemo();
         }
       });
     } catch (e) { console.warn('[bmb] PhotoMode unavailable', e); }
@@ -1188,6 +1202,10 @@ export class Game {
       });
     } catch (e) { console.warn('[bmb] self radio unavailable', e); this.radio = null; }
     this.radioLastLineSec = -1e9;
+    // F35: fresh memo store per run — capture ids pin the seeded waveform
+    // identity and the degraded render to this run's seed.
+    this.memoStore = new VoiceMemoStore((this.seed >>> 0).toString(16));
+    this.memoSeq = 0;
     // F100: never carry a credits walk into a fresh expedition
     this.cancelCreditsWalk();
     // near-miss telemetry + adrenaline arming reset with the fresh run
@@ -3157,6 +3175,35 @@ export class Game {
     if (this.photoMode) out.push('camcorder');
     if (this.nightvision) out.push('camcorder-ir');
     return out;
+  }
+
+  // ---------- F35: camcorder voice memos ----------
+
+  /**
+   * F35: record one memo model entry for a PhotoMode capture. Zone-gen
+   * mapping: memory-contamination intensity at the frame position, scaled
+   * onto the modelled [0, ZONE_GEN_MAX] band — the more reconstructed the
+   * zone a frame was shot in, the more degraded any future playback of it
+   * will be. The spoken payload stands in as the sector designation.
+   *
+   * Gap notes: (1) playback is deferred — degradationFor() rendering needs
+   * a Web Audio presentation layer that does not exist yet; (2) captured
+   * entries have no SaveSlot home — VoiceMemoStore.serialize() output will
+   * ride the slot once a field lands there.
+   */
+  private recordPhotoMemo(): void {
+    if (!this.memoStore || !this.photoMode?.isOpen) return;
+    const id = 'memo-' + (this.seed >>> 0).toString(16) + '-' + this.memoSeq++;
+    try {
+      const sat = this.mem.sampleAt(this.camera.position.x, this.camera.position.z);
+      const zoneGen = Math.round(Math.max(0, Math.min(1, sat.intensity)) * ZONE_GEN_MAX);
+      this.memoStore.record(
+        id,
+        'FRAME ' + sectorName(this.seed, this.camera.position.x, this.camera.position.z),
+        zoneGen,
+        3,
+      );
+    } catch (e) { console.warn('[bmb] voice memo capture failed', e); }
   }
 
   // ---------- F31: roach ecosystems ----------
