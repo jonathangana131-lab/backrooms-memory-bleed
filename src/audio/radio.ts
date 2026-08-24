@@ -22,6 +22,11 @@
  *
  * NOTE: connects straight to ctx.destination because AudioEngine
  * keeps its master bus private; levels are kept low accordingly.
+ *
+ * Determinism: every non-DSP random draw (receiver pan, vibrato rate,
+ * dropout scheduling) runs on mulberry32 streams — receiver-level draws
+ * off a fixed seed, per-beacon draws off the beacon's position hash.
+ * Math.random survives only in the static-carrier buffer fill.
  */
 
 /** Deterministic PRNG so a beacon always sounds like itself. */
@@ -66,6 +71,11 @@ import type { AudioEngine } from './audio';
 const CLEAR_UNDER = 10;    // full clarity below this distance
 const FADE_END = 20;       // intermittent zone ends here
 
+/** Seed for receiver-level draws made before the first beacon reseed. */
+const RECEIVER_SEED = 0x21ade5;
+/** Salt XORed into each beacon's position seed for its dropout stream. */
+const DROPOUT_SALT = 0x44506f;
+
 export class RadioChatter {
   private readonly audio: AudioEngine;
   private ctx: AudioContext | null = null;
@@ -83,7 +93,10 @@ export class RadioChatter {
 
   // ---- per-beacon identity ----
   private seedKey = '';
-  private rnd: () => number = Math.random;
+  /** Voice/speech stream; reseeded per beacon in reseedIfNeeded(). */
+  private rnd: () => number = mulberry32(RECEIVER_SEED);
+  /** Dropout-schedule stream, keyed per beacon off DROPOUT_SALT. */
+  private dropRng: () => number = mulberry32((RECEIVER_SEED ^ DROPOUT_SALT) >>> 0);
   baseFreq = 110;       // seeded glottal pitch (Hz)
   formantScale = 1;     // seeded vocal-tract length bias
   rate = 1;             // seeded speech-rate multiplier
@@ -156,7 +169,7 @@ export class RadioChatter {
     const out = ctx.createGain();
     out.gain.value = 0;                       // fades in when in range
     const pan = ctx.createStereoPanner();     // static-ish placement per session
-    pan.pan.value = Math.random() * 0.9 - 0.45;
+    pan.pan.value = this.rnd() * 0.9 - 0.45;
     out.connect(pan).connect(ctx.destination);
 
     // ---- voice chain: sawtooth -> parallel formants -> env -> quality -> out
@@ -168,7 +181,7 @@ export class RadioChatter {
     osc.connect(oscLevel);
 
     const vibrato = ctx.createOscillator();
-    vibrato.frequency.value = 4.7 + Math.random() * 1.4;
+    vibrato.frequency.value = 4.7 + this.rnd() * 1.4;
     const vibDepth = ctx.createGain();
     vibDepth.gain.value = 7;                  // cents of pitch wobble
     vibrato.connect(vibDepth).connect(osc.detune);
@@ -205,6 +218,7 @@ export class RadioChatter {
     const len = Math.floor(ctx.sampleRate * 2);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
+    // audio DSP buffer fill (static carrier noise) — sim PRNG law carve-out
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     const noiseSrc = ctx.createBufferSource();
     noiseSrc.buffer = buf;
@@ -241,6 +255,7 @@ export class RadioChatter {
     this.seedKey = key;
     const rnd = mulberry32(positionSeed(x, z));
     this.rnd = rnd;
+    this.dropRng = mulberry32((positionSeed(x, z) ^ DROPOUT_SALT) >>> 0);
     this.baseFreq = 82 + rnd() * 58;          // 82-140 Hz: different speakers
     this.formantScale = 0.88 + rnd() * 0.26;  // vocal tract length
     this.rate = 0.85 + rnd() * 0.45;          // hurried .. drawling
@@ -274,8 +289,8 @@ export class RadioChatter {
     // random dropouts only once outside the clear ring
     if (d >= CLEAR_UNDER && d < RANGE && t >= this.dropoutUntil) {
       const p = d < FADE_END ? 0.22 : 0.42;
-      if (Math.random() < p) {
-        const dur = 0.15 + Math.random() * (d < FADE_END ? 0.45 : 0.8);
+      if (this.dropRng() < p) {
+        const dur = 0.15 + this.dropRng() * (d < FADE_END ? 0.45 : 0.8);
         this.dropoutUntil = t + dur;
       }
     }
