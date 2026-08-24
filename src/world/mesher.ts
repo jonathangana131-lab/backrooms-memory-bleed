@@ -7,7 +7,8 @@
  * full detail.
  */
 import { CELL, CHUNK_CELLS, WALL_H, WALL_T, EdgeCode, District } from './constants';
-import { hash2i } from '../core/rng';
+import { hash2i, rand2 } from '../core/rng';
+import { MemoryKind } from '../memory/field';
 import type { ChunkLayout, PropInstance } from './architect';
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,61 @@ function quad(
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Memory-contamination tint drift
+// ---------------------------------------------------------------------------
+
+/** Salt isolating contamination tint hashing from every other feature. */
+export const CONTAM_TINT_SALT = 0xc07a;
+
+/** Surface selectors so floor, wall and ceiling drift decorrelate per cell. */
+export const CONTAM_SURFACE_FLOOR = 0x10;
+export const CONTAM_SURFACE_WALL = 0x21;
+export const CONTAM_SURFACE_CEIL = 0x32;
+
+/**
+ * Contamination tint drift for one cell of one surface.
+ *
+ * High memory contamination stains the world: walls sicken toward
+ * green-brown rot, carpet mottles between dark moldy patches and bleached
+ * sickly ones, ceilings take a weaker version of the wall decay. Strength
+ * scales linearly with intensity; the per-cell hash breaks the field into
+ * irregular patches so it never reads as a flat fill. Wet memory kinds
+ * (HOSPITAL/TRANSIT) lean the drift gray-blue mold; PERSONAL memories rot it
+ * warm rust instead.
+ *
+ * Deterministic pure function of its arguments. At intensity <= 0 returns
+ * exactly [1, 1, 1] - pure-sample chunks carry zero visual drift (hard
+ * identity requirement).
+ * @param intensity contamination density 0..1 (layout.memIntensity)
+ * @param kind MemoryKind driving which sickness the tint leans toward
+ * @param wx world cell x
+ * @param wz world cell z
+ * @param surface one of the CONTAM_SURFACE_* salts
+ * @returns RGB multiply tint per channel, each > 0
+ */
+export function contamCellTint(
+  intensity: number, kind: number, wx: number, wz: number, surface: number,
+): [number, number, number] {
+  if (!(intensity > 0)) return [1, 1, 1];
+  const m = rand2(wx, wz, CONTAM_TINT_SALT ^ surface) * 2 - 1; // patch phase -1..1
+  const t = (m + 1) / 2;
+  // channel deltas at full intensity, lerped between the two mottle poles:
+  // dark moldy (t=0) .. bleached sickly (t=1)
+  let dR = -0.30 + t * 0.38;
+  let dG = -0.22 + t * 0.20;
+  let dB = -0.34 + t * 0.16;
+  if (kind === MemoryKind.HOSPITAL || kind === MemoryKind.TRANSIT) {
+    // antiseptic wet memories: mold goes gray-blue
+    dG += 0.04; dB += 0.10;
+  } else if (kind === MemoryKind.PERSONAL) {
+    // your own returned footsteps: warm rust bleed
+    dR += 0.08; dB -= 0.06;
+  }
+  const a = Math.min(1, intensity);
+  return [1 + dR * a, 1 + dG * a, 1 + dB * a];
+}
 const CARPET_SCALE = 1 / 1.7;
 const CEIL_SCALE = 1 / 0.61;
 const WALL_UV_SCALE = 1 / 2.7;
@@ -309,7 +365,8 @@ function tintVerts(m: MeshArrays, fromVert: number, r: number, g: number, b: num
   }
 }
 
-function addFloor(g: ChunkGeometry, cx: number, cz: number): void {
+function addFloor(g: ChunkGeometry, layout: ChunkLayout): void {
+  const cx = layout.cx, cz = layout.cz;
   const N = CHUNK_CELLS;
   const bx = cx * N * CELL;
   const bz = cz * N * CELL;
@@ -325,6 +382,12 @@ function addFloor(g: ChunkGeometry, cx: number, cz: number): void {
         [x1 * CARPET_SCALE, z1 * CARPET_SCALE],
         [x1 * CARPET_SCALE, z0 * CARPET_SCALE],
         [x0 * CARPET_SCALE, z0 * CARPET_SCALE]);
+      // contamination mottle: deterministic per carpet cell
+      if (layout.memIntensity > 0) {
+        const [r, gg, b] = contamCellTint(
+          layout.memIntensity, layout.memKind, bx + lx, bz + lz, CONTAM_SURFACE_FLOOR);
+        tintVerts(f, f.positions.length / 3 - 4, r, gg, b);
+      }
       jitterCell(f, bx + lx, bz + lz, 0.05);
     }
   }
@@ -370,7 +433,8 @@ function addFloorWear(g: ChunkGeometry, layout: ChunkLayout): void {
   }
 }
 
-function addCeiling(g: ChunkGeometry, cx: number, cz: number): void {
+function addCeiling(g: ChunkGeometry, layout: ChunkLayout): void {
+  const cx = layout.cx, cz = layout.cz;
   const N = CHUNK_CELLS;
   const bx = cx * N * CELL;
   const bz = cz * N * CELL;
@@ -386,6 +450,13 @@ function addCeiling(g: ChunkGeometry, cx: number, cz: number): void {
         [x1 * CEIL_SCALE, z0 * CEIL_SCALE],
         [x1 * CEIL_SCALE, z1 * CEIL_SCALE],
         [x0 * CEIL_SCALE, z1 * CEIL_SCALE]);
+      // contamination decay on ceiling tiles: weaker than walls
+      if (layout.memIntensity > 0) {
+        let [r, gg, b] = contamCellTint(
+          layout.memIntensity, layout.memKind, bx + lx + 4451, bz + lz + 8819, CONTAM_SURFACE_CEIL);
+        r = 1 - (1 - r) * 0.5; gg = 1 - (1 - gg) * 0.5; b = 1 - (1 - b) * 0.5;
+        tintVerts(c, c.positions.length / 3 - 4, r, gg, b);
+      }
       jitterCell(c, bx + lx + 9999, bz + lz + 7777, 0.04);
     }
   }
@@ -563,12 +634,12 @@ function addWalls(g: ChunkGeometry, layout: ChunkLayout): void {
   const w = g.walls;
   const bx = layout.cx * N;
   const bz = layout.cz * N;
-
   // Horizontal edges (walls running along X at integer z boundaries)
   for (let lz = 0; lz <= N; lz++) {
     for (let lx = 0; lx < N; lx++) {
       const code = layout.hEdges[lz * N + lx];
       if (code === EdgeCode.OPEN) continue;
+      const vStart = w.positions.length / 3;
       const x0 = (bx + lx) * CELL;
       const x1 = x0 + CELL;
       const zc = (bz + lz) * CELL;
@@ -582,13 +653,14 @@ function addWalls(g: ChunkGeometry, layout: ChunkLayout): void {
         wallBox(w, mid - dw, zc - ht, mid + dw, zc + ht, DOOR_H, WALL_H); // lintel
         doorFrame(w, mid, zc, false, dw, ht);
       }
+      applyWallDrift(w, layout, bx + lx, bz + lz, vStart);
     }
-  }
-  // Vertical edges (walls running along Z at integer x boundaries)
+  }  // Vertical edges (walls running along Z at integer x boundaries)
   for (let lz = 0; lz < N; lz++) {
     for (let lx = 0; lx <= N; lx++) {
       const code = layout.vEdges[lz * (N + 1) + lx];
       if (code === EdgeCode.OPEN) continue;
+      const vStart = w.positions.length / 3;
       const z0 = (bz + lz) * CELL;
       const z1 = z0 + CELL;
       const xc = (bx + lx) * CELL;
@@ -602,8 +674,23 @@ function addWalls(g: ChunkGeometry, layout: ChunkLayout): void {
         wallBox(w, xc - ht, mid - dw, xc + ht, mid + dw, DOOR_H, WALL_H);
         doorFrame(w, xc, mid, true, dw, ht);
       }
+      applyWallDrift(w, layout, bx + lx, bz + lz, vStart);
     }
   }
+}
+
+/**
+ * Sickly contamination tint over the wall geometry emitted for one edge cell
+ * (wall boxes plus its door frame, if any). No-op at intensity <= 0 so
+ * pure-sample walls stay byte-identical to the classic look.
+ */
+function applyWallDrift(
+  w: MeshArrays, layout: ChunkLayout, wx: number, wz: number, fromVert: number,
+): void {
+  if (!(layout.memIntensity > 0)) return;
+  const [r, gg, b] = contamCellTint(
+    layout.memIntensity, layout.memKind, wx + 771, wz + 313, CONTAM_SURFACE_WALL);
+  tintVerts(w, fromVert, r, gg, b);
 }
 
 /**
@@ -890,8 +977,8 @@ export function buildChunkGeometry(
     props: newArray(), debris: newArray(),
     puddles: newArray(), graffiti: newArray(), stains: newArray(),
   };
-  addFloor(g, layout.cx, layout.cz);
-  addCeiling(g, layout.cx, layout.cz);
+  addFloor(g, layout);
+  addCeiling(g, layout);
   addCeilingGrid(g, layout.cx, layout.cz);
   addWalls(g, layout);
   addBaseboards(g, layout);
