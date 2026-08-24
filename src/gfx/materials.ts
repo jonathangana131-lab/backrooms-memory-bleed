@@ -428,12 +428,13 @@ export function createMaterials(scene: Scene): MaterialSet {
     c.fillRect(0, 0, pw, pw);
     paintNoise(c, pw, pw, new RNG(1234), 26, false);
     blobs(c, pw, pw, new RNG(2345), 14, 'rgba(20,16,10,ALPHA)', 10, 40, 0.3);
-    // scratches
+    // scratches (seeded: texture generation must stay deterministic)
     c.globalAlpha = 0.12;
+    const srng = new RNG(0x5ca7);
     for (let i = 0; i < 60; i++) {
       c.strokeStyle = '#1a150e';
-      const x = Math.random() * pw, y = Math.random() * pw;
-      c.beginPath(); c.moveTo(x, y); c.lineTo(x + (Math.random() - 0.5) * 50, y + (Math.random() - 0.5) * 12); c.stroke();
+      const x = srng.next() * pw, y = srng.next() * pw;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + (srng.next() - 0.5) * 50, y + (srng.next() - 0.5) * 12); c.stroke();
     }
     c.globalAlpha = 1;
   }
