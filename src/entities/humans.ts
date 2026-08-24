@@ -16,6 +16,9 @@ import type { Box2 } from '../world/architect';
 
 export type HumanType = 'watcher' | 'wanderer' | 'helper' | 'incomplete' | 'believer' | 'double';
 
+/** Stream salt for the per-figure walk-phase init draw (determinism law). */
+const WALK_PHASE_STREAM_SALT = 0x3a17a >>> 0;
+
 function believerMat(scene: Scene): StandardMaterial {
   const existing = scene.getMaterialByName('believerMat') as StandardMaterial | null;
   if (existing) return existing;
@@ -42,7 +45,7 @@ export class HumanFigure {
   root: TransformNode;
   body: CircleBody & { y: number };
   private head: TransformNode;
-  private walkPhase = Math.random() * 6;
+  private walkPhase = 0;
   life = 0;
   private pauseUntil = 0;
   vanishAt = Infinity;
@@ -88,6 +91,9 @@ export class HumanFigure {
 
   constructor(public type: HumanType, scene: Scene, x: number, z: number, seed: number) {
     this.rng = new RNG(seed);
+    // walk phase gets its own persistent stream so the behavior stream's
+    // draw sequence stays untouched (same-seed replays stay identical)
+    this.walkPhase = new RNG((seed ^ WALK_PHASE_STREAM_SALT) >>> 0).next() * 6;
     this.body = { x, z, y: 0, radius: 0.3 };
     this.root = new TransformNode('human_' + type + '_' + Math.floor(x) + '_' + Math.floor(z), scene);
     const mat = humanMat(scene);
