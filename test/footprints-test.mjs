@@ -51,11 +51,15 @@ try {
     check('two steps -> two live prints', fp.count === 2);
     const a = fp.centerAt(0);
     const b = fp.centerAt(1);
-    // perpendicular to (0,-1) is (-(-1),0)=(1,0): offsets must straddle x=0
-    check('first print offset left of travel', a.x < 0, 'x=' + a.x);
-    check('second print offset right of travel', b.x > 0, 'x=' + b.x);
-    check('offsets are symmetric', near(Math.abs(a.x), Math.abs(b.x)),
-      Math.abs(a.x) + ' vs ' + Math.abs(b.x));
+    // perpendicular to (0,-1) is (1,0): offsets measured from each stamp's
+    // OWN base (the two steps sit 0.9 apart on purpose) must straddle the
+    // travel line symmetrically
+    const oa = a.x - 0;
+    const ob = b.x - 0.9;
+    check('first print offset left of travel', oa < 0, 'x=' + a.x);
+    check('second print offset right of travel', ob > 0, 'x=' + b.x);
+    check('offsets are symmetric', near(Math.abs(oa), Math.abs(ob)),
+      Math.abs(oa) + ' vs ' + Math.abs(ob));
     check('pair interleaves fore/aft by stride half',
       near(Math.abs(b.z - a.z), STRIDE_HALF * 2), 'dz=' + (b.z - a.z));
     fp.dispose();
@@ -66,7 +70,12 @@ try {
     const fp = new Footprints(makeScene(), 'hard');
     fp.step(5, 5, 10, 0, false); // unnormalized +X
     const c = fp.centerAt(0);
-    check('unnormalized direction handled', near(c.z, 5, 0.2) && c.x > 5,
+    // normalized heading (1,0): centre sits STRIDE_HALF fore/aft on x with
+    // the hard-surface lateral offset on z (side alternation is covered in 2)
+    const fx = c.x - 5;
+    const fz = c.z - 5;
+    check('unnormalized direction handled',
+      near(Math.abs(fx), STRIDE_HALF) && near(Math.abs(fz), SURFACE_PROFILES.hard.lateral),
       'c=' + JSON.stringify(c));
     fp.step(5, 5, 0, 0, false); // degenerate heading
     check('zero-length heading skipped', fp.count === 1);
@@ -157,12 +166,16 @@ try {
     }
     check('live count capped at pool size', fp.count === FOOTPRINT_POOL_SIZE);
     check('all spawns accounted', fp.printsSpawned === FOOTPRINT_POOL_SIZE + 5);
-    // after N+5 stamps the ring wraps: oldest 5 slots were overwritten.
-    // Slot k now holds print #(5+k).
+    // after N+5 stamps the ring has wrapped: prints #40..#44 overwrote the
+    // oldest slots 0..4, so slot k holds the newest print congruent to k mod N
     let wrapOk = true;
     for (let k = 0; k < FOOTPRINT_POOL_SIZE; k++) {
-      const expectX = 5 + k;
-      if (!near(fp.centerAt(k).x, expectX)) { wrapOk = false; break; }
+      const expectX = k < 5 ? FOOTPRINT_POOL_SIZE + k : k;
+      const cx = fp.centerAt(k).x;
+      // centres sit STRIDE_HALF fore/aft of the integer stamp line on x
+      if (Math.round(cx) !== expectX || !near(Math.abs(cx - expectX), STRIDE_HALF)) {
+        wrapOk = false; break;
+      }
     }
     check('ring recycles oldest slots first', wrapOk);
     fp.dispose();
@@ -195,9 +208,15 @@ try {
     check('clear zeroes alphas', fp.alphaAt(0) === 0 && fp.alphaAt(9) === 0);
     const pos = fp['mesh'].getVerticesData('position');
     check('cleared quads collapse below floor', near(pos[1], -10));
-    // ring restarts cleanly afterwards
+    // ring restarts cleanly afterwards; heading (0,1) puts the lateral
+    // offset on x and the fore/aft interleave on z
     fp.step(3, 4, 0, 1, false);
-    check('usable again after clear', fp.count === 1 && near(fp.centerAt(0).x, 3));
+    const c = fp.centerAt(0);
+    check('usable again after clear',
+      fp.count === 1 &&
+      near(Math.abs(c.x - 3), SURFACE_PROFILES.hard.lateral) &&
+      near(Math.abs(c.z - 4), STRIDE_HALF),
+      'c=' + JSON.stringify(c));
     fp.dispose();
   }
 
