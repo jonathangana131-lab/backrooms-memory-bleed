@@ -22,6 +22,11 @@ export class Flashlight {
   on = false;
   /** 0..1 charge; drains ~85s of continuous use */
   battery = 1;
+  /**
+   * EXCEPTION (F42 night-vision mount): external drain multiplier written
+   * by game.ts's DrainSink adapter; 1 is the torch-on baseline.
+   */
+  drainMultiplier = 1;
   private lastT = 0;
 
   /** additive beam-cone mesh (apex at the lens, base 8 m out) */
@@ -75,7 +80,7 @@ export class Flashlight {
     this.lastT = time;
 
     if (this.on) {
-      this.battery = Math.max(0, this.battery - ldt / 85);
+      this.battery = Math.max(0, this.battery - (ldt * this.drainMultiplier) / 85);
       if (this.battery <= 0) { this.on = false; }
     } else if (nearLitLight) {
       // trickle-charges under working fluorescents
