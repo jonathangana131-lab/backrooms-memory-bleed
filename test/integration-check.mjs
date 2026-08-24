@@ -47,7 +47,12 @@ ok(/humAudio\.update\(/.test(src), 'per-frame positional hum update(px,pz,yaw)')
 ok(/watcherSteps\.update\(dt, nearestWatcherDist, .*\.speed > 0\.05/, 'watcher steps fed dist/movement');
 ok(/surfaceDetector\.detect\(this\.player\.body\.x, this\.player\.body\.z, district\)/.test(src), 'surface from detect(x,z,district)');
 ok(/surfaceFootsteps\.play\(surf, running\)/.test(src), 'footsteps play detected surface');
-ok(/heartbeatFromState\(this\.erosion\.stability, nearestWatcherDist/.test(src), 'heartbeat from stability + watcher proximity');
+// heartbeat intensity is computed inline in the frame loop: a closing
+// watcher (<8 m) OR unstable reality (<0.3) drives audio.setHeartbeat
+ok(/wd < 8\) hb = Math\.max\(0, 1 - wd \/ 8\)/.test(src)
+  && /this\.erosion\.stability < 0\.3\) hb = 0\.5/.test(src)
+  && /this\.audio\.setHeartbeat\(active \? hb : 0\)/.test(src),
+  'heartbeat from stability + watcher proximity');
 ok(src.includes('setHeartbeat('), 'setHeartbeat driven each frame');
 ok(/score\.setState\(zoneKind, tension\)/.test(src), 'score setState(zoneKind, tension)');
 ok(/exterior\.update\(dt, zoneKind, tension, /.test(src), 'exterior update(dt, zoneKind, tension, wetness)');
