@@ -117,6 +117,11 @@ import { EchoGeography } from '../story/echogeography';
 import { TimeSlippage } from '../story/timeslippage';
 // F21: memory residue — tagged props play prior-tenant ghost replays
 import { ResidueField, RESIDUE_KINDS, type ResidueKind } from '../memory/residue';
+// F11: torch view-model — held-hand pose model driving a camera-attached mesh
+import { TorchView, type TorchViewTarget } from '../gfx/torchview';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 
 export type GameState = 'menu' | 'playing' | 'paused';
 
@@ -243,6 +248,14 @@ export class Game {
   private residueBeatQueue: { dueSec: number; text: string }[] = [];
   /** session second of the last replay (one replay per 90 s of session time) */
   private residueLastPlaySec = -1e9;
+
+  // ---- F11 torch view-model: persistent hand mesh + per-run pose model ----
+  /** camera-attached hand/torch mesh; built once, survives runs */
+  private torchHandNode: TransformNode | null = null;
+  /** pose sink for TorchView (captures the node without a Babylon import in gfx) */
+  private torchTarget: TorchViewTarget | null = null;
+  /** rebuilt every run so sway phases re-seed from the fresh seed */
+  private torchView: TorchView | null = null;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -399,6 +412,32 @@ export class Game {
     };
     this.player = new PlayerController(this.camera, this.input, this.scene);
     this.flashlight = new Flashlight(this.scene);
+    // ---- F11: torch view-model hand mesh (built once; TorchView re-seeds per run) ----
+    try {
+      const hand = new TransformNode('torchHand', this.scene);
+      hand.parent = this.camera;
+      const bodyMesh = MeshBuilder.CreateCylinder('torchBody', {
+        height: 0.22, diameterTop: 0.035, diameterBottom: 0.05, tessellation: 8,
+      }, this.scene);
+      bodyMesh.parent = hand;
+      // barrel points along the view axis; camera-local forward is -Z
+      bodyMesh.position.z = -0.1;
+      const bodyMat = new StandardMaterial('torchBodyMat', this.scene);
+      bodyMat.diffuseColor = new Color3(0.14, 0.13, 0.11);
+      bodyMat.emissiveColor = new Color3(0.05, 0.048, 0.042);
+      bodyMat.specularColor = new Color3(0.02, 0.02, 0.02);
+      bodyMesh.material = bodyMat;
+      bodyMesh.isPickable = false;
+      this.torchHandNode = hand;
+      this.torchTarget = {
+        setPosition: (x, y, z) => { this.torchHandNode?.position.set(x, y, z); },
+        setRotation: (x, y, z) => { if (this.torchHandNode) this.torchHandNode.rotation.set(x, y, z); },
+      };
+    } catch (e) {
+      console.warn('[bmb] torch hand mesh unavailable', e);
+      this.torchHandNode = null;
+      this.torchTarget = null;
+    }
     this.chunks = new ChunkManager(this.scene, this.mats, 1);
     this.chunks.consumedBatteries = this.consumedBatteries;
     this.chunks.discoveredLandmarks = this.seenLandmarks;
@@ -624,7 +663,10 @@ export class Game {
         this.interactQueued = true;
       }
       if (e.code === 'KeyF' && this.state === 'playing') {
+        const wasOn = this.flashlight.on;
         const turned = this.flashlight.toggle();
+        // F11: the hand jolts whenever the torch state actually flips
+        if (turned !== wasOn) this.torchView?.kick();
         if (turned && !this.flashHintShown) {
           this.flashHintShown = true;
           this.ui.say('The camp kit’s torch. It drinks from the working lights.', 4);
@@ -649,6 +691,8 @@ export class Game {
             this.chunks.rebuildChunk(cx2, cz2);
             this.flashlight.battery = Math.min(1, this.flashlight.battery + 0.35);
             this.ui.toast('TORCH CELL +35%', 2500);
+            // F11: fresh cell goes in — the hand dips for the swap beat
+            this.torchView?.beginSwap();
             this.ui.setPrompt(null);
             // Wave B (B-1): battery pickup cue
             try { this.batteryCues?.pickupSound(); }
@@ -860,6 +904,18 @@ export class Game {
     catch (e) { console.warn('[bmb] residue field unavailable', e); this.residue = null; }
     this.residueBeatQueue.length = 0;
     this.residueLastPlaySec = -1e9;
+    // F11: fresh torch pose model per run so sway phases re-seed; the shared
+    // hand node persists. Rest pose sits at negative camera-local z (Babylon
+    // forward is -Z), lens anchor ahead of the grip.
+    if (this.torchTarget) {
+      try {
+        this.torchView = new TorchView(this.torchTarget, () => this.player.speed, {
+          seed: this.seed,
+          restPosition: { x: 0.18, y: -0.24, z: -0.38 },
+          anchorLocal: { x: 0, y: 0.05, z: -0.14 },
+        });
+      } catch (e) { console.warn('[bmb] torch view unavailable', e); this.torchView = null; }
+    }
     this.knownChunkKeys.clear();
     this.lastChunksBuiltSeen = 0;
     this.markedBeaconKeys.clear();
@@ -1673,6 +1729,23 @@ export class Game {
       // flashlight simulation (drains on, trickles under working lights)
       const nearLit = this.playtimeSec >= this.blackoutUntil && this.chunks.nearestFixtureDist(this.player.body.x, this.player.body.z) < 8;
       this.flashlight.update(dt, now / 1000, this.camera.position.x, this.camera.position.z, this.player.yaw, this.player.pitch, nearLit);
+      // F11: advance the view-model after the camera pose settles, then
+      // remount the SpotLight on its lens anchor so the beam originates at
+      // the visible hand (only while lit — Flashlight parks the light at
+      // (0,-50,0) when off and that parking must win).
+      if (this.torchView && this.flashlight.on) {
+        try {
+          this.torchView.update(dt);
+          const a = this.torchView.getLightAnchor();
+          const anchorWorld = Vector3.TransformCoordinates(
+            new Vector3(a.x, a.y, a.z),
+            this.camera.computeWorldMatrix(),
+          );
+          this.flashlight.light.position.copyFrom(anchorWorld);
+        } catch (e) {
+          console.warn('[bmb] torch view update failed', e);
+        }
+      }
       // path echoes: the space remembers where you walked last session
       if (this.pastSessionPath.length) {
         this.echoCheckTimer -= dt;
