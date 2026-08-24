@@ -1,19 +1,32 @@
 # Integration Status Report — BACKROOMS: MEMORY BLEED
 
-Generated: 2026-08-23 · Scope: src/{audio,entities,gfx,ui,world,story} vs main game loop src/core/game.ts
-Method: grep for exported classes/factories (`^export class`, `^export function create`), cross-referenced against imports and usages in `src/core/game.ts`, plus a full transitive import-graph reachability analysis from game.ts. **Analysis only — no source files were modified.**
+Generated: 2026-08-24 · Scope: src/{audio,director,entities,gfx,memory,player,story,ui,world} vs main game loop src/core/game.ts (+ chunk build path src/world/chunkManager.ts)
+Method: grep of committed `HEAD` imports in `src/core/game.ts` cross-checked for real usages, plus the ChunkManager chunk build path (F24 aging ledger fold, F56 map-fragment scatter). **This file tracks docs only — no source files modified here.**
 
 ## Summary
 
-
-
 | Status | Count | Meaning |
 |---|---|---|
-| WIRED (direct) | 16 module files | Imported and used directly by `src/core/game.ts` |
-| REACHABLE (indirect) | 2 module files | Not imported by game.ts but pulled in transitively via wired modules |
-| UNWIRED | 78 module files | Never imported by game.ts nor by anything reachable from it (dead code / orphaned subsystems) |
+| WIRED (direct) | 96 module files | Imported and used by `src/core/game.ts` at main (35782b0) |
+| WIRED (chunk build path) | +2 module files | `world/aging.ts` and `world/seasonrooms.ts` mounted into ChunkManager's chunk build path |
+| UNWIRED | remainder | Implemented with passing tests but not yet reachable from game.ts or the chunk build path |
 
-Roughly **83% of standalone modules are not wired into the main game loop**.
+The 2026-06-era picture ("83% unwired") is obsolete: mount batches A-E alone moved ~25 modules onto the loop, including the entire audio ambience pack, journal/tracker/compass/minimap UI cluster, PostFX, day cycle, and the player-state systems below.
+
+## Mount batches landed on main
+
+- **Batch A** (`src/core/game.ts`): render clarity (`gfx/renderclarity`), player breath (`audio/breath`), area identity beds (`audio/areaidentity`).
+- **Batch B** (862b229, `src/core/game.ts`): tremor (`player/tremor`), blinks (`player/blinks`), adrenaline (`player/adrenaline`), hunger (`player/hunger`), flicker battery (`player/flickerbattery`).
+- **Batch C** (1437452, `src/core/game.ts`): gossip (`entities/gossip`), lying compass (`ui/lyingcompass`), journal font (`ui/journalfont`).
+- **Chunk build path** (5ef8f59, 8d6a289, `src/world/chunkManager.ts`): F24 aging ledger fold + F56 map-fragment paper scatter.
+- **Batch D** (a30f0b7, `src/world/chunkManager.ts`): F57 seasonal bleed rooms wired into landmark chunk builds.
+- **Batch E** (35782b0, `src/core/game.ts`): F50 exit-that-isn't mount — ExitVoidTracker fed from frame-loop doorway crossings into the epilogue flow.
+
+Feature-by-feature SHIPPED marks live in [GAME-PLAN.md](GAME-PLAN.md).
+
+## Historical snapshot (2026-08-23)
+
+The per-module WIRED/REACHABLE/UNWIRED listings below were generated against an older main and are superseded by the counts above; many "unwired" entries in sections 3 have since been mounted (doors, crowd, groans, loresting, batterycue, vents, echoes, fanaudio, postfx, daycycle, fogvariation, cracks, stains-growth, graffiti-evolution, minimap, compass, weatherui, journal cluster, tracker cluster, savescreen, gallery, endcapture, endstats, hints, settings/settingspanel/accessibility, checkpoints, beats, reread, watcherintro, gaze cluster, faunawiring). They are kept for provenance only.
 
 ## 1. WIRED — imported & used by src/core/game.ts
 
