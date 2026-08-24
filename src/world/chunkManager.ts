@@ -16,6 +16,7 @@ import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
 import type { GraffitiInstance, PropInstance } from './architect';
 import { hash2i, RNG } from '../core/rng';
+import { ChunkDeltas, applyDecorDrift } from './chunkDeltas';
 import type { MaterialSet } from '../gfx/materials';
 import type { MemoryField } from '../memory/field';
 
@@ -54,6 +55,13 @@ export class ChunkManager {
   discoveredLandmarks: Set<string> | null = null;
   /** downsampled movement trail from the previous session; scuffs render in debris */
   pathEchoPoints: Array<{ x: number; z: number }> | null = null;
+  /**
+   * Reversible per-chunk mutation ledger (see chunkDeltas.ts). When set,
+   * drifted chunks fold their drift step into decor generation so anomaly
+   * mutations survive rebuilds while revertAll() restores the canonical
+   * world. Purely deterministic - never written by generation itself.
+   */
+  deltas: ChunkDeltas | null = null;
 
   constructor(private scene: Scene, private mats: MaterialSet, public seed: number) {}
 
@@ -64,6 +72,7 @@ export class ChunkManager {
   reset(): void {
     for (const c of this.chunks.values()) for (const m of c.meshes) m.dispose();
     this.chunks.clear();
+    this.building.clear();
     this.pending.length = 0;
     this.fixtureCache = null;
     this.fixtureVersion++;
@@ -77,7 +86,8 @@ export class ChunkManager {
     for (let dz = -VIEW_RADIUS; dz <= VIEW_RADIUS; dz++) {
       for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
         const cx = pcx + dx, cz = pcz + dz;
-        if (!this.chunks.has(this.key(cx, cz))) {
+        const k = this.key(cx, cz);
+        if (!this.chunks.has(k) && !this.building.has(k)) {
           this.pending.push({ cx, cz, d: dx * dx + dz * dz });
         }
       }
@@ -105,14 +115,25 @@ export class ChunkManager {
   /** when true, layout generation runs on a Web Worker (async) */
   useWorker = false;
 
+  /**
+   * Chunk keys with an async build currently in flight. The await inside
+   * buildFromLayout spans frames under slow renderers; without this guard
+   * update() re-queues the same chunk every frame and duplicate builds
+   * stack until memory blows out.
+   */
+  private building = new Set<string>();
+
   private build(cx: number, cz: number): void {
+    const k = this.key(cx, cz);
+    this.building.add(k); // cleared by buildFromLayout's finally
     if (this.useWorker) {
       getLayoutPool().requestLayout(this.seed, cx, cz).then((l) => {
-        if (!this.chunks.has(cx + ':' + cz)) return;
+        if (!this.chunks.has(k)) return;
         void this.buildFromLayout(cx, cz, l);
       }).catch(() => {
         const l2 = generateLayout(this.seed, cx, cz, this.mem ?? undefined);
-        if (this.chunks.has(cx + ':' + cz)) void this.buildFromLayout(cx, cz, l2);
+        if (this.chunks.has(k)) void this.buildFromLayout(cx, cz, l2);
+        else this.building.delete(k);
       });
       return;
     }
@@ -121,6 +142,19 @@ export class ChunkManager {
   }
 
   private async buildFromLayout(cx: number, cz: number, layout: ChunkLayout): Promise<void> {
+    const k = this.key(cx, cz);
+    try {
+      await this.buildFromLayoutInner(cx, cz, layout);
+    } finally {
+      this.building.delete(k);
+    }
+  }
+
+  private async buildFromLayoutInner(cx: number, cz: number, layout: ChunkLayout): Promise<void> {
+    // anomaly decor drift (see chunkDeltas.ts): deterministic for a given
+    // drift step, so a drifted chunk rebuilds identically until reverted
+    const drift = this.deltas?.step(cx, cz) ?? 0;
+    if (drift > 0) applyDecorDrift(layout.props, cx, cz, this.seed, drift);
     if (this.consumedBatteries && this.consumedBatteries.size) {
       // coordinate-stable keys survive index shifts between builds
       layout.props = layout.props.filter((p, i) =>
@@ -236,7 +270,10 @@ export class ChunkManager {
     for (const s of layout.signs) meshes.push(this.buildSign(s));
     for (const gf of layout.graffiti) meshes.push(this.buildGraffiti(gf));
 
-    this.chunks.set(this.key(cx, cz), {
+    const k = this.key(cx, cz);
+    const prev = this.chunks.get(k);
+    if (prev) for (const m of prev.meshes) m.dispose(); // no orphaned meshes
+    this.chunks.set(k, {
       layout,
       meshes,
       colliders: buildColliders(layout),
@@ -474,6 +511,13 @@ export class ChunkManager {
 
   layoutAt(cx: number, cz: number): ChunkLayout | undefined {
     return this.chunks.get(this.key(cx, cz))?.layout;
+  }
+
+  /** All currently loaded layouts (atmosphere consumers iterate these). */
+  loadedLayouts(): ChunkLayout[] {
+    const out: ChunkLayout[] = [];
+    for (const c of this.chunks.values()) out.push(c.layout);
+    return out;
   }
 
   /** District of the chunk containing a position (if built). */
