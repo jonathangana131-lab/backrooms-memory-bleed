@@ -83,6 +83,8 @@ import { applyRenderClarity, type RenderClarityHandle } from '../gfx/renderclari
 // Wave-1 dread features (F5/F6): binaural whispers + rationed total-mix duck
 import { WhisperField } from '../audio/whisperfield';
 import { DreadSilence } from '../audio/dreadsilence';
+// F7 footstep DNA: gait classifier fed from earshot strides
+import { FootstepDNA, CLASSIFY_WINDOW, gaitSignature, type StepObservation } from '../audio/footstepdna';
 // Wave B: scene pack
 import { PostFX } from '../gfx/postfx';
 import { FaunaWiring } from '../entities/faunawiring';
@@ -194,6 +196,13 @@ export class Game {
   private whispers: WhisperField | null = null;
   /** F6: director-rationed total-mix silence before major anomalies */
   private dread: DreadSilence | null = null;
+  /** F7: per-archetype gait classifier fed from earshot strides */
+  private footstepDNA: FootstepDNA | null = null;
+  /** F7: per-figure stride accumulator + rolling observation window */
+  private strideState = new WeakMap<object, {
+    lastX: number; lastZ: number; acc: number; lastStepAt: number;
+    window: StepObservation[]; flagged: boolean;
+  }>();
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -674,6 +683,10 @@ export class Game {
     // F2: re-bind district identity beds (office phones) to the fresh seed
     try { this.areaBeds?.seed(this.seed); }
     catch (e) { console.warn('[bmb] area beds seed failed', e); }
+    // F7: fresh gait classifier + stride accumulators per run
+    try { this.footstepDNA = new FootstepDNA(this.seed); }
+    catch (e) { console.warn('[bmb] footstep dna unavailable', e); this.footstepDNA = null; }
+    this.strideState = new WeakMap();
     this.beginRun({ x: SPAWN_X, z: SPAWN_Z, yaw: Math.PI * 0.75 });
     this.player.beginWake();
     this.story.anchors(); // materialize guaranteed beacons
@@ -1487,6 +1500,52 @@ export class Game {
         }
       }
       this.humans.update(dt, this.player.body.x, this.player.body.z, this.player.yaw, colliders, { on: this.flashlight.on });
+      // F7: footstep DNA — learn each earshot walker's gait and flag wrong
+      // cadence before line of sight. Energy fractions come from the same
+      // seeded archetype signature the step synth uses (documented prior).
+      if (this.footstepDNA) {
+        try {
+          for (const fig of this.humans.figures) {
+            const dxF = fig.body.x - this.player.body.x;
+            const dzF = fig.body.z - this.player.body.z;
+            if (dxF * dxF + dzF * dzF > 18 * 18) { this.strideState.delete(fig); continue; }
+            let st = this.strideState.get(fig);
+            if (!st) {
+              st = { lastX: fig.body.x, lastZ: fig.body.z, acc: 0, lastStepAt: this.playtimeSec, window: [], flagged: false };
+              this.strideState.set(fig, st);
+            }
+            st.acc += Math.hypot(fig.body.x - st.lastX, fig.body.z - st.lastZ);
+            st.lastX = fig.body.x;
+            st.lastZ = fig.body.z;
+            if (st.acc < 0.75) continue; // one stride ≈ 0.75 m of travel
+            st.acc = 0;
+            const sig = gaitSignature(fig.type, this.seed);
+            const interval = Math.max(0.2, this.playtimeSec - st.lastStepAt);
+            st.lastStepAt = this.playtimeSec;
+            // spectral balance: signature prior + small seeded per-step jitter
+            const jr = new RNG(hash2i(Math.floor(this.playtimeSec * 60), 7717, this.seed));
+            const obs: StepObservation = {
+              interval,
+              low: sig.low * (0.9 + jr.next() * 0.2),
+              mid: sig.mid * (0.9 + jr.next() * 0.2),
+              high: sig.high * (0.9 + jr.next() * 0.2),
+            };
+            this.footstepDNA.observe(fig.type, obs);
+            st.window.push(obs);
+            if (st.window.length > CLASSIFY_WINDOW) st.window.shift();
+            if (st.flagged || st.window.length < CLASSIFY_WINDOW) continue;
+            const id = this.footstepDNA.classifyWindow(st.window);
+            const seen = hasLineOfSight(fig.body.x, fig.body.z, this.player.body.x, this.player.body.z, colliders);
+            if (!seen && id.confidence > 0.8 && (id.type === 'watcher' || id.type === 'double')) {
+              st.flagged = true; // once per figure per run
+              this.showAudioCaption('FOOTSTEPS'); // a11y caption overlay takes arbitrary kinds
+              this.ui.say('...footfalls out there keep a rhythm nothing human owns...', 4);
+            }
+          }
+        } catch (e) {
+          console.warn('[bmb] footstep dna update failed', e);
+        }
+      }
       // Wave B (B-2m): ambient fauna tick directly after the human sim
       if (this.fauna) {
         try {
