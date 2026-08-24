@@ -61,6 +61,8 @@ function makePad(index, id) {
       playEffect(type, params) { effects.push({ type, params }); return Promise.resolve('complete'); },
     },
   };
+  // effects mirrored onto the pad so assertions can read pad.effects
+  pad.effects = effects;
   return { pad, effects };
 }
 
@@ -115,7 +117,7 @@ async function main() {
   pad.axes[3] = -1;                              // right stick up
   f = mgr.update();
   approx(f.moveX, 1, 1e-9, 'moveX full-right analog');
-  pad.axes = [0, -1, 0, 0];                     // left stick up (raw Y negative)
+  pad.axes = [0, -1, 0, -1];                    // left stick up (raw Y negative); right stick kept up so the lookY assertion below is well-defined
   f = mgr.update();
   approx(f.moveY, 1, 1e-9, 'stick up gives positive moveY (Y inverted)');
   approx(f.lookY, 1, 1e-9, 'lookY positive looking up');
