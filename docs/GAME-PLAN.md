@@ -33,172 +33,179 @@ with infinite possibility and no end.
 - tsc clean; PLAYTHROUGH_PASS (launch → explore → 3 beacons → stage-4 threshold
   ending → continue-enabled); save-stress intact; wave-a/b/c + integration +
   emergency suites green; perf-regression green post-leak-fix (heap plateaus).
-- Built: chunk streaming world (architect/mesher/chunkManager), memory
-  contamination field + weather fronts, horror director FSM, entities (watcher/
-  wanderer/helper/believer/incomplete/double/fauna) with gaze/vocals/fidgets/
-  sitting/schedules/graceful despawn, spatial anomalies (doorway déjà-vu,
-  corridor stretch, migrating lights, mirror steps), contamination visuals
-  (tint drift, bleed decals, warm murk fog), full UI suite (journal/gallery/
-  endstats/compass/minimap/tracker/savescreen/settings/radiotune/weatherui),
-  save system (IndexedDB + checkpoints), render clarity pass, player breath +
-  area-identity audio, Wave-B ambience pack, momentum movement feel.
-- Known gaps tracked as DEFECT skips in wave-c/emergency suites: journal chain,
-  tracker chain, checkpoint-save-screen mount, watcher-intro mount,
-  frameUpdate/onChunkFixtures hooks — these wirings are v1 must-fix items (F1).
+- Built: chunk streaming world, memory contamination field + weather fronts,
+  horror director FSM, seven entity archetypes with gaze/vocals/fidgets/sitting/
+  schedules/graceful despawn, spatial anomalies (doorway déjà-vu, corridor
+  stretch, migrating lights, mirror steps), contamination visuals, full UI
+  suite, save system, render clarity pass, player breath + area-identity audio,
+  Wave-B ambience pack, momentum movement feel, 105-note/14-arc content base.
+- Known defects tracked as SKIP(defect) lines in wave-c/emergency suites:
+  journal/tracker/checkpoint-savescreen/watcher-intro chains + frameUpdate/
+  onChunkFixtures hooks — v1 must-fix (F1).
 
 ## HARD RULES FOR ALL WORK
 
 - Feature isolation: systems talk via src/core/events.ts or injected interfaces.
 - Strict TS ES2022, match local style, JSDoc headers, no new npm deps without
   orchestrator approval.
-- Tests colocated in test/*.mjs (node strip-types or transpile-loader idioms —
-  copy an existing healthy sibling).
-- Gates before any commit: scoped tsc zero for touched files, touched tests exit 0,
-  'node test/playthrough.mjs' prints PLAYTHROUGH_PASS.
-- One commit per file. Never /private/tmp for anything durable.
+- Tests colocated in test/*.mjs (node strip-types or transpile-loader idioms).
+- Gates before any commit: scoped tsc zero, touched tests exit 0, playthrough
+  prints PLAYTHROUGH_PASS. One commit per file. Never /private/tmp durable.
+- Agents may ADD new features beyond F1–F100 while developing when a discovery
+  earns it — log them into this file with the next free F-number and full AC.
+### CATEGORY A — v1 wiring blockers
 
-## ROADMAP — 50 FEATURES (tiers; F-numbers are stable ids)
+- F1 Wave-B/C wiring restoration — journal/tracker/checkpoint-savescreen/watcher-intro chains constructed + fed in game.ts init/frame; frameUpdate + onChunkFixtures emergency hooks re-added. AC: wave-c + emergency suites exit 0 with ZERO DEFECT skips.
+- F2 Central integration mounts — applyRenderClarity / breath / areaidentity / ShadowMesherPass consumers mounted from game.ts per report snippets. AC: clarity tiers visibly switch; breathing audible under sprint; district beds change on district change; playthrough unaffected.
+- F3 Determinism audit — replace verbatim Math.random sites (relocation/camera-shake) with hash2i/RNG draws; add test/determinism-audit.mjs scanning sim/gen paths. AC: audit exits 0; relocation replays identical per seed.
+- F4 Hardware-GL QA sweep — qa-shots + playthrough on real GPU (non-swiftshader); six screenshots into shots/. AC: zero console errors; crisp-render verified.
 
-### TIER A — v1 completion blockers (do first)
+### CATEGORY B — embodiment
 
-- **F1 Wave-B/C wiring restoration** — journal/tracker/checkpoint-savescreen/
-  watcher-intro chains constructed + fed in game.ts init/frame; frameUpdate +
-  onChunkFixtures emergency hooks re-added. AC: wave-c + emergency suites exit 0
-  with ZERO DEFECT skips.
-- **F2 Central integration mounts** — applyRenderClarity/breath/areaidentity/
-  ShadowMesherPass consumers mounted from game.ts per their report snippets.
-  AC: visible clarity tiers + breathing audible under sprint + district beds on
-  district change; playthrough unaffected.
-- **F3 Determinism audit** — replace verbatim Math.random sites in relocation/
-  camera-shake with hash2i/RNG draws; add test/determinism-audit.mjs scanning
-  sim/gen paths. AC: audit exits 0; relocation replays identical per seed.
-- **F4 Hardware-GL QA sweep** — qa-shots + playthrough on real GPU (non-
-  swiftshader); capture 6 screenshots into shots/. AC: zero console errors.
+- F5 Binaural whisper field — HRTF-panned whispers fixed in world space while ears move. AC: panning inverts with 180° turn (graph test).
+- F6 Dread silence — director-commanded total mix duck (<-24 dB, 8–20 s) before major anomalies + recovery exhale. AC: automation provable; capped 1/25 min.
+- F7 Footstep DNA — per-archetype gait signatures identifiable before line-of-sight. AC: classifier ≥95% accuracy on synthetic trains.
+- F8 Gait-synced dread — high tension drifts footstep micro-timing toward heartbeat interval. AC: phase-coherence metric monotone with tension.
+- F9 Stamina embodiment — low stamina alters breath rate, stride sound, FOV pulse. AC: three outputs scale monotonically.
+- F10 Lean/peek Q/E around doorframes — camera roll + parallax. AC: collision-safe lean envelope.
+- F11 Torch view-model — visible flashlight hand, sway, battery-swap beat <1.2s. AC: light follows mesh.
+- F12 Surface wading — puddles slow stride, splash, wet-footprint trail. AC: penalty + spawn tests.
+- F13 Vault/mantle crates — choreographed camera dip. AC: no collider clip; dip curve test.
+- F14 Fall stagger — postfx blur + control damp after hard falls. AC: recovery timeline test.
 
-### TIER B — atmosphere & embodiment deepening
+### CATEGORY C — deeper wrongness
 
-- **F5 Binaural whisper field** — HRTF-panned whispers tied to head rotation
-  (they stay put in world space while your ears move). AC: panning inverts with
-  180° turn in headless audio-graph test.
-- **F6 Dread silence** — director-commanded total mix duck (<-24 dB, 8–20 s)
-  immediately before major anomalies; recovery exhale afterward. AC: mix automation
-  provable in graph test; frequency capped 1/25 min.
-- **F7 Footstep DNA** — each archetype gets a gait signature (interval/ratio/
-  surface bias) identifiable before line-of-sight. AC: classifier test over
-  synthetic step trains ≥95% kind accuracy.
-- **F8 Gait-synced dread** — under high tension, footstep micro-timing drifts
-  toward the heartbeat interval (the place entrains you). AC: phase-coherence metric.
-- **F9 Stamina embodiment** — low stamina alters breath rate, stride sound, FOV
-  pulse. AC: three observable outputs scale monotonically with stamina.
-- **F10 Lean/peek** — Q/E lean around doorframes with camera roll + parallax.
-  AC: collision-safe lean envelope test.
-- **F11 Torch view-model** — visible flashlight hand with sway, battery-swap beat
-  (procedural mesh, no assets). AC: swap animation completes <1.2s; light follows.
-- **F12 Surface wading** — puddle zones slow stride, splash steps, wet-footprint
-  trail via existing footprints.ts. AC: speed penalty + trail spawn tests.
-- **F13 Vault/mantle** — hop low crates with choreographed camera dip. AC: no clip
-  through colliders; dip curve test.
-- **F14 Fall stagger** — vision blur (postfx) + control damp after hard falls.
-  AC: recovery timeline test.
+- F15 Pocket dimensions — seeded doors open into interiors larger than the building. AC: interior byte-identical regen; exterior unchanged.
+- F16 Blackout rearrangement — props drift one slot, one door bricks after blackouts. AC: deltas reversible.
+- F17 Echo geography — halls return YOUR earlier footsteps/memos as distant echoes. AC: deterministic replay per site.
+- F18 Time slippage — clocks/camcorder/session timer disagree inside saturation zones. AC: offsets consistent per zone seed.
+- F19 Impossible windows — lit rooms visible where exterior should be. AC: registry + culling test.
+- F20 Unobserved stairwell loop — loops only while gaze-away >2s. AC: trigger iff condition (reuses stretch logic).
+- F21 Memory residue touch — tagged objects play ghost replays of prior tenants. AC: one-shot per visit.
+- F22 Gravity ambivalence — saturation zones tilt balance ±5° with veering walk. AC: bounded, exits cleanly.
+- F23 Door/wall swaps — door opens into wall; adjacent wall becomes a door. AC: nav+collision+mesh atomic swap test.
+- F24 Aging corridors — revisits accumulate decay proportional to sessions since first seen. AC: persists via ChunkDeltas.
 
-### TIER C — deeper wrongness (the vibe core)
+### CATEGORY D — entities & society
 
-- **F15 Pocket dimensions** — seeded doors open into interiors larger than the
-  building (non-Euclidean sub-chunk). AC: interior regenerates byte-identical;
-  exterior footprint unchanged.
-- **F16 Blackout rearrangement** — rooms settle subtly WRONG after blackouts
-  (props drifted one slot, one door now bricked). AC: deltas reversible.
-- **F17 Echo geography** — certain halls return YOUR earlier footsteps/voice
-  memos as distant echoes. AC: replay buffer deterministic per site.
-- **F18 Time slippage** — wall clocks, camcorder timestamp, and session timer
-  disagree inside saturation zones. AC: offsets consistent per zone seed.
-- **F19 Impossible windows** — rare windows show lit rooms where exterior should
-  be. AC: window registry + culling test.
-- **F20 Unobserved stairwell loop** — a stairwell loops only while unwatched.
-  AC: loop triggers iff gaze-away >2s (reuse corridor-stretch logic).
-- **F21 Memory residue touch** — interacting with tagged objects plays ghost
-  replays (audio vignettes from prior 'tenants'). AC: one-shot per visit.
-- **F22 Gravity ambivalence** — saturation-band zones tilt balance: subtle camera
-  roll pressure + veering walk. AC: tilt bounded ±5°, exits cleanly.
-- **F23 Door/wall swaps** — rare event: door opens into wall; the wall beside it
-  becomes a door. AC: nav+collision+mesh all swap atomically.
-- **F24 Aging corridors** — revisited hallways accumulate decay proportional to
-  sessions since first seen. AC: decay state persists via ChunkDeltas.
+- F25 Believer congregations — chapel landmarks host kneeling night services. AC: formation/dispersal tests.
+- F26 The Archivist — harmless cataloguer; photographing it changes next-session behavior. AC: reaction table test.
+- F27 Watcher packs — coordinated multi-watcher stalks at stage ≥3, spacing discipline. AC: spacing + shared-aggression tests.
+- F28 Mimic props — furniture that is an entity until observed. AC: observation-freeze consistent with watcher rules.
+- F29 Entity gossip — vocals reference places the PLAYER actually visited. AC: grounding test vs journal feed.
+- F30 Your Double — doppelgänger learns route habits across saves, walks YOUR paths. AC: path-replay fidelity.
+- F31 Roach ecosystems — colonies migrate moisture→food; cabinets infest over sessions. AC: migration stability.
+- F32 The Custodian — removes graffiti/markings overnight; cart squeak precedes removals. AC: removal ledger test.
 
-### TIER D — entities & society
+### CATEGORY E — audio dread
 
-- **F25 Believer congregations** — chapel landmarks host kneeling groups mid-
-  service at night-cycle. AC: group formation + dispersal tests.
-- **F26 The Archivist** — harmless entity cataloguing rooms; photographing it
-  changes its behavior next session. AC: reaction table test.
-- **F27 Watcher packs** — coordinated multi-watcher stalks at stage ≥3 with
-  spacing discipline. AC: min-spacing + shared-aggression test.
-- **F28 Mimic props** — furniture pieces that are entities until observed; freeze
-  mechanic consistent with watcher rules. AC: observation-freeze test.
-- **F29 Entity gossip** — vocals reference actual places the PLAYER visited
-  (journal feed feeds vocal selection). AC: reference-grounding test.
-- **F30 Your Double** — doppelgänger learns route habits across saves; appears
-  walking YOUR recorded paths. AC: path-replay fidelity test.
-- **F31 Roach ecosystems** — colonies migrate moisture→food scraps; cabinets
-  infest over sessions. AC: migration model stability test.
-- **F32 The Custodian** — overnight entity removes your graffiti/markings; its
-  cart squeak is audible before you see the removals. AC: removal ledger test.
+- F33 Infrasound beds — sub-20Hz per-district beds expressed via harmonic proxies. AC: proxy test.
+- F34 Self-tuning radio — drifts toward broadcasts describing the player's own discoveries/loadout. AC: selection grounding test.
+- F35 Camcorder voice memos — recordable, degraded playback scaled by zone gen. AC: degradation curve test.
+- F36 Hum melody leaks — hum harmonics quote motifs from prior-run seeds. AC: motif persistence test.
+- F37 Room-tone drops — granular silence preceding ANY anomaly type. AC: pre-anomaly silence correlation test.
 
-### TIER E — audio/dread expansion
+### CATEGORY F — visual expansion
 
-- **F33 Infrasound beds** — sub-20Hz beds per district expressed via harmonic
-  proxies (felt not heard). AC: harmonic-proxy test.
-- **F34 Self-tuning radio** — radio drifts toward broadcasts describing the
-  player's own discoveries. AC: script-selection grounding test.
-- **F35 Camcorder voice memos** — recordable, played back degraded by zone gen.
-  AC: degradation curve test.
-- **F36 Hum melodies leak across sessions** — hum harmonics quote motifs from
-  prior-run seeds. AC: motif persistence test.
-- **F37 Room-tone drops** — granular silence events preceding ANY anomaly type
-  (generalizing F6). AC: pre-anomaly silence correlation test.
+- F38 Volumetric god-rays — shafts through missing ceiling tiles, dust lit per-shaft. AC: ≤2ms/frame cost.
+- F39 Raymarched wet floors — moisture-zone screen-space reflections. AC: quality-tier gated off on low.
+- F40 Breathing wallpaper — saturation-band vertex displacement (~0.5cm inhale). AC: amplitude test.
+- F41 Anomaly photography — photos reveal entities invisible live; gallery displays them. AC: reveal pipeline test.
+- F42 Night-vision camcorder — IR mode with gain noise + audio artifacts. AC: drain + artifact tests.
+- F43 Ceiling tile ecosystem — missing tiles accumulate; nesting skitter cues beneath. AC: persistence test.
 
-### TIER F — visual/atmosphere expansion
+### CATEGORY G — meta, endings, accessibility
 
-- **F38 Volumetric shafts** — god-rays through missing ceiling tiles with dust
-  (dust.ts particles lit per-shaft). AC: perf budget ≤2ms/frame.
-- **F39 Raymarched wet floors** — moisture-zone floor reflections (screen-space).
-  AC: quality-tier gated; low tier off.
-- **F40 Breathing wallpaper** — vertex displacement breathing at saturation band
-  (walls inhale ~0.5cm). AC: displacement amplitude test.
-- **F41 Anomaly photography** — camcorder photos reveal entities invisible live;
-  gallery displays them. AC: photo-entity reveal pipeline test.
-- **F42 Night-vision camcorder** — IR mode with gain noise + audio artifacts.
-  AC: battery drain + artifact tests.
-- **F43 Ceiling tile ecosystem** — missing tiles accumulate; things nest above
-  (skitter audio cue when beneath). AC: accumulation persistence test.
+- F44 Save-file scarring — long-lived saves grow phantom cracks shaped like your routes. AC: determinism per save-id.
+- F45 New Game+ : the place remembers — prior-run graffiti appears in fresh runs. AC: provenance test.
+- F46 Expedition ledger — meta-archive of discovered notes/clusters between runs. AC: round-trip test.
+- F47 Daily rite — shared daily seed + discovery checklist overlay. AC: date-derived seed test.
+- F48 Director personalities — per-run temperament (patient/vindictive/theatrical) altering pacing curves. AC: differentiation test.
+- F49 Accessibility pack — motion-safety mode, speaker-tagged subtitles, high-contrast palette. AC: each toggle zeroes its effect.
+- F50 The Exit that isn't — ultra-rare fire-exit into white void epilogue room. AC: ≤1 per 8h expected; flow test.
 
-### TIER G — meta, endings, accessibility
+### CATEGORY H — second hundred (added by community directive)
 
-- **F44 Save-file scarring** — long-lived saves grow phantom geometry scars
-  (cracks shaped like your routes). AC: scar determinism per save-id.
-- **F45 New Game+ : the place remembers** — prior-run graffiti appears in new
-  runs. AC: cross-run graffiti provenance test.
-- **F46 Expedition ledger** — meta-progression archive of discovered notes/
-  clusters between runs. AC: ledger round-trip test.
-- **F47 Daily rite** — shared daily seed + discovery checklist overlay. AC:
-  date-derived seed test.
-- **F48 Director personalities** — each run's director rolls a temperament
-  (patient/vindictive/theatrical) altering pacing curves. AC: temperament curve
-  differentiation test.
-- **F49 Accessibility pack** — motion-safety mode (no shake/tilt/anomalies that
-  displace), speaker-tagged subtitles, high-contrast palette. AC: each toggle
-  provably zeroes its effect.
-- **F50 The Exit that isn't** — ultra-rare fire-exit doors open onto a white void
-  epilogue room (mirror of threshold ending; no escape). AC: encounter rate ≤1
-  per 8h expected; epilogue flow test.
+- F51 The Mezzanine That Wasn't — upper floors glimpsed through ceilings become explorable via rare staircases. AC: interior regen identical.
+- F52 Weather with memory — last session's rain still drips in the same rooms. AC: cross-run weather persistence via deltas.
+- F53 District color bleed — border chunks blend palettes over a one-chunk gradient. AC: gradient continuity test.
+- F54 The Long Hall — rare 300m corridor whose exit doors cycle behind you. AC: cycle determinism test.
+- F55 Negative-space rooms — void silhouettes where furniture should be. AC: collision matches absence.
+- F56 Cartographer's error — map fragments disagree; majority vote reveals truth. AC: vote logic test.
+- F57 Seasonal bleed rooms — one room per session stuck in another season. AC: season assignment hash test.
+- F58 Sub-floor crawlspaces — floor gaps reveal crawlspace darkness beneath. AC: nav flag + fall safety.
+- F59 Landmark echoes — landmark rooms repeat identically exactly 7 chunks apart. AC: spacing invariant test.
+- F60 The Loading Dock — infinite exterior-look dock with an idling engine that never arrives. AC: audio bed + no-arrival proof.
+- F61 The Congregation's Hymn — believers sing rounds naming YOUR discoveries. AC: lyric-grounding test.
+- F62 Watcher molt — vacated skins keep watching. AC: decoy behavior test.
+- F63 Entity funerals — processions for their own dead at erosion sites. AC: procession route test.
+- F64 The Negotiator — trades items for passage via gesture language. AC: trade-state machine test.
+- F65 Child drawings — appear near playgrounds depicting events YOU caused. AC: event-grounding test.
+- F66 Doppelgänger letters — your Double leaves notes criticizing your choices. AC: choice-reference test.
+- F67 Roach domestication — feed roaches to be led to batteries. AC: lead-path reliability test.
+- F68 The Tour Guide — escort entity that abandons you at the worst moment. AC: abandonment timing test.
+- F69 Polite doors — doors open themselves and hold open for you. AC: courtesy cooldown test.
+- F70 Shadow audience — silhouettes gather at hall ends during peaks. AC: gather/scatter gating test.
+- F71 Contamination cough — saturation zones give the player a cough. AC: rate scales with intensity.
+- F72 Low-battery hand tremor — camcorder aim wobbles below 20% charge. AC: tremor curve test.
+- F73 Hunger pangs — ambient stomach audio tied to expedition length. AC: interval scaling test.
+- F74 Sleep pressure — micro-blinks close vision after long sessions. AC: blink cadence test.
+- F75 Adrenaline dumps — near-misses shake hands and sharpen hearing. AC: dual-effect envelope test.
+- F76 Cold-storage shiver — teeth chatter + view shiver in cold zones. AC: zone gating test.
+- F77 Injury limp — hard falls alter stride until firstaid used. AC: gait modifier test.
+- F78 Panic breathing control — hold-rhythm minigame steadies breath meter. AC: stabilization math test.
+- F79 Forensic storytelling — the previous expedition's story assembled purely from scene evidence. AC: evidence-chain completeness test.
+- F80 Unreliable journal — entries rewrite themselves between visits. AC: rewrite determinism test.
+- F81 Choice-weighted whisper chorus — whispers reference moral micro-choices. AC: weighting table test.
+- F82 Contamination epilogues — threshold ending text varies with total exposure. AC: epilogue keying test.
+- F83 The Surveyor's Tape — found tape measures wrong distances (anomaly detector in disguise). AC: wrongness-as-signal test.
+- F84 Name discovery — assembling the facility's true name changes worldwide signage. AC: sign swap propagation test.
+- F85 Anomaly photo catalog — completing the gallery tiers unlocks journal pages. AC: tier unlock test.
+- F86 Call-in radio show — callers describe YOUR exact equipment loadout. AC: loadout-grounding test.
+- F87 Procedural VHS degradation — camcorder artifacts scale with anomaly proximity. AC: artifact-intensity test.
+- F88 Live occlusion reverb — per-room-volume audio physics computed live. AC: reverb-zone transition test.
+- F89 Save-slot ghosts — loading old saves flashes temporal echoes of that timeline. AC: echo lifetime test.
+- F90 Director v2 learning — pauses/hesitations teach the director what scares YOU. AC: telemetry-to-pacing test.
+- F91 Staged wake cinematic — waking sequence procedurally staged per seed. AC: staging determinism test.
+- F92 Camcorder optics — photo-mode DOF + focal breathing matching the IR lens. AC: optic curve test.
+- F93 Diegetic menus — title/pause projected onto in-world walls. AC: projection raycast mount test.
+- F94 Lying compass — needle bends toward memory wells under contamination. AC: bend-vs-well test.
+- F95 Hardcore flicker battery UI — charge conveyed only by torch flicker (opt-in). AC: mode equivalence test.
+- F96 Evolving journal font — handwriting degrades with stage/sanity. AC: font-stage table test.
+- F97 Bureaucratic achievements — toasts as stamped FORMS (approved/denied). AC: stamp routing test.
+- F98 Local speedrun ghosts — per-seed ghost replays. AC: ghost determinism test.
+- F99 Colorblind anomaly signals — pattern language replaces color-only cues. AC: pattern coverage test.
+- F100 The credits walk — credits roll while walking an endless corridor of your own screenshots. AC: screenshot pipeline test.
 
-## SEQUENCING
 
-v1.0 = F1→F4 + polish sweep (current defects closed, screenshots captured).
-v1.1 = Tier B complete. v1.2 = Tier C flagship anomalies expanded.
-v1.3 = Tier D entities society. v1.4 = Tiers E/F. v2 = Tier G + endings matrix.
+## V1 SCOPE — EVERY FEATURE, NO DEFERRALS
 
-Agents: pick ONE feature per session-wave, implement to its AC, keep every gate
-green, commit per file. The game ships when the quality bar stops being met only
-in snapshots and starts being met everywhere at once.
+**ALL of F1–F100 ship in v1.** There is no backlog parking lot. Each feature is
+'PERFECT' when: its AC passes in a committed test, its visuals/audio are judged
+against the QUALITY BAR in a real browser session, zero regressions exist, and
+an orchestrator review signs it off. Agents discovering NEW feature opportunities
+during development add them to this file at the next free F-number with full AC —
+they join v1 scope automatically.
 
+## V1 COMPLETION & RELEASE CHECKLIST
+
+1. Every F1–F100 signed off PERFECT (AC test + quality-bar review + no regressions).
+2. Full gates green in one quiescent run: tsc 0, entire test/*.mjs suite exit 0,
+   PLAYTHROUGH_PASS, perf-regression pass, qa-shots on hardware GL.
+3. docs/ updated (README, DESIGN, GAME-PLAN status column marked shipped-per-feature).
+4. `npm run build` produces a clean dist; smoke-load dist via vite preview.
+5. Tag `v1.0.0`, generate GitHub Release with notes (features, known limits,
+   controls, browser requirements), attach dist zip.
+6. Flip repo visibility PUBLIC (or confirm already public) so the release is live.
+7. Immediately after release: author the v1.1+ plan as a huge new roadmap document
+   (docs/GAME-PLAN-V1.1.md) — expansion directions, systems deepening, new
+   anomaly families, content waves, platform work. v1 ends by beginning v1.1.
+
+## WORKING RHYTHM FOR AGENT SESSIONS
+
+- Fleet of ≥5 parallel subagents on disjoint file sets; instant retry/resume on any
+  transient failure; never idle, never sequential when parallel is possible.
+- One feature (or coherent sub-feature) per agent per wave; implement to its AC;
+  add the proving test; run the full gate trio (scoped tsc, touched tests,
+  playthrough); commit per file; push origin main.
+- When a feature is signed PERFECT, mark its line 'SHIPPED ✅' in this file.
