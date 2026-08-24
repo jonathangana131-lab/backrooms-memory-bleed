@@ -216,6 +216,12 @@ export interface BreathMountOptions {
   tension?: () => number;
   /** Blackout state provider, polled each update. */
   blackout?: () => boolean;
+  /**
+   * Fatigue provider 0..1 (F9 stamina embodiment), polled each update.
+   * Fatigue raises the effective tension the breath layer feels, so winded
+   * breathing is faster and louder even when the director is calm.
+   */
+  effort?: () => number;
   /** Override the master mix; omit for BREATH_MIX. */
   mix?: number;
 }
@@ -242,7 +248,10 @@ export function mountPlayerBreath(opts: BreathMountOptions): BreathHandle {
   return {
     update(dt: number): void {
       if (disposed) return;
-      if (opts.tension) breath.setTension(opts.tension());
+      // F9: fatigue folds into the effective tension driving breath rate.
+      const fatigue = opts.effort ? Math.max(0, Math.min(1, opts.effort())) : 0;
+      const base = opts.tension ? opts.tension() : 0;
+      breath.setTension(Math.min(1, base * 0.6 + fatigue * 0.65));
       if (opts.blackout) breath.setBlackout(opts.blackout());
       breath.update(dt);
     },
