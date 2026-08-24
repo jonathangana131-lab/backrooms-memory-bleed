@@ -59,7 +59,7 @@ export class SurfaceFootsteps {
     const data = this.noise.getChannelData(0);
     // audio DSP buffer fill (white noise source) — sim PRNG law carve-out
     for (let i = 0; i < len; i++) {
-      data[i] = Math.random() * 2 - 1;
+      data[i] = Math.random() * 2 - 1; // DSP fill exempt from sim PRNG law
     }
   }
 
