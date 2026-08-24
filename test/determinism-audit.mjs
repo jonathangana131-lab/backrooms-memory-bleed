@@ -177,6 +177,7 @@ process.on('exit', () => {
 });
 emit('src/core/rng.ts', 'src/core/rng.mjs');
 emit('src/core/events.ts', 'src/core/events.mjs');
+emit('src/director/persona.ts', 'src/director/persona.mjs');
 emit('src/director/director.ts', 'src/director/director.mjs');
 emit('src/ui/hints.ts', 'src/ui/hints.mjs');
 emit('src/world/textureDressing.ts', 'src/world/textureDressing.mjs');
