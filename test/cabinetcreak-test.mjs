@@ -10,19 +10,9 @@
  *   6/7/8. creak character: sine hinge whine sweeping ~400 -> ~600 Hz over
  *      ~300 ms through gain -> stereo panner -> destination
  *
- * src/audio/cabinetcreak.ts was lost in the transcript corruption (only its
- * import site in src/core/game.ts survives), so the module is restored below
- * from slice evidence and emitted into a temp dir. Drop once src is whole.
- *
  * Run: node test/cabinetcreak-test.mjs
  */
-import ts from 'typescript';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+import { CabinetCreaks } from '../src/audio/cabinetcreak.ts';
 
 let failures = 0;
 function check(name, ok, extra = '') {
@@ -30,120 +20,6 @@ function check(name, ok, extra = '') {
   if (!ok) failures++;
 }
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bmb-cabinetcreak-'));
-fs.mkdirSync(path.join(tmp, 'audio'), { recursive: true });
-
-// src/audio/cabinetcreak.ts lost its body during transcript corruption; this
-// restoration is mirrored from recovery slices so tests can exercise the real
-// graph behavior without touching src/. Drop once src is whole again.
-const CABINETCREAK_TS_RESTORED = `
-/** One tracked cabinet position in world space (meters). */
-export interface CabinetSpot { x: number; z: number; }
-
-/** Entry radius: crossing inside fires one creak voice. */
-const TRIGGER_M = 2;
-/** Exit radius: leaving past this rearms the cabinet (hysteresis band). */
-const RELEASE_M = 2.75;
-/** Per-cabinet quiet time between creaks, seconds. */
-const COOLDOWN_S = 5;
-
-/** Hinge-whine sweep start, Hz. */
-const F_START_HZ = 400;
-/** Hinge-whine sweep top, Hz. */
-const F_END_HZ = 600;
-/** Sweep duration, seconds. */
-const SWEEP_S = 0.3;
-/** Release tail after the sweep tops out, seconds. */
-const TAIL_S = 0.08;
-/** Envelope attack to peak, seconds. */
-const ATTACK_S = 0.06;
-/** Peak linear gain at point-blank range. */
-const PEAK_GAIN = 0.07;
-
-/**
- * Proximity creaks for kitchen/desk cabinets. Each tracked cabinet fires a
- * single short hinge-whine voice when the listener first steps into its
- * trigger radius; a hysteresis band plus a cooldown keep pacing natural.
- */
-export class CabinetCreaks {
-  private spots: CabinetSpot[] = [];
-  private inside: boolean[] = [];
-  private cool: number[] = [];
-
-  constructor(private readonly ctx: AudioContext,
-              private readonly destination: AudioNode | null) {}
-
-  /** Register the cabinet layout for the loaded chunk set. */
-  setCabinets(spots: CabinetSpot[]): void {
-    this.spots = spots.map((s) => ({ x: s.x, z: s.z }));
-    this.inside = this.spots.map(() => false);
-    this.cool = this.spots.map(() => 0);
-  }
-
-  /**
-   * Advance cooldowns and fire one creak per newly-entered cabinet.
-   * @param dt frame delta seconds
-   * @param px player world X
-   * @param pz player world Z
-   */
-  update(dt: number, px: number, pz: number): void {
-    for (let i = 0; i < this.spots.length; i++) {
-      if (this.cool[i] > 0) this.cool[i] = Math.max(0, this.cool[i] - dt);
-      const d = Math.hypot(this.spots[i].x - px, this.spots[i].z - pz);
-      if (!this.inside[i] && d <= TRIGGER_M && this.cool[i] === 0) {
-        this.inside[i] = true;
-        this.cool[i] = COOLDOWN_S;
-        this.play(this.spots[i], px, d);
-      } else if (d > RELEASE_M) {
-        this.inside[i] = false;
-      }
-    }
-  }
-
-  /** Halt every live oscillator and refuse further updates. */
-  stop(): void {
-    this.stopped = true;
-  }
-
-  private stopped = false;
-
-  /**
-   * Render one hinge whine: sine sweep through gain -> stereo panner.
-   * Facing -Z, world +X falls on the listener's left, so pan mirrors
-   * (playerX - cabinetX); distance ducks the peak gain linearly.
-   */
-  private play(spot: CabinetSpot, px: number, dist: number): void {
-    if (this.stopped || !this.destination) return;
-    const t = this.ctx.currentTime;
-    const pan = Math.max(-1, Math.min(1, (px - spot.x) / TRIGGER_M));
-    const att = 1 - 0.6 * Math.min(1, dist / TRIGGER_M);
-    const peak = PEAK_GAIN * att;
-
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(F_START_HZ, t);
-    osc.frequency.linearRampToValueAtTime(F_END_HZ, t + SWEEP_S);
-
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(peak, t + ATTACK_S);
-    g.gain.linearRampToValueAtTime(0.0001, t + SWEEP_S + TAIL_S);
-
-    const panner = this.ctx.createStereoPanner();
-    panner.pan.value = pan;
-
-    osc.connect(g);
-    g.connect(panner);
-    panner.connect(this.destination);
-    osc.start(t);
-    osc.stop(t + SWEEP_S + TAIL_S + 0.02);
-  }
-`;
-fs.writeFileSync(path.join(tmp, 'audio', 'cabinetcreak.mjs'),
-  ts.transpileModule(CABINETCREAK_TS_RESTORED,
-    { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
-
-const { CabinetCreaks } = await import(pathToFileURL(path.join(tmp, 'audio/cabinetcreak.mjs')).href);
 
 // ---- minimal AudioContext mock -------------------------------------------
 let now = 1000;
