@@ -287,8 +287,15 @@ export class HumanFigure {
           if (pSpeed > 0.08) {
             const ux = Math.sin(yawToPlayer), uz = Math.cos(yawToPlayer); // double -> player
             const dot = pvx * ux + pvz * uz;
-            let mx = pvx - 2 * dot * ux; // specular reflection across that line
-            let mz = pvz - 2 * dot * uz;
+            // Radiality gate: the flip term -2(v.u)u injects sightline-aligned
+            // velocity even for mostly-lateral motion (any bearing tilt leaks
+            // strafe into the forward axis). Scaling it by radiality^2 keeps
+            // the full mirror for head-on approach/retreat while purely
+            // tangential motion passes through without forward drift.
+            const radiality = Math.min(1, Math.abs(dot) / pSpeed);
+            const flip = radiality * radiality;
+            let mx = pvx - 2 * flip * dot * ux; // specular reflection across that line
+            let mz = pvz - 2 * flip * dot * uz;
             const ml = Math.hypot(mx, mz) || 1;
             const s = Math.min(sp, pSpeed);
             mx = (mx / ml) * s;
