@@ -19,6 +19,7 @@ import { hash2i, RNG, seedFromString } from '../core/rng';
 import { graffitiTilt, signGrimeRects } from './textureDressing';
 import { ChunkDeltas, applyDecorDrift } from './chunkDeltas';
 import { AgingLedger, decayStage, type AgingStageParams } from './aging';
+import { sessionSeasonBleeds } from './seasonrooms';
 import type { MaterialSet } from '../gfx/materials';
 import type { MemoryField } from '../memory/field';
 
@@ -86,6 +87,12 @@ export class ChunkManager {
   /** Folded aging params for each currently built chunk, keyed "cx,cz". */
   private agingByChunk = new Map<string, AgingStageParams>();
 
+  /** Landmark chunk keys seen this session; the pool that elects the bleed room. */
+  private seasonSeen = new Set<string>();
+
+  /** Key of the currently elected seasonal-bleed room, or null before any landmark builds. */
+  private seasonWinner: string | null = null;
+
   constructor(private scene: Scene, private mats: MaterialSet, public seed: number, aging?: AgingLedger) {
     this.aging = aging ?? new AgingLedger();
   }
@@ -125,6 +132,8 @@ export class ChunkManager {
     this.fixtureCache = null;
     this.fixtureVersion++;
     this.agingByChunk.clear();
+    this.seasonSeen.clear();
+    this.seasonWinner = null;
   }
 
   update(px: number, pz: number): void {
@@ -311,6 +320,31 @@ export class ChunkManager {
         break; // one foreign item per revisit is enough
       }
     }
+    // F57 seasonal bleed: each landmark chunk scores itself through the
+    // session-hash API in seasonrooms.ts; the highest-scoring key seen
+    // this session is the session's single bleed room and carries the
+    // tint/particle descriptor on its layout.
+    if (layout.landmark) {
+      this.seasonSeen.add(k);
+      const bleeds = sessionSeasonBleeds(this.seed, [...this.seasonSeen]);
+      const winner = bleeds.keys().next().value ?? null;
+      if (winner !== null && winner !== this.seasonWinner) {
+        const prevWinner = this.seasonWinner;
+        this.seasonWinner = winner;
+        // A later-streaming landmark outscored the old winner: rebuild that
+        // chunk so its stale descriptor clears. Election is a pure argmax
+        // of intrinsic scores, so once the seen set stops growing the
+        // winner is stable and no rebuild oscillates.
+        if (prevWinner) {
+          const [pcx, pcz] = prevWinner.split(',').map(Number);
+          if (Number.isFinite(pcx) && Number.isFinite(pcz)) this.rebuildChunk(pcx, pcz);
+        }
+      }
+      layout.seasonBleed = winner === k ? bleeds.get(k) : undefined;
+      // Particle seam: layout.seasonBleed.particle has no consumer in the
+      // build path yet - ambient particle passes live game-side. The
+      // descriptor rides on the layout for whoever renders it first.
+    }
     // contact shadows: soft dark blobs under furniture (torch-lit realism)
     try {
       // ../gfx/shadowmesher does not exist yet; widening the specifier to a plain
@@ -332,6 +366,18 @@ export class ChunkManager {
     const tint = TINTS[layout.district as number] ?? [1, 1, 1];
     for (const grp of [geo.floor, geo.ceiling, geo.walls, geo.debris]) {
       applyTint(grp, tint[0], tint[1], tint[2]);
+    }
+    // seasonal-bleed tint: tilt the district look toward the bleed room's
+    // packed ambient hue, kept subtle so it reads as air, not paint.
+    const bleed = layout.seasonBleed;
+    if (bleed) {
+      const br = ((bleed.tint >> 16) & 255) / 255;
+      const bg = ((bleed.tint >> 8) & 255) / 255;
+      const bb = (bleed.tint & 255) / 255;
+      const mean = (br + bg + bb) / 3;
+      for (const grp of [geo.floor, geo.ceiling, geo.walls, geo.debris]) {
+        applyTint(grp, 1 + (br - mean) * 0.45, 1 + (bg - mean) * 0.45, 1 + (bb - mean) * 0.45);
+      }
     }
 
     const meshes: Mesh[] = [];

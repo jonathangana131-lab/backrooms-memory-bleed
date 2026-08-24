@@ -238,6 +238,13 @@ export interface ChunkLayout {
   shadowQuads?: Array<{ positions: number[]; normal: number[]; tints: number[] }>;
   /** set when this chunk contains a named landmark room */
   landmark?: string;
+  /**
+   * Seasonal-bleed descriptor when this landmark chunk is the session's
+   * elected bleed room (see seasonrooms.ts). The mesher folds the packed
+   * tint into its vertex tint pass; the particle descriptor awaits an
+   * ambient-particle consumer and is exposed here for it.
+   */
+  seasonBleed?: import('./seasonrooms').SeasonDescriptor;
   /** memory contamination sampled for this chunk */
   memKind: MemoryKind;
   memIntensity: number;
