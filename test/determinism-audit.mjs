@@ -47,7 +47,6 @@ const RESIDUE_COMMENT = /DSP|audio buffer fill/i;
  * domains convert; never grow it without noting the owner.
  */
 const RESIDUE_LEDGER = new Set([
-  'src/core/game.ts', // orchestrator: relocation/camera-shake conversion
   'src/audio/approach.ts',
   'src/audio/audio.ts',
   'src/audio/boundaries.ts',
@@ -64,7 +63,6 @@ const RESIDUE_LEDGER = new Set([
   'src/audio/pairvocals.ts',
   'src/audio/radio.ts',
   'src/audio/surfaces.ts',
-  'src/audio/whisperfield.ts',
   'src/entities/fauna.ts', // creature vocal DSP fills
   'src/entities/humans.ts', // walkPhase init
   'src/gfx/ceilingfan.ts',

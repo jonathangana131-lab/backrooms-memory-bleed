@@ -366,6 +366,7 @@ export class WhisperField {
       const len = Math.max(1, Math.floor(this.ctx.sampleRate));
       const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = buf.getChannelData(0);
+      // audio DSP buffer fill (white noise source) — sim PRNG law carve-out
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
       this.noiseBuf = buf;
     }
