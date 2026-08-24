@@ -47,6 +47,10 @@ import { MemoryWeather } from '../memory/weather';
 import { HorrorDirector, type DirectorHost } from '../director/director';
 // F48: per-run director temperament — pacing personality selected from the seed
 import { pacingRngFor, temperamentForRun } from '../director/persona';
+// F90: fear-learning telemetry — scare-response events tune per-context pacing
+import { DirectorLearning } from '../director/learning';
+// F91: staged wake cinematic played additively over the wake-intro window
+import { stageWakeCinematic, WakeCinematicPlayer, type WakeStaging } from '../story/wakecinematic';
 // F50: the exit that isn't — ultra-rare fire-exit door into a white epilogue room
 import { buildEpilogueRoom, enterEpilogue, ExitVoidTracker } from '../story/exitvoid';
 // F100: the credits walk — rolling credits over an endless corridor of screenshots
@@ -153,7 +157,7 @@ import { HungerPangs } from '../player/hunger';
 import { FlickerBattery } from '../player/flickerbattery';
 // Batch C mounts: grounded entity gossip + lying compass + journal hand decay
 import { GossipSource, type VisitedSite } from '../entities/gossip';
-import { LyingCompass, bearingDeg, signedDeltaDeg, type MemoryWell } from '../ui/lyingcompass';
+import { LyingCompass, type MemoryWell } from '../ui/lyingcompass';
 import { degradationIndex, entryJournalFont } from '../ui/journalfont';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
@@ -187,6 +191,24 @@ const ROACH_TICK_SEC = 0.5;
 const ROACH_FOOD_RADIUS_M = 6;
 /** F31: hard cap on cabinet fixtures offered to one run's ecosystem. */
 const ROACH_CABINET_CAP = 64;
+
+// ---- F90 director-learning feed tunables ----
+/** F90: dwelling this long inside a landmark room / beside a beacon is a linger. */
+const LEARNING_LINGER_SEC = 5;
+/** F90: beacon radius (m) counted as "at the beacon" for the linger detector. */
+const LEARNING_LINGER_RADIUS_M = 6;
+/** F90: seconds between pacing-bias captions read off suggestPhaseBias(). */
+const LEARNING_BIAS_CAPTION_SEC = 120;
+
+// ---- F91 wake-cinematic additive gains ----
+/** F91: metres of camera drift per unit of staged pose x/z offset. */
+const WAKE_POS_GAIN_M = 0.14;
+/** F91: mid height of the staged pose y range; y offsets are centered on it. */
+const WAKE_POS_Y_MID_M = 0.85;
+/** F91: radians of gaze pull per radian of staged pose look direction. */
+const WAKE_LOOK_GAIN_RAD = 0.08;
+/** F91: radians of lens breath per unit of normalized staged fov deviation. */
+const WAKE_FOV_GAIN_RAD = 0.35;
 
 /** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
 function presetToQualityNum(q: string): number {
@@ -439,6 +461,30 @@ export class Game {
   private longestBeaconDroughtM = 0;
   private beaconsAtLastWalk = 0;
 
+  // ---- F90 director learning: per-run fear-affinity model + feed bookkeeping ----
+  /** Per-run model; rebuilt in beginRun so learning restarts with each expedition. */
+  private learning: DirectorLearning | null = null;
+  /** F90: landmark/beacon key the linger detector currently sits inside. */
+  private learningLingerKey: string | null = null;
+  /** F90: seconds accumulated inside the current linger key. */
+  private learningLingerSec = 0;
+  /** F90: true once the current occupancy already confessed its linger. */
+  private learningLingerFired = false;
+  /** F90: playtime second of the last pacing-bias caption (>=2 min gap). */
+  private learningBiasLastSec = -1e9;
+  /** F90: note key whose READ prompt is currently showing (null when none). */
+  private notePromptKey: string | null = null;
+  /** F90: notes actually opened this run; walking away from the rest is a skip. */
+  private readonly learningReadNotes = new Set<string>();
+
+  // ---- F91 wake cinematic: per-run staging + playback cursor ----
+  /** Staged shot list for this run's waking (startNew only). */
+  private wakeStaging: WakeStaging | null = null;
+  /** Playback cursor; null whenever no cinematic is riding the wake window. */
+  private wakeCine: WakeCinematicPlayer | null = null;
+  /** True after a movement-key skip fired for the active cinematic. */
+  private wakeCineSkipped = false;
+
   // ---- Wave B chunk-built / per-chunk bookkeeping ----
   /** continuous fog sampler: puddle low areas + contamination murk */
   private fogVar = createFogVariation();
@@ -614,6 +660,9 @@ export class Game {
     };
     this.humans.onBeamFreeze = () => {
       this.audio.beamFreezeSting();
+      // F90: freezing in a watcher's beam confesses hesitation (fixed 0.8).
+      try { this.learning?.record({ kind: 'hesitation', contextTag: 'watcher', intensity: 0.8 }); }
+      catch (e) { console.warn('[bmb] director learning feed failed', e); }
     };
     // ---- Wave B (B-2m/B-2n): ambient fauna + per-figure gaze coordination ----
     try { this.fauna = new FaunaWiring(this.scene, this.seed); }
@@ -1064,6 +1113,14 @@ export class Game {
     this.chunks.discoveredLandmarks = this.seenLandmarks;
     this.chunks.story = this.story;
     this.beginRun({ x: slot.px, z: slot.pz, yaw: slot.yaw });
+    // F90: restore learned fear affinities over the fresh per-run model.
+    // Malformed payloads keep the fresh model (deserialize throws loud, we
+    // fall back soft — the learning feed is pacing flavor, not progression).
+    const lraw = (slot as { learning?: string }).learning;
+    if (typeof lraw === 'string') {
+      try { this.learning = DirectorLearning.deserialize(lraw); }
+      catch (e) { console.warn('[bmb] director-learning save unusable', e); }
+    }
     if (this.flashlight.has) {
       this.ui.toast('TORCH RESTORED — charge ' + Math.round(this.flashlight.battery * 100) + '% [F]', 6000);
     }
@@ -1221,6 +1278,20 @@ export class Game {
     this.runNoteIds.clear();
     // F100: never carry a credits walk into a fresh expedition
     this.cancelCreditsWalk();
+    // F90: fresh fear-learning model per run; the known context tags start
+    // at the uniform 0.5 baseline. The module takes no seed by design — it is
+    // pure arithmetic over the injected event feed (determinism law).
+    this.learning = new DirectorLearning(['landmark', 'note', 'watcher']);
+    this.learningLingerKey = null;
+    this.learningLingerSec = 0;
+    this.learningLingerFired = false;
+    this.learningBiasLastSec = -1e9;
+    this.notePromptKey = null;
+    this.learningReadNotes.clear();
+    // F91: a fresh expedition never inherits the last run's wake cinematic.
+    this.wakeStaging = null;
+    this.wakeCine = null;
+    this.wakeCineSkipped = false;
     // near-miss telemetry + adrenaline arming reset with the fresh run
     this.nearMisses = 0;
     this.nearMissArmed = true;
@@ -1279,7 +1350,7 @@ export class Game {
   }
 
   captureSlot(): SaveSlot {
-    return {
+    const slot: SaveSlot = {
       seed: this.seed,
       px: this.player.body.x,
       pz: this.player.body.z,
@@ -1298,6 +1369,12 @@ export class Game {
       pathEcho: this.pathHistory.filter((_, i) => i % 4 === 0).slice(-200).map((p) => ({ x: +p.x.toFixed(1), z: +p.z.toFixed(1) })),
       story: this.story.serialize(),
     };
+    // F90: the learning state rides along as an optional extension field
+    // (documented gap: SaveSlot itself is not extended — that type lives in
+    // save/db.ts). deserialize() validates strictly, so older or malformed
+    // slots fall back to a fresh model at load time.
+    if (this.learning) (slot as { learning?: string }).learning = this.learning.serialize();
+    return slot;
   }
 
   // ---------- director actions ----------
@@ -1570,12 +1647,11 @@ export class Game {
    * the needle while clean halls read true (c = 0 is exact). Pure sampling
    * of mem.sampleAt — deterministic per field state, no clock, no RNG.
    *
-   * Seam: only the screen-edge beacon compass consumes the needle model.
-   * Its marker position rotates about the player by the signed true→needle
-   * bearing delta (≤ MAX_BEND_DEG × contamination), so the chevron misleads
-   * under saturation. The minimap stays truthful by design: it renders
-   * explored geometry, not guidance, so the lie bends the walk without
-   * corrupting the player's map record.
+   * Seam: the needle model stays mounted and fed on this cadence as the
+   * F94 lie surface for UI consumers. The screen-edge beacon compass is
+   * not one of them — its B-3b contract is a true bearing on the nearest
+   * unfound beacon (same truthful feed as the minimap and the beacon-audio
+   * pan), so contamination never bends that marker.
    */
   private updateLyingCompass(dt: number): void {
     if (!(dt > 0)) return;
@@ -2333,7 +2409,12 @@ export class Game {
           if (this.nearMissArmed && adWd < 3) {
             this.nearMissArmed = false;
             this.nearMisses++;
-            this.adrenaline.pushNearMiss({ severity: Math.max(0, Math.min(1, 1 - adWd / 3)) });
+            const severity = Math.max(0, Math.min(1, 1 - adWd / 3));
+            this.adrenaline.pushNearMiss({ severity });
+            // F90: the near-miss dump doubles as a pause confession; intensity
+            // is closeness. Doubles share the 'watcher' tag — both figures
+            // play the same dread role (documented tag simplification).
+            this.learning?.record({ kind: 'pause', contextTag: 'watcher', intensity: severity });
           } else if (!this.nearMissArmed && adWd > 6) {
             this.nearMissArmed = true;
           }
@@ -2341,6 +2422,29 @@ export class Game {
         this.adrenalineHearingGainMul = this.adrenaline.hearingGainMul;
       } catch (e) {
         console.warn('[bmb] adrenaline update failed', e);
+      }
+      // ---- F90 director learning: session clock + scare-response feed. The
+      // near-miss dump above contributes pause/watcher and onBeamFreeze the
+      // hesitation; the linger detector and the note-skip tracker below
+      // complete the feed. Every ~2 min the top of suggestPhaseBias()
+      // surfaces as a caption — that read is the documented pacing-bias seam
+      // where deeper director surgery will consume these weights later.
+      if (this.learning) {
+        try {
+          this.learning.advanceClock(dt);
+          this.updateLearningLinger(dt);
+          if (this.playtimeSec - this.learningBiasLastSec >= LEARNING_BIAS_CAPTION_SEC) {
+            this.learningBiasLastSec = this.playtimeSec;
+            const bias = this.learning.suggestPhaseBias();
+            let top: string | null = null;
+            for (const tag of Object.keys(bias).sort()) {
+              if (top === null || bias[tag] > bias[top]) top = tag;
+            }
+            if (top) this.ui.say('...the house paces itself around your ' + top.toLowerCase() + '...', 5);
+          }
+        } catch (e) {
+          console.warn('[bmb] director learning failed', e);
+        }
       }
       // F73 hunger: absolute session clock in minutes; captions stand in for
       // the stomach growl until that synth lands (>= 20 s between captions).
@@ -2813,38 +2917,16 @@ export class Game {
         const pan = Math.max(-1, Math.min(1, dx * Math.cos(this.player.yaw) - dz * Math.sin(this.player.yaw)));
         this.audio.beaconUpdate(nb, pan);
       }
-      // Wave B (B-3b): compass points at that same nearest unfound beacon.
-      // F94: the chevron reads through the lying needle — under memory
-      // contamination its marker rotates about the player toward the
-      // dominant well (≤ MAX_BEND_DEG × contamination; exact at c = 0).
-      // The beacon audio pan above keeps the true bearing on purpose: the
-      // sound is the building, the needle is the theft. Minimap stays true
-      // too — seam rationale lives on updateLyingCompass().
+      // Wave B (B-3b): the screen-edge compass aims at that same nearest
+      // unfound beacon — true bearing, the same truthful feed the minimap
+      // and the beacon-audio pan get. Its contract (ui/compass.ts header,
+      // integration-plan B-3b "same feed as B-3a") is to always point at
+      // the nearest unfound research beacon; the F94 needle model does not
+      // bend this marker.
       if (this.compass) {
-        let cx2 = nx2;
-        let cz2 = nz2;
-        try {
-          if (isFinite(nb)) {
-            const trueBearing = bearingDeg(nx2 - this.player.body.x, nz2 - this.player.body.z);
-            const needle = this.lyingCompass.needleAngle(this.player.body.x, this.player.body.z, trueBearing);
-            const bendRad = (signedDeltaDeg(trueBearing, needle) * Math.PI) / 180;
-            if (bendRad !== 0) {
-              const cos = Math.cos(bendRad);
-              const sin = Math.sin(bendRad);
-              const dx = nx2 - this.player.body.x;
-              const dz = nz2 - this.player.body.z;
-              cx2 = this.player.body.x + dx * cos - dz * sin;
-              cz2 = this.player.body.z + dx * sin + dz * cos;
-            }
-          }
-        } catch (e) {
-          console.warn('[bmb] lying compass bend failed', e);
-          cx2 = nx2;
-          cz2 = nz2;
-        }
         try {
           this.compass.update(this.player.body.x, this.player.body.z, this.player.yaw,
-            this.camera, cx2, cz2, isFinite(nb));
+            this.camera, nx2, nz2, isFinite(nb));
         } catch (e) { console.warn('[bmb] compass update failed', e); }
       }
     } else if (this.compass) {
@@ -3302,6 +3384,26 @@ export class Game {
     } catch (e) {
       console.warn('[bmb] roach ecosystem unavailable', e);
       this.roachEco = null;
+    }
+  }
+
+  /**
+   * F90 linger feed: dwell ≥5 s inside one named landmark records a 'linger'
+   * scare-response so the director learns which rooms hold the player.
+   */
+  private updateLearningLinger(dt: number): void {
+    if (!this.playerLandmark) {
+      this.learningLingerSec = 0;
+      this.learningLingerFired = false;
+      return;
+    }
+    if (this.learningLingerFired) return; // one confession per occupancy
+    this.learningLingerSec += dt;
+    if (this.learningLingerSec >= 5) {
+      this.learningLingerSec = 0;
+      this.learningLingerFired = true;
+      try { this.learning?.record({ kind: 'linger', contextTag: 'landmark', intensity: 0.5 }); }
+      catch (e) { console.warn('[bmb] learning linger failed', e); }
     }
   }
 
