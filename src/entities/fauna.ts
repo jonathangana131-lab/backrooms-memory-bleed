@@ -46,6 +46,9 @@ const BEAM_RANGE = 12;
 
 const CHUNK_SIZE = CELL * CHUNK_CELLS;
 
+/** Stream salt for the skitter synth's deterministic draw stream. */
+const SKITTER_STREAM_SALT = 0x5b177ea >>> 0;
+
 /** Minimal fixture surface the fauna system needs (subset of LightFixture). */
 export interface FixtureRef {
   x: number;
@@ -342,14 +345,17 @@ export class Moth {
 class SkitterVoice {
   private noise: AudioBuffer;
   private out: AudioNode;
+  /** persistent stream for every synth draw; same seed ⇒ identical bursts */
+  private rng: RNG;
 
-  constructor(private ctx: AudioContext, destination: AudioNode) {
+  constructor(private ctx: AudioContext, destination: AudioNode, rng?: RNG) {
+    this.rng = rng ?? new RNG(SKITTER_STREAM_SALT);
     const len = Math.floor(ctx.sampleRate * 0.22);
     this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = this.noise.getChannelData(0);
     for (let i = 0; i < len; i++) {
       // sparse impulses rather than hiss reads as little feet, not static
-      data[i] = (Math.random() * 2 - 1) * (Math.random() < 0.12 ? 1 : 0.15) * (1 - i / len);
+      data[i] = (this.rng.next() * 2 - 1) * (this.rng.chance(0.12) ? 1 : 0.15) * (1 - i / len);
     }
     this.out = destination;
   }
@@ -359,19 +365,19 @@ class SkitterVoice {
     if (ctx.state !== 'running') return;
     const t0 = ctx.currentTime;
     // 2-4 rapid ticks per burst
-    const ticks = 2 + Math.floor(Math.random() * 3);
+    const ticks = 2 + Math.floor(this.rng.next() * 3);
     for (let i = 0; i < ticks; i++) {
-      const t = t0 + i * (0.03 + Math.random() * 0.04);
+      const t = t0 + i * (0.03 + this.rng.next() * 0.04);
       const src = ctx.createBufferSource();
       src.buffer = this.noise;
-      src.playbackRate.value = 0.8 + Math.random() * 0.6;
+      src.playbackRate.value = 0.8 + this.rng.next() * 0.6;
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = 2200 + Math.random() * 1600;
+      bp.frequency.value = 2200 + this.rng.next() * 1600;
       bp.Q.value = 1.6;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.linearRampToValueAtTime(volume * (0.6 + Math.random() * 0.4), t + 0.006);
+      g.gain.linearRampToValueAtTime(volume * (0.6 + this.rng.next() * 0.4), t + 0.006);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
       const pn = ctx.createStereoPanner();
       pn.pan.value = Math.max(-1, Math.min(1, pan));
