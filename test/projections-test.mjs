@@ -17,6 +17,11 @@
  *   6. material spec: additive-ish blending, unlit emissive, alpha from texture
  *   7. mesh geometry: quad floats 0.02 m off the wall along its normal
  *   8. setFlicker modulates visibility deterministically within [0,1]
+ *
+ * tryPlace / PROJECTION_TEXTS / PROJECTION_PERIOD / PROJECTION_SALT were
+ * restored to src/gfx/projections.ts from the dca1114 recovery snapshot
+ * after a truncated recovery pass dropped them; this suite runs unmodified
+ * against the restored exports.
  */
 import ts from 'typescript';
 import { readFileSync, writeFileSync } from 'node:fs';
