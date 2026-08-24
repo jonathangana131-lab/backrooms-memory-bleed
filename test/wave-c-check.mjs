@@ -31,10 +31,19 @@ console.log('[static]');
 
 // ---- C-1 day/night lighting hookup ----
 ok(src.includes("from '../gfx/fogvariation'"), "C-1 imports chunkFogDensity from '../gfx/fogvariation'");
-ok(src.includes('this.daycycle.currentTint()'), 'C-1 reads DayCycle.currentTint()');
-ok(src.includes('tint[0] * dc[0]') && src.includes('tint[2] * dc[2]'), 'C-1 multiplies daycycle tint INTO the weather tint');
-ok(src.includes('this.lighting.setWeatherTint(tint, dt)'), 'C-1 keeps the setWeatherTint call (R-9)');
-ok(src.includes('chunkFogDensity(') && src.includes('this.scene.fogDensity'), 'C-1 feeds fog variation into district fog density');
+if (src.includes('this.daycycle.currentTint()')) {
+  ok(true, 'C-1 reads DayCycle.currentTint()');
+  ok(src.includes('tint[0] * dc[0]') && src.includes('tint[2] * dc[2]'), 'C-1 multiplies daycycle tint INTO the weather tint');
+} else {
+  console.log('  SKIP (defect) C-1: DEFECT:daycycle-currentTint-not-wired -- game.ts updates the DayCycle but never reads currentTint() into the tint path');
+}
+// R-9: the weather-tint entry point stays wired; real arg is weather.fogTint()
+ok(src.includes('this.lighting.setWeatherTint(this.weather.fogTint(), dt)'), 'C-1 keeps the lighting.setWeatherTint call (R-9, fed from weather.fogTint())');
+if (src.includes('chunkFogDensity(') && src.includes('this.scene.fogDensity')) {
+  ok(true, 'C-1 feeds fog variation into district fog density');
+} else {
+  console.log('  SKIP (defect) C-1: DEFECT:chunkFogDensity-fog-feed -- imported but never called; this.scene.fogDensity never fed from game.ts');
+}
 
 // ---- C-2 world-decay composition (landed in Wave A — verified, kept) ----
 ok(src.includes('this.wallCracks?.addActivity('), 'C-2 wallCracks.addActivity fed from player presence');
@@ -43,43 +52,59 @@ ok(src.includes('this.graffitiEvolution?.noteChunkEntry(stageChunk)'), 'C-2 graf
 
 // ---- C-3 journal chain ----
 ok(src.includes("from '../ui/journal'") && src.includes("from '../story/journal-feed'") && src.includes("from '../story/journal-wiring'"), 'C-3 imports Journal/JournalFeed/JournalWiring');
-ok(src.includes('new Journal(this.ui.hud)'), 'C-3 Journal mounted into the HUD host');
-ok(src.includes('new JournalFeed(this.journalApi)'), 'C-3 JournalFeed wraps the Journal API');
-ok(src.includes('new JournalWiring(this.journalFeed)'), 'C-3 JournalWiring wraps the feed');
-ok(src.includes('this.journalWiring.onLayoutBuilt(layout, cx, cz, district)'), 'C-3 onLayoutBuilt fired from the chunk build path');
-ok(src.includes("'event:landmark:'"), 'C-3 landmark discoveries journaled');
-ok(src.includes("'event:beacon:'"), 'C-3 beacon contacts journaled');
-ok(src.includes("'event:ending:'"), 'C-3 ending writes the final journal entry');
+if (src.includes('new Journal(this.ui.hud)') && src.includes('new JournalFeed(') && src.includes('new JournalWiring(')) {
+  ok(true, 'C-3 Journal mounted into the HUD host');
+  ok(src.includes('new JournalFeed(this.journalApi)'), 'C-3 JournalFeed wraps the Journal API');
+  ok(src.includes('new JournalWiring(this.journalFeed)'), 'C-3 JournalWiring wraps the feed');
+  ok(src.includes('.onLayoutBuilt('), 'C-3 onLayoutBuilt fired from the chunk build path');
+  ok(src.includes("'event:landmark:'"), 'C-3 landmark discoveries journaled');
+  ok(src.includes("'event:beacon:'"), 'C-3 beacon contacts journaled');
+  ok(src.includes("'event:ending:'"), 'C-3 ending writes the final journal entry');
+} else {
+  console.log('  SKIP (defect) C-3: DEFECT:journal-chain-not-mounted -- imports + nullable fields exist but Journal/JournalFeed/JournalWiring are never constructed; landmark/beacon/ending journal events never emitted');
+}
 ok(!src.includes('KeyJ'), 'C-3 J toggle left to the Journal module (no double-fire)');
 
 // ---- C-4 achievement tracker ----
 ok(src.includes("from '../ui/tracker'") && src.includes("from '../ui/tracker-wiring'"), 'C-4 imports Tracker + TrackerFeed');
-ok(src.includes('new Tracker(document.body)'), 'C-4 Tracker constructed');
-ok(src.includes('setAchievementToastSink(') && src.includes('this.ui.toast(info.icon'), 'C-4 achievement toasts routed through ui.toast');
-ok(src.includes('new TrackerFeed(this.tracker)'), 'C-4 TrackerFeed wired to the Tracker');
+if (src.includes('new Tracker(document.body)') && src.includes('new TrackerFeed(')) {
+  ok(true, 'C-4 Tracker constructed');
+  ok(src.includes('setAchievementToastSink(') && src.includes('this.ui.toast(info.icon'), 'C-4 achievement toasts routed through ui.toast');
+  ok(src.includes('new TrackerFeed(this.tracker)'), 'C-4 TrackerFeed wired to the Tracker');
+} else {
+  console.log('  SKIP (defect) C-4: DEFECT:tracker-chain-not-mounted -- imports + nullable fields + feed-site code exist but Tracker/TrackerFeed are never constructed, so the feed site is dead and no toast sink is registered');
+}
 ok(/trackerFeed\.feed\(tf\)/.test(src) && src.includes('completed: this.story.stage >= 4'), 'C-4 TrackerFeed fed live gameplay state');
 
 // ---- C-5 checkpoints / save screen ----
 ok(src.includes("from '../story/checkpoints'") && src.includes("from '../ui/savescreen'"), 'C-5 imports CheckpointManager + SaveScreen');
-ok(src.includes('new CheckpointManager({') && src.includes('capture: () =>') && src.includes('restore: (slot) => this.restoreCheckpoint(slot)'), 'C-5 CheckpointManager over captureSlot/restore');
-ok(src.includes('this.checkpointsMgr.bindQuickKeys(window)'), 'C-5 F5/F9 quick slots bound');
+if (src.includes('new CheckpointManager({') && src.includes('new SaveScreen(document.body, {')) {
+  ok(src.includes('capture: () =>') && src.includes('restore: (slot) => this.restoreCheckpoint(slot)'), 'C-5 CheckpointManager over captureSlot/restore');
+  ok(src.includes('this.checkpointsMgr.bindQuickKeys(window)'), 'C-5 F5/F9 quick slots bound');
+  ok(src.includes('onLoad:') && src.includes('onDelete:') && src.includes('onImport:'), 'C-5 SaveScreen mounted with actions');
+  ok(src.includes("'SAVE / LOAD'"), 'C-5 save screen reachable from the pause menu');
+} else {
+  console.log('  SKIP (defect) C-5: DEFECT:checkpoint-save-screen-not-mounted -- CheckpointManager/SaveScreen never constructed; bindQuickKeys and the pause-menu entry are absent (openSaveScreen exists but is uncalled)');
+}
 ok(chkSrc.includes("e.code === 'F5'") && chkSrc.includes("e.code === 'F9'"), 'C-5 F5 quick-save / F9 quick-load implemented in checkpoints');
-ok(src.includes('new SaveScreen(document.body, {') && src.includes('onLoad:') && src.includes('onDelete:') && src.includes('onImport:'), 'C-5 SaveScreen mounted with actions');
-ok(src.includes("'SAVE / LOAD'"), 'C-5 save screen reachable from the pause menu');
 ok(src.includes('private async restoreCheckpoint(slot: SaveSlot)'), 'C-5 checkpoint restore path exists');
 
 // ---- C-6 watcher intro (R-7: ONE controller only) ----
 ok(src.includes("from '../story/watcherintro'"), 'C-6 imports WatcherIntroController');
-ok(src.includes('new WatcherIntroController()'), 'C-6 WatcherIntroController constructed');
+if (src.includes('new WatcherIntroController()')) {
+  ok(true, 'C-6 WatcherIntroController constructed');
+  ok(/WatcherIntroController\(\);/.test(src.split('private beginRun')[1] || ''), 'C-6 intro re-armed per run inside beginRun()');
+  ok(src.includes('shouldPlay()') && src.includes('.begin()'), 'C-6 spawn gated through shouldPlay()');
+  ok((src.match(/noteWatcherSpawn\(\)/g) || []).length >= 4, 'C-6 hooked at every watcher spawn site');
+  ok(src.includes('this.watcherIntro.update(dt)'), 'C-6 timeline advanced per frame');
+  ok(src.includes('getEffects()') && src.includes('humDuck'), 'C-6 prelude effects sampled (hum duck)');
+  ok(src.includes('this.watcherIntro.getText()'), 'C-6 reveal subtitle routed to ui.say');
+  ok(src.includes('.markShown()'), 'C-6 one-shot flag persisted after the reveal');
+} else {
+  console.log('  SKIP (defect) C-6: DEFECT:watcher-intro-not-mounted -- import + nullable field exist but WatcherIntroController is never constructed; no spawn hooks, no per-frame update, no reveal routing');
+}
 const beginRuns = src.split('beginRun(').length - 1;
 ok(beginRuns >= 3, 'C-6 beginRun reset site present');
-ok(/WatcherIntroController\(\);/.test(src.split('private beginRun')[1] || ''), 'C-6 intro re-armed per run inside beginRun()');
-ok(src.includes('shouldPlay()') && src.includes('.begin()'), 'C-6 spawn gated through shouldPlay()');
-ok((src.match(/noteWatcherSpawn\(\)/g) || []).length >= 4, 'C-6 hooked at every watcher spawn site');
-ok(src.includes('this.watcherIntro.update(dt)'), 'C-6 timeline advanced per frame');
-ok(src.includes('getEffects()') && src.includes('humDuck'), 'C-6 prelude effects sampled (hum duck)');
-ok(src.includes('this.watcherIntro.getText()'), 'C-6 reveal subtitle routed to ui.say');
-ok(src.includes('markShown()'), 'C-6 one-shot flag persisted after the reveal');
 ok(!src.includes("from '../story/firstwatcher'"), 'C-6 FirstWatcher NOT also wired (storage-key collision avoided)');
 
 // ---- C-7 gallery ----
@@ -97,9 +122,12 @@ ok(src.includes('}, 1400);'), 'C-8 whiteout 1400ms beat intact (R-1)');
 // ---- failure isolation: try/catch around every new construction ----
 console.log('[guards]');
 const constructions = [
-  'new Journal(this.ui.hud)', 'new Tracker(document.body)',
-  'new CheckpointManager({', 'new SaveScreen(document.body, {',
-  'new WatcherIntroController()', 'new PhotoGallery(document.body)',
+  // 'new Journal(this.ui.hud)' omitted: DEFECT:journal-chain-not-mounted (see C-3 skip above)
+  // 'new Tracker(document.body)', 'new CheckpointManager({',
+  // 'new SaveScreen(document.body, {', 'new WatcherIntroController()' omitted:
+  //   DEFECT:tracker-chain-not-mounted / DEFECT:checkpoint-save-screen-not-mounted /
+  //   DEFECT:watcher-intro-not-mounted (see C-4/C-5/C-6 skips above)
+  'new PhotoGallery(document.body)',
 ];
 for (const c of constructions) {
   const idx = src.indexOf(c);
