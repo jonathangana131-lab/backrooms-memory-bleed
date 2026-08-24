@@ -6,6 +6,10 @@
 export class AudioEngine {
   ctx: AudioContext | null = null;
   private master!: GainNode;
+  /** Total-mix bus gain for whole-mix automation (F6 dread-silence duck). Null before start(). */
+  get masterBus(): GainNode | null {
+    return this.master ?? null;
+  }
   private reverb!: ConvolverNode;
   private reverbGain!: GainNode;
   private lmGains = new Map<string, GainNode>();
