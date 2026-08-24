@@ -31,6 +31,7 @@ function check(name, ok, extra = '') {
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bmb-doubleletters-'));
 fs.mkdirSync(path.join(tmp, 'src/core'), { recursive: true });
+fs.mkdirSync(path.join(tmp, 'src/content'), { recursive: true });
 fs.mkdirSync(path.join(tmp, 'src/story'), { recursive: true });
 
 function emit(relSrc, outRel) {
@@ -41,6 +42,7 @@ function emit(relSrc, outRel) {
   fs.writeFileSync(path.join(tmp, outRel), js);
 }
 emit('src/core/rng.ts', 'src/core/rng.mjs');
+emit('src/content/doubleletters-pool.ts', 'src/content/doubleletters-pool.mjs');
 emit('src/story/doubleletters.ts', 'src/story/doubleletters.mjs');
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ } });
 
