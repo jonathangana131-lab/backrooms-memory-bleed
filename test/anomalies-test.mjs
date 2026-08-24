@@ -34,6 +34,7 @@ function emit(relSrc, outRel) {
 emit('src/core/rng.ts', 'src/core/rng.mjs');
 emit('src/core/events.ts', 'src/core/events.mjs');
 emit('src/world/constants.ts', 'src/world/constants.mjs');
+emit('src/director/persona.ts', 'src/director/persona.mjs');
 emit('src/director/director.ts', 'src/director/director.mjs');
 emit('src/world/chunkDeltas.ts', 'src/world/chunkDeltas.mjs');
 emit('src/director/anomalies.ts', 'src/director/anomalies.mjs');
