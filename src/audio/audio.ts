@@ -783,6 +783,31 @@ export class AudioEngine {
     this.whisperPan = Math.max(-1, Math.min(1, pan));
   }
 
+  /**
+   * One duplicated footstep at a fixed stereo pan, scheduled delaySec after
+   * the call (the anomaly system's mirror-steps phenomenon uses 0.4 s).
+   * Deliberately not routed through the step-verb send: the double walks on
+   * carpet that has never been inside any room.
+   */
+  echoFootstep(pan: number, delaySec: number, volMul = 1): void {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime + Math.max(0, delaySec);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.72 + Math.random() * 0.2; // DSP texture only; sim determinism unaffected
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 380;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.085 * volMul, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    const p = ctx.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, pan));
+    src.connect(f).connect(g).connect(p).connect(this.master);
+    src.start(t, Math.random() * 1.5, 0.2);
+  }
+
   /** close, breathy whisper swell */
   whisper(): void {
     if (!this.ctx) return;
