@@ -11,7 +11,18 @@
  *
  * hold() makes the room catch its breath — pinned near silence until the
  * pause elapses, then a loud resumed exhale. Fully procedural, no assets.
+ *
+ * Determinism: the breath phase, cycle period, ornament schedules and the
+ * ARCHIVE flutter roll draw from one seeded RNG stream
+ * (`(seed ^ BREATH_SALT) >>> 0`, src/core/rng.ts); only the sample-data
+ * air-bed buffer fill keeps Math.random under the DSP carve-out.
  */
+import { RNG } from '../core/rng';
+
+/** Stream salt so breath rolls never correlate with other seeded systems. */
+const BREATH_SALT = 0x0f2b3a17;
+/** Default stream seed used when no run seed reaches the constructor. */
+const DEFAULT_BREATH_SEED = 0x77b3ea7d;
 
 /** Room kinds that breathe, from the landmark table. */
 export type BreathKind = 'ARCHIVE' | 'MEDICAL' | 'PLAYROOM';
@@ -35,25 +46,33 @@ export class LandmarkBreath {
   private readonly sources: AudioScheduledSourceNode[] = [];
 
   // ---- motion state ----
-  private phase = Math.random();
+  private phase = 0;
   private boost = 1;              // entrance/resume exhale multiplier
   private holdTimer = -1;         // >=0 while holding its breath
-  private nextBeepIn = 2 + Math.random() * 2;
-  private nextChimeIn = 4 + Math.random() * 3;
+  private nextBeepIn = 0;
+  private nextChimeIn = 0;
 
   stopped = false;
 
-  constructor(ctx: AudioContext, destination: AudioNode, kind: BreathKind, vol = 0.5) {
+  /** Seeded stream driving phase/period/ornament rolls (determinism law). */
+  private readonly rng: RNG;
+
+  constructor(ctx: AudioContext, destination: AudioNode, kind: BreathKind, vol = 0.5, seed = DEFAULT_BREATH_SEED) {
     this.ctx = ctx;
     this.out = destination;
     this.kind = kind;
     this.vol = vol;
-    this.period = 5 + Math.random() * 4;
+    this.rng = new RNG((seed ^ BREATH_SALT) >>> 0);
+    this.phase = this.rng.next();
+    this.nextBeepIn = 2 + this.rng.next() * 2;
+    this.nextChimeIn = 4 + this.rng.next() * 3;
+    this.period = 5 + this.rng.next() * 4;
 
     // chest: filtered noise swelling through breathGain
     const len = Math.floor(ctx.sampleRate * 2);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
+    // audio DSP buffer fill (air-bed noise source) — sim PRNG law carve-out
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -124,7 +143,7 @@ export class LandmarkBreath {
 
     // ARCHIVE rooms get paper rustle riding the breath with a dry flutter
     if (this.kind === 'ARCHIVE') {
-      const flutter = 0.5 + Math.random();
+      const flutter = 0.5 + this.rng.next();
       this.rustleGain.gain.setTargetAtTime(env * 0.02 * flutter, t, 0.22);
     } else {
       this.rustleGain.gain.setTargetAtTime(0, t, 0.3);
@@ -134,13 +153,13 @@ export class LandmarkBreath {
     if (this.kind === 'MEDICAL') {
       this.nextBeepIn -= dt;
       if (this.nextBeepIn <= 0) {
-        this.nextBeepIn = 1.6 + Math.random() * 0.8;
+        this.nextBeepIn = 1.6 + this.rng.next() * 0.8;
         this.beep(t);
       }
     } else if (this.kind === 'PLAYROOM') {
       this.nextChimeIn -= dt;
       if (this.nextChimeIn <= 0) {
-        this.nextChimeIn = 4 + Math.random() * 5;
+        this.nextChimeIn = 4 + this.rng.next() * 5;
         this.chime(t);
       }
     }

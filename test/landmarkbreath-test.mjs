@@ -7,8 +7,35 @@
  *   4. only ARCHIVE rooms ride paper rustle
  *   5. MEDICAL rooms emit soft monitor blips, PLAYROOM toy chimes
  *   6. stop() silences everything and double-stop is safe
+ *
+ * The TS module is bundled with esbuild so its '../core/rng' import
+ * resolves under plain Node (same loader as groans-test).
  */
-import { LandmarkBreath } from '../src/audio/landmarkbreath.ts';
+import { createRequire } from 'node:module';
+import { writeFileSync, readdirSync } from 'node:fs';
+
+const require_ = createRequire(import.meta.url);
+function loadEsbuild() {
+  try {
+    return require_('esbuild');
+  } catch {
+    const pnpmDir = process.cwd() + '/node_modules/.pnpm';
+    const entry = readdirSync(pnpmDir).find((d) => d.startsWith('esbuild@'));
+    if (!entry) throw new Error('esbuild not found in node_modules');
+    return require_(pnpmDir + '/' + entry + '/node_modules/esbuild');
+  }
+}
+const esbuild = loadEsbuild();
+const BUILT = process.cwd() + '/test/.landmarkbreath-build.mjs';
+const bundle = await esbuild.build({
+  entryPoints: [process.cwd() + '/src/audio/landmarkbreath.ts'],
+  bundle: true,
+  format: 'esm',
+  target: 'es2022',
+  write: false,
+});
+writeFileSync(BUILT, bundle.outputFiles[0].text);
+const { LandmarkBreath } = await import('./.landmarkbreath-build.mjs');
 
 // ---- minimal AudioContext mock -------------------------------------------
 let now = 100;
