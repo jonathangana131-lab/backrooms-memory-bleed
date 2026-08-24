@@ -47,21 +47,46 @@ await page.waitForTimeout(300);
 const sub2 = await page.evaluate(() => document.querySelector('.subtitle')?.textContent);
 console.log('SUBTITLES_ON_TEXT=' + JSON.stringify(sub2), sub2 === 'visible now' ? 'SUBS2_OK' : 'SUBS2_BAD');
 
-// settings persist with fov
+// settings persist with fov.
+// Root cause of the old crash: the game's save layer (src/save/db.ts) opens
+// 'bmb' at version 2, so opening it at version 1 here raised a VersionError
+// on a request whose handlers only covered success — the evaluate promise
+// never settled and Playwright garbage-collected it. Open without a version
+// (never a VersionError), settle every request through error paths too, and
+// race the whole read against an explicit timeout so this evaluate always
+// resolves. Assertions unchanged: the persisted 'kv'/'settings' record must
+// come back and be logged.
 const kv = await page.evaluate(async () => {
-  const db = await new Promise((res) => {
-    const r = indexedDB.open('bmb', 1);
+  const withTimeout = (p, ms, what) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('settings-read timeout: ' + what)), ms)),
+  ]);
+  const db = await withTimeout(new Promise((res, rej) => {
+    const r = indexedDB.open('bmb'); // no version -> never a VersionError
     r.onsuccess = () => res(r.result);
-  });
-  const val = await new Promise((res) => {
-    const tx = db.transaction('kv', 'readonly');
-    const q = tx.objectStore('kv').get('settings');
-    q.onsuccess = () => res(q.result);
-  });
-  db.close();
-  return val;
+    r.onerror = () => rej(r.error ?? new Error('open failed'));
+    r.onblocked = () => rej(new Error('open blocked'));
+  }), 10000, 'indexedDB.open');
+  try {
+    if (!db.objectStoreNames.contains('kv')) throw new Error('kv store missing');
+    const val = await withTimeout(new Promise((res, rej) => {
+      const tx = db.transaction('kv', 'readonly');
+      const q = tx.objectStore('kv').get('settings');
+      q.onsuccess = () => res(q.result);
+      q.onerror = () => rej(q.error ?? new Error('get failed'));
+      tx.onabort = () => rej(tx.error ?? new Error('transaction aborted'));
+    }), 10000, 'kv.get(settings)');
+    return val;
+  } finally {
+    db.close();
+  }
 });
 console.log('PERSISTED_SETTINGS', JSON.stringify(kv));
+if (!kv || kv.fov !== 110) {
+  console.log('PERSIST_BAD', 'expected persisted fov 110');
+} else {
+  console.log('PERSIST_OK');
+}
 await browser.close();
 
 
