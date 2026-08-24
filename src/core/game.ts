@@ -119,6 +119,8 @@ import { TimeSlippage } from '../story/timeslippage';
 import { ResidueField, RESIDUE_KINDS, type ResidueKind } from '../memory/residue';
 // F11: torch view-model — held-hand pose model driving a camera-attached mesh
 import { TorchView, type TorchViewTarget } from '../gfx/torchview';
+// F42: night-vision camcorder — IR ramp mode draining the torch cell
+import { NightVision } from '../gfx/nightvision';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -256,6 +258,15 @@ export class Game {
   private torchTarget: TorchViewTarget | null = null;
   /** rebuilt every run so sway phases re-seed from the fresh seed */
   private torchView: TorchView | null = null;
+
+  // ---- F42 night-vision camcorder: per-run mode model + IR tint veil ----
+  /** rebuilt every run (starts off, latch cleared, drain handed back) */
+  private nightvision: NightVision | null = null;
+  /** full-screen green grade element, created lazily like the stagger blur */
+  private nvTintEl: HTMLDivElement | null = null;
+  private nvHintShown = false;
+  /** cutoff announcements already surfaced for the current run */
+  private nvCutoffsSeen = 0;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -701,6 +712,15 @@ export class Game {
           }
         }
       }
+      if (e.code === 'KeyN' && this.state === 'playing') {
+        // F42: camcorder IR toggle — shares the torch cell, so it needs the kit
+        if (!this.flashlight.has) {
+          this.ui.say('No camcorder yet. The camp kit holds one.', 3);
+        } else if (this.nightvision?.toggle() && !this.nvHintShown) {
+          this.nvHintShown = true;
+          this.ui.say('IR mode. Green light drinks from the same cell. [N]', 4);
+        }
+      }
       if (e.code === 'Tab') {
         e.preventDefault();
         this.logOpen = !this.logOpen;
@@ -916,6 +936,16 @@ export class Game {
         });
       } catch (e) { console.warn('[bmb] torch view unavailable', e); this.torchView = null; }
     }
+    // F42: fresh camcorder per run — starts off and re-owns the drain seam;
+    // battery provider drives the one-shot auto-cutoff.
+    this.nvCutoffsSeen = 0;
+    this.flashlight.drainMultiplier = 1;
+    try {
+      this.nightvision = new NightVision(
+        { setDrainMultiplier: (m) => { this.flashlight.drainMultiplier = m; } },
+        { seed: (this.seed ^ 0x1eca7a) >>> 0, batteryLevel: () => this.flashlight.battery },
+      );
+    } catch (e) { console.warn('[bmb] night vision unavailable', e); this.nightvision = null; }
     this.knownChunkKeys.clear();
     this.lastChunksBuiltSeen = 0;
     this.markedBeaconKeys.clear();
@@ -1729,19 +1759,22 @@ export class Game {
       // flashlight simulation (drains on, trickles under working lights)
       const nearLit = this.playtimeSec >= this.blackoutUntil && this.chunks.nearestFixtureDist(this.player.body.x, this.player.body.z) < 8;
       this.flashlight.update(dt, now / 1000, this.camera.position.x, this.camera.position.z, this.player.yaw, this.player.pitch, nearLit);
-      // F11: advance the view-model after the camera pose settles, then
-      // remount the SpotLight on its lens anchor so the beam originates at
-      // the visible hand (only while lit — Flashlight parks the light at
-      // (0,-50,0) when off and that parking must win).
-      if (this.torchView && this.flashlight.on) {
+      // F11: advance the view-model every playing frame (the battery-swap
+      // beat must animate even while the torch is off), then remount the
+      // SpotLight on its lens anchor so the beam originates at the visible
+      // hand (only while lit — Flashlight parks the light at (0,-50,0)
+      // when off and that parking must win).
+      if (this.torchView) {
         try {
           this.torchView.update(dt);
-          const a = this.torchView.getLightAnchor();
-          const anchorWorld = Vector3.TransformCoordinates(
-            new Vector3(a.x, a.y, a.z),
-            this.camera.computeWorldMatrix(),
-          );
-          this.flashlight.light.position.copyFrom(anchorWorld);
+          if (this.flashlight.on) {
+            const a = this.torchView.getLightAnchor();
+            const anchorWorld = Vector3.TransformCoordinates(
+              new Vector3(a.x, a.y, a.z),
+              this.camera.computeWorldMatrix(),
+            );
+            this.flashlight.light.position.copyFrom(anchorWorld);
+          }
         } catch (e) {
           console.warn('[bmb] torch view update failed', e);
         }
