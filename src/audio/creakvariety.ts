@@ -17,6 +17,10 @@
  * individual PLAY adds +-10% micro-variation so no two creaks are
  * byte-identical either. Distance attenuates volume with a squared law
  * beyond 5 m and closes the lowpass with it.
+ *
+ * Determinism: personality tables and per-play micro-variation both draw
+ * from mulberry32 streams seeded by the constructor seed (tables) or that
+ * seed XOR a site salt (play stream). No Math.random outside DSP fills.
  */
 
 /** Stable string hash (FNV-1a + murmur finalizer), local to this module so
@@ -76,6 +80,9 @@ export interface CreakPersonality {
 
 /** Default world-seed salt for the personality tables. */
 const DEFAULT_SEED = 0x67ea;
+
+/** Site salt separating the per-play stream from other consumers of a seed. */
+const PLAY_SALT = 0xcea21;
 
 /** Distance past which attenuation begins (meters). */
 const UNITY_DISTANCE_M = 5;
@@ -148,6 +155,8 @@ function seedKind(
 export class CreakVariety {
   private readonly destination: AudioNode | null;
   private readonly table: Record<CreakKind, CreakPersonality>;
+  /** Persistent per-play micro-variation stream (seed XOR PLAY_SALT). */
+  private readonly playRng: () => number;
 
   private ctxRef: AudioContext | null = null;
   private readonly live: OscillatorNode[] = [];
@@ -162,8 +171,9 @@ export class CreakVariety {
   constructor(ctx: AudioContext, destination: AudioNode | null, seed = DEFAULT_SEED) {
     this.ctxRef = ctx; // construction builds no graph; plays render lazily
     this.destination = destination;
-    void seed;
-    this.table = buildPersonalities(seed >>> 0 || DEFAULT_SEED);
+    const s = seed >>> 0 || DEFAULT_SEED;
+    this.playRng = mulberry32((s ^ PLAY_SALT) >>> 0);
+    this.table = buildPersonalities(s);
   }
 
   /**
@@ -191,7 +201,7 @@ export class CreakVariety {
     if (this.stopped || !this.ctxRef || !this.destination) return;
     const p = this.personalityOf(kind);
     // Per-play micro-variation: stays inside +-10%, never twice alike.
-    const j = (v: number): number => v * (1 + (Math.random() * 0.16 - 0.08));
+    const j = (v: number): number => v * (1 + (this.playRng() * 0.16 - 0.08));
     const fLo = j(p.fLo);
     const fHi = Math.max(j(p.fHi), fLo * 1.15);
 
@@ -236,7 +246,7 @@ export class CreakVariety {
   ): number {
     const ctx = this.ctxRef!;
     const t = ctx.currentTime;
-    const dur = Math.max(0.05, seedDur * (1 + (Math.random() * 0.16 - 0.08)));
+    const dur = Math.max(0.05, seedDur * (1 + (this.playRng() * 0.16 - 0.08)));
     void kind;
 
     const osc = ctx.createOscillator();
@@ -278,7 +288,7 @@ export class CreakVariety {
   ): number {
     const ctx = this.ctxRef!;
     const t = ctx.currentTime;
-    const dur = p.dur * (1 + (Math.random() * 0.16 - 0.08));
+    const dur = p.dur * (1 + (this.playRng() * 0.16 - 0.08));
     const total = dur + METAL_RING_TAIL;
 
     const body = ctx.createOscillator();
