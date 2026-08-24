@@ -69,6 +69,11 @@ function makeShim() {
   class DB {
     constructor(stores) { this.stores = stores; }
     get objectStoreNames() { return { contains: (n) => this.stores.has(n) }; }
+    /** Real IDB allows createObjectStore only inside the upgrade transaction; the
+        shim enforces nothing beyond existence, which is all callers rely on. */
+    createObjectStore(name) {
+      if (!this.stores.has(name)) this.stores.set(name, new Map());
+    }
     transaction(name /* , mode */) {
       const tx = {
         objectStore: () => new Store(this.stores.get(name)),
@@ -89,7 +94,9 @@ function makeShim() {
       req.onupgradeneeded = null;
       queueMicrotask(() => {
         if (!dbs.has('bmb')) {
-          const db = new DB(new Map([['slots', new Map()], ['kv', new Map()]]));
+          // Schema starts empty, like a fresh browser DB: src/save/db.ts's
+          // onupgradeneeded creates 'slots', 'kv', and 'checkpoints' itself.
+          const db = new DB(new Map());
           dbs.set('bmb', db);
           req.result = db; // real IDB sets result before upgrade callbacks
 
@@ -180,6 +187,7 @@ ok('legacy JSON-string saves still load through migration');
 // 3. quota handling: evict oldest non-current slot, retry once
 // ---------------------------------------------------------------------------
 {
+  resetShim();
   const mod = await freshImport();
   const old = { ...base, seed: 111, savedAt: 500 };
   await mod.SaveDB.saveGame(old);
@@ -196,6 +204,7 @@ ok('legacy JSON-string saves still load through migration');
   ok('quota-exceeded write evicts oldest non-current slot and retries once');
 }
 {
+  resetShim();
   const mod = await freshImport();
   await mod.SaveDB.saveGame({ ...base, seed: 1, savedAt: 10 });
   shim.quotaFailKeys.set('auto', 99); // fail initial attempt AND retry
@@ -208,6 +217,7 @@ ok('legacy JSON-string saves still load through migration');
 // 4. backup slot: pre-overwrite snapshot + restore
 // ---------------------------------------------------------------------------
 {
+  resetShim();
   const mod = await freshImport();
   assert.equal(await mod.SaveDB.loadBackup(), null, 'no backup before any save');
   await mod.SaveDB.saveGame({ ...base, seed: 777, savedAt: 1 });
