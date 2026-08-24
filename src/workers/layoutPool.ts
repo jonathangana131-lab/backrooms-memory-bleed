@@ -50,6 +50,8 @@ export interface LayoutErrorResponse {
 export const WORKER_COUNT = 2;
 
 interface PendingRequest {
+  /** Cache key ('cx,cz') of the originating request, written on resolve. */
+  key: string;
   resolve: (layout: ChunkLayout) => void;
   reject: (err: Error) => void;
 }
@@ -77,7 +79,13 @@ export class LayoutPool {
         if (!req) return;
         slots.delete(id);
         if ('error' in ev.data) req.reject(new Error('layout worker: ' + ev.data.error));
-        else req.resolve(ev.data.layout);
+        else {
+          // Completed layouts are cached by the request's 'cx,cz' key (see
+          // class doc): repeat requests are then served without touching a
+          // worker. Cached instances are shared by reference.
+          this.cache.set(req.key, ev.data.layout);
+          req.resolve(ev.data.layout);
+        }
       };
       worker.onerror = (ev: ErrorEvent) => {
         // Worker-level failure (bundle load error, uncaught throw outside a
@@ -111,7 +119,7 @@ export class LayoutPool {
     const id = this.nextId++;
 
     return new Promise<ChunkLayout>((resolve, reject) => {
-      this.pending.get(workerIndex)!.set(id, { resolve, reject });
+      this.pending.get(workerIndex)!.set(id, { key, resolve, reject });
       const msg: LayoutRequest = { id, seed, cx, cz };
       worker.postMessage(msg);
     });
