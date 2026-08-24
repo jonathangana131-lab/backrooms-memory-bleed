@@ -25,6 +25,12 @@ import type { MemoryField } from '../memory/field';
 /** Salt so aging decor draws never correlate with any other per-chunk feature. */
 const AGING_DECOR_SALT = 0xa9e6;
 
+/** Salt so map-fragment scatter draws never correlate with other features. */
+const MAPFRAG_SALT = 0xf8a6;
+
+/** Chance a chunk scatters the cartographer's map fragments at all. */
+const MAPFRAG_CHANCE = 0.22;
+
 /** Minimal surface of the story system used during chunk builds. */
 export interface StoryLike {
   beaconForChunk(cx: number, cz: number): { cx: number; cz: number; found: boolean } | null;
@@ -225,6 +231,23 @@ export class ChunkManager {
     // the FloorCracks pass is not wired into buildChunkGeometry. The folded
     // value stays exposed via agingAt() for whichever decal pass consumes
     // it first; nothing here forces that wiring.
+    // F56 cartographer's error: seeded chance scatters 0-2 map-fragment
+    // papers as NoteInstances - this world's existing paper prop kind,
+    // rendered flat on the carpet by the mesher's note pass. Payload ids
+    // are pure hashes of (seed, chunkKey, fragment slot), so a future
+    // pickup/consumption pass resolves the identical fragment from the id
+    // alone; this mount places paper only.
+    const fragRng = new RNG(hash2i(seedFromString(k), this.seed, MAPFRAG_SALT));
+    const fragCount = fragRng.chance(MAPFRAG_CHANCE) ? 1 + fragRng.int(0, 2) : 0;
+    for (let fi = 0; fi < fragCount; fi++) {
+      layout.notes.push({
+        x: (cx * CHUNK_CELLS + fragRng.range(0.8, CHUNK_CELLS - 0.8)) * CELL,
+        z: (cz * CHUNK_CELLS + fragRng.range(0.8, CHUNK_CELLS - 0.8)) * CELL,
+        rot: fragRng.next() * Math.PI * 2,
+        text: 'MAP FRAGMENT #' +
+          (hash2i(this.seed, seedFromString(k), fi) >>> 0).toString(16).padStart(8, '0'),
+      });
+    }
     if (this.consumedBatteries && this.consumedBatteries.size) {
       // coordinate-stable keys survive index shifts between builds
       layout.props = layout.props.filter((p, i) =>
