@@ -856,7 +856,12 @@ export class Game {
     // normalize FOV into sane bounds (60–110 degrees); default 75 when missing
     const fovDeg = Math.min(110, Math.max(60, s.fov ?? 75));
     this.settings = { ...s, fov: fovDeg };
-    this.camera.fov = fovDeg * Math.PI / 180;
+    // FOV routes through the controller's baseFovRad seam: the controller
+    // rewrites camera.fov every frame from that field (sprint kick + stamina
+    // pulse are relative to it), so a direct camera.fov write here would be
+    // clobbered. Clamp keeps the radian value in a sane [0.9, 2.2] band on
+    // top of the degree normalization above.
+    this.player.baseFovRad = Math.max(0.9, Math.min(2.2, fovDeg * Math.PI / 180));
     this.player.sensitivity = 0.0022 * this.settings.sensitivity;
     this.audio.setMasterVolume(this.settings.volume);
     this.engine.setHardwareScalingLevel(1 / Math.max(0.4, Math.min(1, this.settings.quality)));
