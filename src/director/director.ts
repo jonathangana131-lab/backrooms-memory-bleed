@@ -9,6 +9,7 @@
  */
 import { RNG } from '../core/rng';
 import { Emitter } from '../core/events';
+import { adjustIntensity, adjustPhase, windowEventChance, type Temperament } from './persona';
 
 /**
  * Salt separating the director's persistent phase/pacing stream from other
@@ -18,6 +19,21 @@ import { Emitter } from '../core/events';
 const PHASE_STREAM_SALT = 0x0dd1f33d >>> 0;
 
 export type Phase = 'calm' | 'build' | 'peak' | 'release';
+
+/**
+ * Per-run temperament mount (F48). When present, every phase-enter
+ * duration routes through persona.adjustPhase, peak tension through a
+ * per-peak adjustIntensity draw, and window-event chances through
+ * persona.windowEventChance — all over the persona's dedicated pacing
+ * stream so same-seed runs replay identically. Omitted (tests, legacy
+ * hosts) means exact passthrough of the generic pacing curves.
+ */
+export interface DirectorPersona {
+  /** Run temperament selected by persona.temperamentForRun(seed). */
+  temperament: Temperament;
+  /** Dedicated stream from persona.pacingRngFor(seed, temperament). */
+  pacingRng: RNG;
+}
 
 /**
  * Payloads published on HorrorDirector.events under the 'directorEvent'
@@ -99,15 +115,48 @@ export class HorrorDirector {
   /** Persistent phase/pacing stream; identical seed ⇒ identical pacing. */
   private readonly pacingRng: RNG;
 
+  /** F48: per-run temperament mount; null keeps the generic curves. */
+  private readonly persona: DirectorPersona | null;
+
+  /** Consecutive build cycles that ended without a peak (persona context). */
+  private noPeakStreak = 0;
+
+  /** Intensity multiplier drawn once at peak entry; 1 without a persona. */
+  private peakIntensityMul = 1;
+
   /**
    * @param host Pacing hooks the director drives.
    * @param seed Run seed; all pacing derives from it deterministically.
    * @param rng Optional injected stream (tests); defaults to one derived
    *            from `seed` so same-seed replays are identical.
+   * @param persona Optional F48 temperament mount; without it the generic
+   *                pacing curves pass through untouched.
    */
-  constructor(private host: DirectorHost, private seed: number, rng?: RNG) {
+  constructor(private host: DirectorHost, private seed: number, rng?: RNG, persona?: DirectorPersona) {
     this.pacingRng = rng ?? new RNG((seed ^ PHASE_STREAM_SALT) >>> 0);
+    this.persona = persona ?? null;
     this.phaseDur = this.pacingRng.range(70, 130);
+  }
+
+  /**
+   * Route one phase-enter duration through the temperament table. Without
+   * a persona this is the identity; with one, draws come from the persona's
+   * dedicated stream (caller-owned draw order preserved).
+   */
+  private personaDuration(phase: Phase, baseSec: number): number {
+    if (!this.persona) return baseSec;
+    return adjustPhase(phase, baseSec, this.persona.temperament, this.persona.pacingRng, {
+      safetyStreak: this.noPeakStreak,
+    });
+  }
+
+  /**
+   * Scale a window-event chance through the temperament's window-rate
+   * appetite; identity without a persona.
+   */
+  private personaChance(baseChancePerSec: number): number {
+    if (!this.persona) return baseChancePerSec;
+    return windowEventChance(baseChancePerSec, this.persona.temperament);
   }
 
   notifyDiscovery(): void {
@@ -119,38 +168,46 @@ export class HorrorDirector {
     switch (this.phase) {
       case 'calm': {
         this.tension = Math.max(0, this.tension - dt * 0.05);
-        if (this.phaseT > this.phaseDur) this.enter('build', this.pacingRng.range(35, 90));
+        if (this.phaseT > this.phaseDur) {
+          this.enter('build', this.personaDuration('build', this.pacingRng.range(35, 90)));
+        }
         break;
       }
       case 'build': {
         this.tension = Math.min(0.75, (this.phaseT / this.phaseDur) * 0.75);
-        if (this.pacingRng.chance(dt * 0.06)) this.host.killNearbyLight();
-        if (this.pacingRng.chance(dt * 0.04)) this.host.distantThreat();
+        if (this.pacingRng.chance(this.personaChance(dt * 0.06))) this.host.killNearbyLight();
+        if (this.pacingRng.chance(this.personaChance(dt * 0.04))) this.host.distantThreat();
         if (this.phaseT > this.phaseDur) {
           const rng = new RNG((this.seed ^ Math.floor(this.host.elapsed() * 1000)) >>> 0);
-          if (rng.chance(0.55)) this.enter('peak', 12 + rng.next() * 14);
-          else this.enter('release', 40 + rng.next() * 50);
+          if (rng.chance(0.55)) this.enter('peak', this.personaDuration('peak', 12 + rng.next() * 14));
+          else this.enter('release', this.personaDuration('release', 40 + rng.next() * 50));
         }
         break;
       }
       case 'peak': {
-        this.tension = 0.85 + Math.sin(this.phaseT * 3) * 0.1;
+        // F48: peak tension runs through the per-peak intensity multiplier
+        // drawn at enter('peak'); clamped to the same 0..1 proxy range.
+        this.tension = Math.min(1, Math.max(0, this.peakIntensityMul * (0.85 + Math.sin(this.phaseT * 3) * 0.1)));
         if (this.phaseT < dt * 2) {
           const blackoutSec = this.pacingRng.range(3, 8);
           this.host.blackoutPulse(blackoutSec);
           // When this blackout lifts, the lights come back warm (falseDawn).
           this.falseDawnPendingAt = this.host.elapsed() + blackoutSec;
           this.host.requestEntitySpawn('watcher');
-          if (this.pacingRng.chance(0.35)) this.host.nonEuclideanNudge();
-          if (this.pacingRng.chance(0.4)) this.host.armDoorwayLoop(75);
+          if (this.pacingRng.chance(this.personaChance(0.35))) this.host.nonEuclideanNudge();
+          if (this.pacingRng.chance(this.personaChance(0.4))) this.host.armDoorwayLoop(75);
         }
-        if (this.pacingRng.chance(dt * 0.2)) this.host.whisperSurge();
-        if (this.phaseT > this.phaseDur) this.enter('release', this.pacingRng.range(50, 120));
+        if (this.pacingRng.chance(this.personaChance(dt * 0.2))) this.host.whisperSurge();
+        if (this.phaseT > this.phaseDur) {
+          this.enter('release', this.personaDuration('release', this.pacingRng.range(50, 120)));
+        }
         break;
       }
       case 'release': {
         this.tension = Math.max(0, 0.4 - this.phaseT * 0.05);
-        if (this.phaseT > this.phaseDur) this.enter('calm', this.pacingRng.range(60, 140));
+        if (this.phaseT > this.phaseDur) {
+          this.enter('calm', this.personaDuration('calm', this.pacingRng.range(60, 140)));
+        }
         break;
       }
     }
@@ -165,7 +222,19 @@ export class HorrorDirector {
 
   private enter(p: Phase, dur: number): void {
     const prev = this.phase;
-    if (p === 'peak') this.peaksUsed++;
+    if (p === 'peak') {
+      this.peaksUsed++;
+      // F48: one intensity draw per peak, reused for the whole peak so
+      // tension stays smooth instead of re-rolling every frame.
+      this.peakIntensityMul = this.persona
+        ? adjustIntensity(1, 'peak', this.persona.temperament, this.persona.pacingRng)
+        : 1;
+      this.noPeakStreak = 0;
+    } else if (prev === 'build' && p === 'release') {
+      // F48: a build that resolved without a peak grows the vindictive
+      // safety streak feeding the next build's compression.
+      this.noPeakStreak++;
+    }
     this.phase = p;
     this.phaseT = 0;
     this.phaseDur = dur;
