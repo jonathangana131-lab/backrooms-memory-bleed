@@ -63,8 +63,6 @@ const RESIDUE_LEDGER = new Set([
   'src/audio/pairvocals.ts',
   'src/audio/radio.ts',
   'src/audio/surfaces.ts',
-  'src/entities/fauna.ts', // creature vocal DSP fills
-  'src/entities/humans.ts', // walkPhase init
   'src/gfx/ceilingfan.ts',
   'src/gfx/drips.ts',
   'src/gfx/dust.ts',
