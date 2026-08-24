@@ -9,6 +9,7 @@ import { Input } from '../core/input';
 import { moveCircle, type CircleBody } from '../world/collision';
 import type { Box2 } from '../world/architect';
 import { Emitter } from '../core/events';
+import { Stamina } from './stamina';
 
 export const PLAYER_RADIUS = 0.34;
 export const EYE_STAND = 1.62;
@@ -43,6 +44,8 @@ function smoothstep01(k: number): number {
 
 export interface PlayerEvents extends Record<string, unknown> {
   footstep: { running: boolean };
+  /** F14: touchdown harder than LAND_TRIGGER_VY; vy is the impact speed. */
+  hardfall: { vy: number };
 }
 
 export class PlayerController {
@@ -58,7 +61,14 @@ export class PlayerController {
   crouching = false;
   sprinting = false;
   speed = 0;
-  stamina = 1;
+  /** F9: fatigue model — drain/regen plus the three monotone outputs. */
+  readonly staminaEngine = new Stamina();
+  /** Fatigue level in [0,1] (1 fresh → 0 winded), read by HUD + audio mounts. */
+  get stamina(): number {
+    return this.staminaEngine.level;
+  }
+  /** F14: external control-damp multiplier applied to movement this frame. */
+  inputScale = 1;
   eye = EYE_STAND;
   private bobPhase = 0;
   private idleTime = 0;
@@ -124,9 +134,8 @@ export class PlayerController {
     const canSprint = this.input.down('ShiftLeft') || this.input.down('ShiftRight');
     this.sprinting = canSprint && !this.crouching && fz > 0 && this.stamina > 0.05 && moving;
 
-    // stamina
-    if (this.sprinting) this.stamina = Math.max(0, this.stamina - dt * 0.11);
-    else this.stamina = Math.min(1, this.stamina + dt * 0.075);
+    // stamina: F9 engine owns drain/regen + breath/stride/fov outputs
+    this.staminaEngine.update(dt, { sprinting: this.sprinting });
 
     const targetSpeed = this.crouching ? 1.15 : this.sprinting ? 4.4 : 2.35;
     // momentum: real bodies have mass - speed eases toward intent instead of
@@ -142,8 +151,10 @@ export class PlayerController {
       // Babylon yaw: forward = (-sin, 0, -cos), right = (cos, 0, -sin)
       const wx = -sin * fz + cos * fx;
       const wz = -cos * fz - sin * fx;
-      const dx = wx * this.speed * dt;
-      const dz = wz * this.speed * dt;
+      // F14: fall stagger damps movement intent while the stagger runs
+      const damp = this.inputScale;
+      const dx = wx * this.speed * dt * damp;
+      const dz = wz * this.speed * dt * damp;
       moveCircle(this.body, dx, dz, colliders);
     }
 
@@ -158,6 +169,8 @@ export class PlayerController {
       // clamp always sees prevVy == 0 here, so idle standing never trips it)
       if (prevVy < LAND_TRIGGER_VY) {
         hardLanding = true;
+        // F14: publish the impact so mounts can drive stagger/blur envelopes
+        this.events.emit('hardfall', { vy: prevVy });
       }
       this.vy = 0;
     }
