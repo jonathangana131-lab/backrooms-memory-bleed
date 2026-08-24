@@ -9,8 +9,36 @@
  *      countdown so tense phases hear proportionally fewer groans
  *   4. pan + attenuation are randomized per event
  *   5. stop() silences the scheduler
+ *
+ * Standalone in Node; the TS module is bundled with esbuild so its
+ * '../core/rng' import resolves.
  */
-import { StructureGroans } from '../src/audio/groans.ts';
+import { createRequire } from 'node:module';
+import { writeFileSync, readdirSync } from 'node:fs';
+
+const require_ = createRequire(import.meta.url);
+function loadEsbuild() {
+  try {
+    return require_('esbuild');
+  } catch {
+    const pnpmDir = process.cwd() + '/node_modules/.pnpm';
+    const entry = readdirSync(pnpmDir).find((d) => d.startsWith('esbuild@'));
+    if (!entry) throw new Error('esbuild not found in node_modules');
+    return require_(pnpmDir + '/' + entry + '/node_modules/esbuild');
+  }
+}
+
+const esbuild = loadEsbuild();
+const BUILT = process.cwd() + '/test/.groans-build.mjs';
+const bundle = await esbuild.build({
+  entryPoints: [process.cwd() + '/src/audio/groans.ts'],
+  bundle: true,
+  format: 'esm',
+  target: 'es2022',
+  write: false,
+});
+writeFileSync(BUILT, bundle.outputFiles[0].text);
+const { StructureGroans } = await import('./.groans-build.mjs');
 
 // ---- minimal AudioContext mock -------------------------------------------
 let now = 1000;

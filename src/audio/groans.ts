@@ -13,12 +13,23 @@
  *   SCHEDULER   an event every 90-180 s of calm, stretched further as
  *               director tension rises — loud groans would be lost under
  *               tense soundscapes anyway, so they thin out instead.
- *   PLACEMENT   each event gets a random compass bearing and distance;
+ *   PLACEMENT   each event gets a seeded compass bearing and distance;
  *               stereo pan follows the bearing, an inverse-square
  *               falloff keeps distant structures barely breathing.
+ *
+ * All pacing and per-event rolls come from one seeded RNG stream
+ * (`(seed ^ GROANS_SALT) >>> 0`, src/core/rng.ts); only the sample-data
+ * buffer fill keeps Math.random under the DSP carve-out.
  */
 
+import { RNG } from '../core/rng';
+
 const TWO_PI = Math.PI * 2;
+
+/** Stream salt so groan pacing never correlates with other seeded systems. */
+const GROANS_SALT = 0x67726f31;
+/** Default stream seed used when no run seed reaches the constructor. */
+const DEFAULT_GROANS_SEED = 0x1c40a417;
 
 /** Inverse-square distance attenuation, unity at 5 m and closer. */
 function rolloff(dist: number): number {
@@ -41,9 +52,11 @@ interface Placement {
 export class StructureGroans {
   private readonly ctx: AudioContext;
   private readonly out: AudioNode;
+  /** Seeded stream driving every pacing/jitter roll (determinism law). */
+  private readonly rng: RNG;
 
   /** Seconds until the next structural event. */
-  private nextIn = 30 + Math.random() * 40;
+  private nextIn = 0;
   private stopped = false;
 
   /** Shared white-noise buffer for pipe knocks, built lazily. */
@@ -51,9 +64,11 @@ export class StructureGroans {
   /** Voices still sounding, so stop() can silence them immediately. */
   private readonly live = new Set<AudioScheduledSourceNode>();
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = DEFAULT_GROANS_SEED) {
     this.ctx = ctx;
     this.out = destination;
+    this.rng = new RNG((seed ^ GROANS_SALT) >>> 0);
+    this.nextIn = this.rng.range(30, 70);
   }
 
   /**
@@ -68,8 +83,8 @@ export class StructureGroans {
     // stretches produce proportionally fewer ambient groans.
     this.nextIn -= dt / (1 + 2 * tension);
     if (this.nextIn > 0) return;
-    this.nextIn = 90 + Math.random() * 90; // calm pacing: 90-180 s
-    if (Math.random() < 0.5) this.settlementGroan();
+    this.nextIn = this.rng.range(90, 180); // calm pacing: 90-180 s
+    if (this.rng.chance(0.5)) this.settlementGroan();
     else this.pipeKnocks();
   }
 
@@ -82,9 +97,9 @@ export class StructureGroans {
     this.live.clear();
   }
 
-  /** Random spot for an event: any bearing, 12-48 m out. */
+  /** Seeded spot for an event: any bearing, 12-48 m out. */
   private place(): Placement {
-    return { bearing: Math.random() * TWO_PI, dist: 12 + Math.random() * 36 };
+    return { bearing: this.rng.range(0, TWO_PI), dist: this.rng.range(12, 48) };
   }
 
   /** Register a voice so stop() can cut it short. */
@@ -105,19 +120,19 @@ export class StructureGroans {
 
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
-    const f0 = 40 + Math.random() * 40;
+    const f0 = this.rng.range(40, 80);
     // A slight downward slump reads as mass settling rather than humming.
     o.frequency.setValueAtTime(f0, t0);
-    o.frequency.exponentialRampToValueAtTime(f0 * (0.82 + Math.random() * 0.1), t0 + 4.5);
+    o.frequency.exponentialRampToValueAtTime(f0 * (0.82 + this.rng.range(0, 0.1)), t0 + 4.5);
 
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 90 + Math.random() * 160;
+    lp.frequency.value = this.rng.range(90, 250);
     lp.Q.value = 0.7;
 
     const g = ctx.createGain();
     const peak = 0.11 * rolloff(dist);
-    const decay = 2 + Math.random() * 2; // 2-4 s
+    const decay = this.rng.range(2, 4); // 2-4 s
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.linearRampToValueAtTime(peak, t0 + 0.5); // slow attack
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5 + decay);
@@ -136,13 +151,13 @@ export class StructureGroans {
     const t0 = ctx.currentTime;
     const first = this.place();
     // One shared resonance: it is the same wave moving down the pipe.
-    const baseFreq = 700 + Math.random() * 1500;
+    const baseFreq = this.rng.range(700, 2200);
     this.knock(t0, first.bearing, first.dist, baseFreq);
 
     // The pressure wave moves off: further away, duller, drifting pan.
-    const dist2 = first.dist + 10 + Math.random() * 20;
-    const bearing2 = first.bearing + (Math.random() - 0.5) * 0.5;
-    this.knock(t0 + 0.5 + Math.random() * 0.15, bearing2, dist2, baseFreq);
+    const dist2 = first.dist + this.rng.range(10, 30);
+    const bearing2 = first.bearing + this.rng.range(-0.25, 0.25);
+    this.knock(t0 + this.rng.range(0.5, 0.65), bearing2, dist2, baseFreq);
   }
 
   /** One metallic bang: resonant bandpassed noise burst, fast decay. */
@@ -160,7 +175,7 @@ export class StructureGroans {
 
     const g = ctx.createGain();
     const peak = 0.09 * rolloff(dist);
-    const dur = 0.09 + Math.random() * 0.09;
+    const dur = this.rng.range(0.09, 0.18);
     g.gain.setValueAtTime(0.0001, at);
     g.gain.linearRampToValueAtTime(peak, at + 0.004);
     g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
@@ -179,6 +194,7 @@ export class StructureGroans {
       const len = Math.max(1, Math.floor(this.ctx.sampleRate * 0.25));
       const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = buf.getChannelData(0);
+      // audio DSP buffer fill (white noise source) — sim PRNG law carve-out
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
       this.noiseBuf = buf;
     }
