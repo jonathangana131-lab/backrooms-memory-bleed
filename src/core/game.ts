@@ -45,6 +45,7 @@ import { AnomalySystem, type AnomalyHost } from '../director/anomalies';
 import { ChunkDeltas } from '../world/chunkDeltas';
 import { RealityErosion } from '../director/erosion';
 import { HumanManager } from '../entities/manager';
+import { RoachEcosystem, type RoachGrid, type CabinetSite, type SpawnCandidate } from '../entities/roaches';
 import { StorySystem } from '../story/story';
 // Wave A: pure logic modules (no Scene, no AudioContext)
 import { SettingsManager, type GameSettings } from '../ui/settings';
@@ -168,6 +169,13 @@ const COMPASS_WELL_MIN_INTENSITY = 0.25;
 const JOURNAL_RESTYLE_SEC = 1;
 /** F96: opacity lost per unit of glyph-break probability at full break. */
 const JOURNAL_OPACITY_LOSS_PER_BREAK = 0.15;
+
+/** F31: fixed simulation step for roach ecosystem ticks (seed-replayable). */
+const ROACH_TICK_SEC = 0.5;
+/** F31: metres from a food-store prop its food signal reaches. */
+const ROACH_FOOD_RADIUS_M = 6;
+/** F31: hard cap on cabinet fixtures offered to one run's ecosystem. */
+const ROACH_CABINET_CAP = 64;
 
 /** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
 function presetToQualityNum(q: string): number {
@@ -454,6 +462,12 @@ export class Game {
   consumedBatteries = new Set<string>();
   private pathHistory: { x: number; z: number; t: number }[] = [];
   private pathSampleTimer = 0;
+  /** F31: this run's roach ecosystem (null until chunk data is loaded). */
+  private roachEco: RoachEcosystem | null = null;
+  /** F31: seconds until the next deferred spawn attempt. */
+  private roachSpawnTimer = 0;
+  /** F31: fixed-step accumulator for roach doTick(). */
+  private roachAccumulatorSec = 0;
   private attract = { x: 8, z: 8, t: 0 };
   private loopArmedUntil = 0;
   /** Spatial-anomaly runtime; rebuilt with the director on every run. */
@@ -1154,6 +1168,11 @@ export class Game {
     // F50: fresh fire-exit gate per run (one seeded roll chain, one latch)
     this.exitVoid = new ExitVoidTracker(this.seed);
     this.exitVoidTaken = false;
+    // F31: fresh ecosystem per run — spawn defers until chunk data streams
+    // in (frame loop), so the moisture scan sees real world geometry.
+    this.roachEco = null;
+    this.roachSpawnTimer = 0;
+    this.roachAccumulatorSec = 0;
     // F100: never carry a credits walk into a fresh expedition
     this.cancelCreditsWalk();
     // near-miss telemetry + adrenaline arming reset with the fresh run
@@ -2160,6 +2179,29 @@ export class Game {
           console.warn('[bmb] fauna update failed', e);
         }
       }
+      // ---- Mount batch G (F31): roach ecosystems on the adapted chunk
+      // grid. Spawn defers until world data streams in; ticks run on a
+      // ROACH_TICK_SEC fixed-step accumulator so population dynamics stay
+      // seed-replayable regardless of frame rate.
+      if (!this.roachEco) {
+        this.roachSpawnTimer -= dt;
+        if (this.roachSpawnTimer <= 0) {
+          this.roachSpawnTimer = 2;
+          this.spawnRoachEcosystem();
+        }
+      } else {
+        this.roachAccumulatorSec += dt;
+        while (this.roachAccumulatorSec >= ROACH_TICK_SEC) {
+          this.roachAccumulatorSec -= ROACH_TICK_SEC;
+          try {
+            this.roachEco.doTick();
+          } catch (e) {
+            console.warn('[bmb] roach tick failed', e);
+            this.roachAccumulatorSec = 0;
+            break;
+          }
+        }
+      }
       // record the wake you leave behind (the double walks it back to you)
       this.pathSampleTimer -= dt;
       if (this.pathSampleTimer <= 0) {
@@ -3057,6 +3099,91 @@ export class Game {
       deepestM: Math.round(deepestM),
       discoveries: this.story.discoveries,
     };
+  }
+
+  // ---------- F31: roach ecosystems ----------
+
+  /**
+   * F31 grid adaptation — chunk layout data mapped onto the RoachGrid the
+   * ecosystem consumes. The mapping (single-floor v1, y is unused):
+   *  - moistureAt: every puddle instance (the architect's damp floors in
+   *    transit/hospital corridors and around the laundry washers) radiates
+   *    moisture with linear falloff across three puddle radii, scaled to a
+   *    0.9 peak; standing inside a LAUNDRY landmark chunk adds a flat 0.65.
+   *    Unloaded chunks and dry rooms read 0.
+   *  - foodAt: vending machines, coolers and crates read as food stores —
+   *    full strength at the prop and gone by ROACH_FOOD_RADIUS_M. All
+   *    other props read 0.
+   * Both are pure reads of deterministic per-(seed, chunk) layout data,
+   * so identical runs see identical grids.
+   */
+  private roachMoistureAt(x: number, _y: number, z: number): number {
+    let m = 0;
+    for (const l of this.chunks.loadedLayouts()) {
+      if (l.landmark === 'LAUNDRY') {
+        const cxw = l.cx * CHUNK_SIZE + CHUNK_SIZE / 2;
+        const czw = l.cz * CHUNK_SIZE + CHUNK_SIZE / 2;
+        if (Math.abs(x - cxw) < CHUNK_SIZE && Math.abs(z - czw) < CHUNK_SIZE) m = Math.max(m, 0.65);
+      }
+      for (const p of l.puddles) {
+        const d = Math.hypot(p.x - x, p.z - z);
+        m = Math.max(m, Math.max(0, 1 - d / (p.r * 3)) * 0.9);
+      }
+    }
+    return m;
+  }
+
+  /** F31 food mapping: see roachMoistureAt for the documented adaptation. */
+  private roachFoodAt(x: number, _y: number, z: number): number {
+    let f = 0;
+    for (const l of this.chunks.loadedLayouts()) {
+      for (const p of l.props) {
+        if (p.kind !== 'vending' && p.kind !== 'cooler' && p.kind !== 'crate') continue;
+        const d = Math.hypot(p.x - x, p.z - z);
+        f = Math.max(f, Math.max(0, 1 - d / ROACH_FOOD_RADIUS_M));
+      }
+    }
+    return f;
+  }
+
+  /**
+   * F31: hatch this run's ecosystem once chunk data exists. Candidates are
+   * sampled straight from the mapped grid's moisture sources (four ring
+   * points per puddle), so spawnIn sees exactly the cells the world can
+   * actually wet; cabinets come from loaded layout props within reach.
+   */
+  private spawnRoachEcosystem(): void {
+    try {
+      const layouts = this.chunks.loadedLayouts();
+      if (layouts.length === 0) return; // world not streamed yet — retry later
+      const candidates: SpawnCandidate[] = [];
+      for (const l of layouts) {
+        for (const p of l.puddles) {
+          for (let k = 0; k < 4; k++) {
+            const ang = (k / 4) * Math.PI * 2;
+            candidates.push({ x: p.x + Math.cos(ang) * p.r, y: 0, z: p.z + Math.sin(ang) * p.r });
+          }
+        }
+      }
+      if (candidates.length === 0) return; // no moisture in view yet — retry
+      const cabinets: CabinetSite[] = [];
+      for (const l of layouts) {
+        for (const p of l.props) {
+          if (p.kind !== 'cabinet') continue;
+          cabinets.push({ id: 'cab:' + l.cx + ':' + l.cz + ':' + cabinets.length, x: p.x, y: 0, z: p.z });
+          if (cabinets.length >= ROACH_CABINET_CAP) break;
+        }
+        if (cabinets.length >= ROACH_CABINET_CAP) break;
+      }
+      const grid: RoachGrid = {
+        moistureAt: (x, y, z) => this.roachMoistureAt(x, y, z),
+        foodAt: (x, y, z) => this.roachFoodAt(x, y, z),
+      };
+      this.roachEco = RoachEcosystem.spawnIn({ grid, cabinets, seed: this.seed }, candidates);
+    } catch (e) {
+      console.warn('[bmb] roach ecosystem unavailable', e);
+      this.roachEco = null;
+    }
   }
 
   /**
