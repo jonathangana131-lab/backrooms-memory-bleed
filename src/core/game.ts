@@ -85,6 +85,8 @@ import { WhisperField } from '../audio/whisperfield';
 import { DreadSilence } from '../audio/dreadsilence';
 // F7 footstep DNA: gait classifier fed from earshot strides
 import { FootstepDNA, CLASSIFY_WINDOW, gaitSignature, type StepObservation } from '../audio/footstepdna';
+// F14 fall stagger: post-hard-fall control damp + screen blur envelope
+import { FallStagger } from '../player/fallstagger';
 // Wave B: scene pack
 import { PostFX } from '../gfx/postfx';
 import { FaunaWiring } from '../entities/faunawiring';
@@ -111,6 +113,8 @@ export type GameState = 'menu' | 'playing' | 'paused';
 
 const SPAWN_X = 1.25;
 const SPAWN_Z = 1.25;
+/** Resting vertical field-of-view (radians); F9 pulses around this base. */
+const BASE_FOV = 1.25;
 
 /** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
 function presetToQualityNum(q: string): number {
@@ -203,6 +207,10 @@ export class Game {
     lastX: number; lastZ: number; acc: number; lastStepAt: number;
     window: StepObservation[]; flagged: boolean;
   }>();
+  /** F14: hard-fall stagger driving control damp + blur veil */
+  private fallStagger = new FallStagger();
+  /** F14: lazy full-screen backdrop-blur veil (grain-overlay pattern) */
+  private staggerBlurEl: HTMLDivElement | null = null;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -319,7 +327,7 @@ export class Game {
     this.scene.ambientColor = new Color3(0.12, 0.11, 0.08);
 
     this.camera = new TargetCamera('cam', new Vector3(SPAWN_X, 1.62, SPAWN_Z), this.scene);
-    this.camera.fov = 1.25;
+    this.camera.fov = BASE_FOV;
     this.camera.minZ = 0.08;
     this.camera.maxZ = 140;
 
@@ -529,6 +537,10 @@ export class Game {
     try { this.reread = new NoteReread(); }
     catch (e) { console.warn('[bmb] NoteReread unavailable', e); }
 
+    // F14: hard falls arm the control-damp + blur stagger envelope
+    this.player.events.on('hardfall', ({ vy }) => {
+      this.fallStagger.onImpact(vy);
+    });
     this.player.events.on('footstep', ({ running }) => {
       this.audio.footstep(running);
       // mirror-steps anomaly duplicates rare footsteps 400 ms behind
@@ -687,6 +699,9 @@ export class Game {
     try { this.footstepDNA = new FootstepDNA(this.seed); }
     catch (e) { console.warn('[bmb] footstep dna unavailable', e); this.footstepDNA = null; }
     this.strideState = new WeakMap();
+    // F14: fresh stagger state per run
+    this.fallStagger = new FallStagger();
+    this.updateStaggerBlur(0);
     this.beginRun({ x: SPAWN_X, z: SPAWN_Z, yaw: Math.PI * 0.75 });
     this.player.beginWake();
     this.story.anchors(); // materialize guaranteed beacons
@@ -1300,6 +1315,8 @@ export class Game {
         playerEvents: this.player.events,
         tension: () => this.director.tension,
         blackout: () => this.playtimeSec < this.blackoutUntil,
+        // F9: winded players breathe harder — fatigue folds into tension
+        effort: () => Math.max(0, Math.min(1, (this.player.staminaEngine.breathRateMul - 1) / 0.8)),
       });
     } catch (e) { console.warn('[bmb] breath mount unavailable', e); this.breathHandle = null; }
     // ---- F2: per-district identity beds (maze/office/honeycomb/corridor/storage) ----
@@ -1321,6 +1338,21 @@ export class Game {
       this.dread = bus ? new DreadSilence(bus, { seed: (this.seed ^ 0x64726561) >>> 0 }) : null;
     } catch (e) { console.warn('[bmb] DreadSilence unavailable', e); this.dread = null; }
     this.audioModulesReady = true;
+  }
+
+  /** F14: full-screen backdrop-blur veil whose opacity tracks the stagger envelope. */
+  private updateStaggerBlur(amp: number): void {
+    if (typeof document === 'undefined') return;
+    if (!this.staggerBlurEl) {
+      const el = document.createElement('div');
+      el.id = 'bmb-stagger-blur';
+      el.style.cssText =
+        'position:fixed;inset:0;pointer-events:none;z-index:5;' +
+        'backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);opacity:0';
+      document.body.appendChild(el);
+      this.staggerBlurEl = el;
+    }
+    this.staggerBlurEl.style.opacity = String(Math.max(0, Math.min(0.85, amp)));
   }
 
   // ---------- frame ----------
@@ -1351,6 +1383,10 @@ export class Game {
       this.state === 'menu' ? this.attract.z : this.player.body.z,
     );
     this.player.update(active ? dt : 0, colliders);
+    // F14: fall-stagger control damp + screen blur envelope
+    this.player.inputScale = active ? this.fallStagger.inputScale : 1;
+    if (this.fallStagger.active) this.fallStagger.update(dt);
+    this.updateStaggerBlur(this.fallStagger.blurAmp);
 
     if (active) {
       this.mem.recordPresence(this.player.body.x, this.player.body.z, dt);
@@ -1975,6 +2011,14 @@ export class Game {
       this.camera.position.x += (shakeRng.next() - 0.5) * shakeAmt;
       this.camera.position.y += (shakeRng.next() - 0.5) * shakeAmt;
       this.camera.rotation.z += (shakeRng.next() - 0.5) * shakeAmt * 0.5;
+    }
+    // F9: exertion FOV pulse — amplitude rises as stamina drains
+    {
+      const amp = active ? this.player.staminaEngine.fovPulseAmp : 0;
+      const targetFov = amp > 0.001
+        ? BASE_FOV * (1 + 0.022 * amp * Math.sin(this.playtimeSec * 5.4))
+        : BASE_FOV;
+      if (Math.abs(this.camera.fov - targetFov) > 1e-4) this.camera.fov = targetFov;
     }
     this.ui.setStamina(this.player.stamina);
     this.ui.setBattery(this.flashlight.has ? this.flashlight.battery : null);
