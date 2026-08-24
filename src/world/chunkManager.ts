@@ -18,8 +18,12 @@ import type { GraffitiInstance, PropInstance } from './architect';
 import { hash2i, RNG, seedFromString } from '../core/rng';
 import { graffitiTilt, signGrimeRects } from './textureDressing';
 import { ChunkDeltas, applyDecorDrift } from './chunkDeltas';
+import { AgingLedger, decayStage, type AgingStageParams } from './aging';
 import type { MaterialSet } from '../gfx/materials';
 import type { MemoryField } from '../memory/field';
+
+/** Salt so aging decor draws never correlate with any other per-chunk feature. */
+const AGING_DECOR_SALT = 0xa9e6;
 
 /** Minimal surface of the story system used during chunk builds. */
 export interface StoryLike {
@@ -64,10 +68,47 @@ export class ChunkManager {
    */
   deltas: ChunkDeltas | null = null;
 
-  constructor(private scene: Scene, private mats: MaterialSet, public seed: number) {}
+  /**
+   * Revisit-decay ledger (see aging.ts, F24). Every chunk build records one
+   * visit; the resulting decay stage folds into the decor the build path
+   * generates so heavily revisited corridors visibly worsen. Accepting an
+   * external ledger lets save systems restore decay history; a fresh
+   * ledger keeps the constructor call site unchanged.
+   */
+  aging: AgingLedger;
+
+  /** Folded aging params for each currently built chunk, keyed "cx,cz". */
+  private agingByChunk = new Map<string, AgingStageParams>();
+
+  constructor(private scene: Scene, private mats: MaterialSet, public seed: number, aging?: AgingLedger) {
+    this.aging = aging ?? new AgingLedger();
+  }
 
   key(cx: number, cz: number): string {
     return cx + ',' + cz;
+  }
+
+  /**
+   * Serialize the revisit-decay ledger for persistence. Round-trips
+   * exactly through restoreLedger.
+   */
+  ledgerSnapshot(): string {
+    return this.aging.toJSON();
+  }
+
+  /**
+   * Replace the decay ledger with one built from ledgerSnapshot output.
+   * Folded params recompute on each chunk's next build, so already-built
+   * chunks keep their current look until rebuilt.
+   * @throws When the payload is malformed (see AgingLedger.fromJSON).
+   */
+  restoreLedger(json: string): void {
+    this.aging = AgingLedger.fromJSON(json);
+  }
+
+  /** Folded aging params for a built chunk, or null when not loaded. */
+  agingAt(cx: number, cz: number): AgingStageParams | null {
+    return this.agingByChunk.get(this.key(cx, cz)) ?? null;
   }
 
   reset(): void {
@@ -77,6 +118,7 @@ export class ChunkManager {
     this.pending.length = 0;
     this.fixtureCache = null;
     this.fixtureVersion++;
+    this.agingByChunk.clear();
   }
 
   update(px: number, pz: number): void {
@@ -107,6 +149,7 @@ export class ChunkManager {
       if (d > DISPOSE_RADIUS) {
         for (const m of c.meshes) m.dispose();
         this.chunks.delete(k);
+        this.agingByChunk.delete(k);
         this.fixtureCache = null;
         this.fixtureVersion++;
       }
@@ -152,10 +195,36 @@ export class ChunkManager {
   }
 
   private async buildFromLayoutInner(cx: number, cz: number, layout: ChunkLayout): Promise<void> {
+    const k = this.key(cx, cz);
     // anomaly decor drift (see chunkDeltas.ts): deterministic for a given
     // drift step, so a drifted chunk rebuilds identically until reverted
     const drift = this.deltas?.step(cx, cz) ?? 0;
     if (drift > 0) applyDecorDrift(layout.props, cx, cz, this.seed, drift);
+    // F24 aging: every build of a chunk counts as one visit; the folded
+    // decay params thicken its decor below. Deterministic per
+    // (chunkKey, visits, seed), so a rebuilt chunk shows the same decay.
+    const visits = this.aging.recordVisit(k);
+    const aging = decayStage(k, visits, this.seed);
+    this.agingByChunk.set(k, aging);
+    if (aging.stainSpreadFactor > 0 && layout.stains.length > 0) {
+      // Stain spread: grow the architect's stain set toward full coverage.
+      // The base count is chosen in architect.generateStains; this fold
+      // multiplies it where the build path finalizes decor density.
+      const arng = new RNG(hash2i(seedFromString(k), this.seed, AGING_DECOR_SALT));
+      const extra = Math.round(layout.stains.length * aging.stainSpreadFactor);
+      for (let i = 0; i < extra; i++) {
+        layout.stains.push({
+          x: (cx * CHUNK_CELLS + arng.range(0.5, CHUNK_CELLS - 0.5)) * CELL,
+          z: (cz * CHUNK_CELLS + arng.range(0.5, CHUNK_CELLS - 0.5)) * CELL,
+          r: arng.range(0.5, 1.6),
+        });
+      }
+    }
+    // crackDensityMul seam: the build path has no crack-count site to
+    // multiply - wall cracks are runtime decals driven by core/game.ts and
+    // the FloorCracks pass is not wired into buildChunkGeometry. The folded
+    // value stays exposed via agingAt() for whichever decal pass consumes
+    // it first; nothing here forces that wiring.
     if (this.consumedBatteries && this.consumedBatteries.size) {
       // coordinate-stable keys survive index shifts between builds
       layout.props = layout.props.filter((p, i) =>
@@ -271,7 +340,6 @@ export class ChunkManager {
     for (const s of layout.signs) meshes.push(this.buildSign(s));
     for (const gf of layout.graffiti) meshes.push(this.buildGraffiti(gf));
 
-    const k = this.key(cx, cz);
     const prev = this.chunks.get(k);
     if (prev) for (const m of prev.meshes) m.dispose(); // no orphaned meshes
     this.chunks.set(k, {
