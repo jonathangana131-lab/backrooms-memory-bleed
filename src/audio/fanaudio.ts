@@ -19,6 +19,7 @@ export class FanAudio {
     const len = ctx.sampleRate;
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
+    // audio DSP buffer fill (white noise source) — sim PRNG law carve-out
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     this.noiseBuf = buf;
   }
