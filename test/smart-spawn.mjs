@@ -12,10 +12,15 @@ import { writeFileSync, readdirSync } from 'node:fs';
 
 const require_ = createRequire(import.meta.url);
 function loadEsbuild() {
-  const pnpmDir = process.cwd() + '/node_modules/.pnpm';
-  const entry = readdirSync(pnpmDir).find((d) => d.startsWith('esbuild@'));
-  if (!entry) throw new Error('esbuild not found in node_modules/.pnpm');
-  return require_(pnpmDir + '/' + entry + '/node_modules/esbuild');
+  // npm layout installs esbuild at node_modules/esbuild; pnpm layout only
+  // exposes it inside the node_modules/.pnpm store. Try direct resolution
+  // first, then fall back to scanning the store.
+  try { return require_('esbuild'); } catch { /* not a directly resolvable dependency */ }
+  let entries = [];
+  try { entries = readdirSync(process.cwd() + '/node_modules/.pnpm'); } catch { /* no pnpm store directory */ }
+  const entry = entries.find((d) => d.startsWith('esbuild@'));
+  if (!entry) throw new Error('esbuild not found in node_modules/esbuild or node_modules/.pnpm');
+  return require_(process.cwd() + '/node_modules/.pnpm/' + entry + '/node_modules/esbuild');
 }
 const esbuild = loadEsbuild();
 
@@ -27,6 +32,10 @@ function check(name, ok, extra = '') {
 
 // ---- shared Babylon stubs -----------------------------------------------------
 const STUBS = process.cwd() + '/test/.smart-spawn-stubs.mjs';
+// Permissive Scene stand-in: humans.ts consults getMaterialByName for its
+// shared-material cache before creating one; the spawn-policy phase never
+// needs real materials, so always answer "none cached".
+const sceneStub = () => ({ getMaterialByName: () => null });
 const node = (name) => ({
   name,
   position: { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; } },
@@ -64,13 +73,15 @@ const result = await esbuild.build({
         const map = {
           transformNode: ['TransformNode'],
           meshBuilder: ['MeshBuilder'],
-          'standard_material': ['StandardMaterial'],
+          'standardMaterial': ['StandardMaterial'],
           'math.color': ['Color3'],
           'math.vector': ['Vector3'],
         };
         const names = map[mod] ?? [];
         const reexports = names.map((n) => 'export { ' + n + " } from '" + STUBS + "';").join('\n');
-        return { contents: reexports || 'export default {};', loader: 'js' };
+        // resolveDir is required for the absolute STUBS import to resolve
+        // (esbuild >= 0.21 refuses onLoad contents without a resolve directory).
+        return { contents: reexports || 'export default {};', loader: 'js', resolveDir: process.cwd() };
       });
     },
 
@@ -84,7 +95,7 @@ const { HumanManager } = await import('./.smart-spawn-build.mjs');
 
 // ---- A. backward compatibility -----------------------------------------------
 try {
-  const m = new HumanManager({});
+  const m = new HumanManager(sceneStub());
   const f = m.spawn('watcher', 40, 40, 7);
   check('spawn() returns a live figure at the requested spot', !!f && typeof f.update === 'function' && m.count === 1);
   check('legacy placement is exact on a fresh tile', f.body.x === 40 && f.body.z === 40, f.body.x + ',' + f.body.z);
@@ -92,7 +103,7 @@ try {
   check('reset() clears figures', m.count === 0);
 
   // ---- B. behavior profiling ----
-  const p = new HumanManager({});
+  const p = new HumanManager(sceneStub());
   p.update(1, 0, 0, 0, []);                    // stationary frame
   p.update(1, 8, 0, 0, [], { on: true });       // ~8 m/s: sprinting, torch on
   p.update(1, 8, 0, 0, [], { on: true });       // holding still, torch on
@@ -105,7 +116,7 @@ try {
     prof.confidence > 0.5 && prof.cautiousness < 0.5,
     'c=' + prof.confidence.toFixed(2) + ' k=' + prof.cautiousness.toFixed(2));
 
-  const q = new HumanManager({});
+  const q = new HumanManager(sceneStub());
   for (let i = 0; i < 6; i++) q.update(1, 0, 0, 0, []);
   const qp = q.getPlayerProfile();
   check('stationary/torch-off profile reads as cautious', qp.cautiousness > qp.confidence,
@@ -116,7 +127,7 @@ try {
 
 // ---- C. adaptive difficulty ----------------------------------------------------
 try {
-  const m = new HumanManager({});
+  const m = new HumanManager(sceneStub());
   m.setDifficultyBias(0); // aggressive: watchers pull close
   check('bias 0 scales distances down (0.7x)', Math.abs(m.scaledDistance(20) - 14) < 1e-9, String(m.scaledDistance(20)));
   m.setDifficultyBias(1); // passive: everything pushed far
@@ -144,7 +155,7 @@ try {
 
 // ---- D. spawn memory ------------------------------------------------------------
 try {
-  const m = new HumanManager({});
+  const m = new HumanManager(sceneStub());
   m.clock = 0;
   m.spawn('watcher', 50, 50, 1);
   check('fresh spawn recorded in memory', m.recentlySpawned('watcher', 50, 50));
@@ -166,7 +177,7 @@ try {
 
 // ---- E. group dynamics -----------------------------------------------------------
 try {
-  const m = new HumanManager({});
+  const m = new HumanManager(sceneStub());
   m.clock = 0;
   m.spawn('watcher', 60, 60, 11);
   m.spawn('watcher', 63, 60, 12); // pair within 15m -> cluster
@@ -177,7 +188,7 @@ try {
   check('smartSpawn honors variety enforcement', smart.type !== 'watcher', smart.type);
   check('smartSpawn places the diversified figure', m.count === 3 && m.figures.includes(smart.figure));
 
-  const far = new HumanManager({});
+  const far = new HumanManager(sceneStub());
   far.spawn('watcher', 0, 0, 21);
   far.spawn('watcher', 40, 0, 22); // 40m apart: no cluster
   check('same-type pair beyond 15m is not a cluster', !far.isTypeClustered('watcher'));
