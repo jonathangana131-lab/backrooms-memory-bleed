@@ -36,7 +36,7 @@
  */
 import type { Engine } from '@babylonjs/core/Engines/engine';
 import type { Scene } from '@babylonjs/core/scene';
-import type { BaseTexture } from '@babylonjs/core/Materials/Textures/texture';
+import type { BaseTexture } from '@babylonjs/core/Materials/Textures/baseTexture';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { ColorCurves } from '@babylonjs/core/Materials/colorCurves';
 import { DefaultRenderingPipeline } from '@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline';
@@ -314,7 +314,7 @@ export function applyRenderClarity(
       try {
         bt.anisotropicFilteringLevel = aniso;
         if (bt.samplingMode === Texture.NEAREST_SAMPLINGMODE) {
-          bt.samplingMode = Texture.TRILINEAR_SAMPLINGMODE;
+          (bt as { samplingMode: number }).samplingMode = Texture.TRILINEAR_SAMPLINGMODE;
           report.samplingUpgraded++;
         }
         report.texturesTouched++;
@@ -357,7 +357,10 @@ export function applyRenderClarity(
   }
 
   // -- grain: default OFF --
-  const ipc = scene.imageProcessingConfiguration;
+  // grain fields are version-dependent on ImageProcessingConfiguration; go
+  // through the same structural bag lighting.ts uses when it enables them.
+  const ipc = scene.imageProcessingConfiguration as unknown as Record<string, number | boolean>;
+  const ipcCfg = scene.imageProcessingConfiguration; // typed view for curve binding
   try {
     ipc.grainEnabled = false;
   } catch {
@@ -392,8 +395,8 @@ export function applyRenderClarity(
           curves.globalHue = g.hue;
           curves.globalDensity = g.density;
           curves.globalSaturation = g.saturation;
-          ipc.colorCurves = curves;
-          ipc.colorCurvesEnabled = true;
+          ipcCfg.colorCurves = curves;
+          ipcCfg.colorCurvesEnabled = true;
           report.gradeBand = band;
         } catch {
           // curve binding unsupported - canonical colors remain untouched
