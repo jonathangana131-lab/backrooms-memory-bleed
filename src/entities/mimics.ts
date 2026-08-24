@@ -132,6 +132,26 @@ export class MimicProps {
   }
 
   /**
+   * Register one prop anchor mid-session (chunk-streamed spawns). The
+   * per-mimic draw streams extend in insertion order, so the same spawn
+   * script replays identically under the determinism law.
+   */
+  addProp(p: PropAnchor): void {
+    const i = this.mimics.length;
+    this.mimics.push({
+      index: i,
+      id: p.id ?? 'mimic:' + i,
+      x: p.x,
+      z: p.z,
+      revealed: false,
+      frozen: false,
+      gazeHeldSec: 0,
+    });
+    this.wobblePhase.push(this.rng.range(0, Math.PI * 2));
+    this.nextWobbleAt.push(this.rng.range(0, WOBBLE_PERIOD_SEC));
+  }
+
+  /**
    * Advance one frame. For each mimic: sample observation (gaze OR close
    * direct view), latch the reveal flag, freeze iff observed, otherwise
    * creep toward the player at CREEP_SPEED with a seeded heading wobble.
