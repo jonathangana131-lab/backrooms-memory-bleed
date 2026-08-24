@@ -10,6 +10,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { TargetCamera } from '@babylonjs/core/Cameras/targetCamera';
+import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { Input } from './input';
 import { seedFromString, hash2i, RNG } from './rng';
 import { moveCircle, hasLineOfSight } from '../world/collision';
@@ -33,6 +34,8 @@ import { SaveDB, type SaveSlot, type SettingsData } from '../save/db';
 import { MemoryField, MemoryKind, MEMORY_NAMES, sectorName } from '../memory/field';
 import { MemoryWeather } from '../memory/weather';
 import { HorrorDirector, type DirectorHost } from '../director/director';
+import { AnomalySystem, type AnomalyHost } from '../director/anomalies';
+import { ChunkDeltas } from '../world/chunkDeltas';
 import { RealityErosion } from '../director/erosion';
 import { HumanManager } from '../entities/manager';
 import { StorySystem } from '../story/story';
@@ -66,6 +69,12 @@ import { StructureGroans } from '../audio/groans';
 import { CrowdAmbience } from '../audio/crowd';
 import { LoreStings } from '../audio/loresting';
 import { BatteryCues } from '../audio/batterycue';
+import { VentAudio } from '../audio/vents';
+import { ElevatorAmbience } from '../audio/elevator';
+import { ElectricPops } from '../audio/electricpop';
+import { FanSpeedAudio, type FanSpeedState } from '../audio/fanspeeds';
+import { CabinetCreaks } from '../audio/cabinetcreak';
+import { EchoSites } from '../audio/echoes';
 import { FanAudio } from '../audio/fanaudio';
 // Wave B: scene pack
 import { PostFX } from '../gfx/postfx';
@@ -87,7 +96,7 @@ import { SaveScreen } from '../ui/savescreen';
 import { WatcherIntroController } from '../story/watcherintro';
 import { PhotoGallery } from '../ui/gallery';
 import { formatExtended, type ExtendedStats } from '../ui/endstatsext';
-import { chunkFogDensity } from '../gfx/fogvariation';
+import { createFogVariation } from '../gfx/fogvariation';
 
 export type GameState = 'menu' | 'playing' | 'paused';
 
@@ -160,6 +169,12 @@ export class Game {
   private crowd: CrowdAmbience | null = null;
   private loreStings: LoreStings | null = null;
   private batteryCues: BatteryCues | null = null;
+  private vents: VentAudio | null = null;
+  private elevatorAmb: ElevatorAmbience | null = null;
+  private electricPops: ElectricPops | null = null;
+  private fanSpeedAudio: FanSpeedAudio | null = null;
+  private cabinetCreaks: CabinetCreaks | null = null;
+  private echoSites: EchoSites | null = null;
   private fanAudio: FanAudio | null = null;
 
   // ---- Wave B (B-2) scene pack ----
@@ -204,6 +219,8 @@ export class Game {
   private beaconsAtLastWalk = 0;
 
   // ---- Wave B chunk-built / per-chunk bookkeeping ----
+  /** continuous fog sampler: puddle low areas + contamination murk */
+  private fogVar = createFogVariation();
   /** chunk keys already announced to the fauna spawn lottery */
   private knownChunkKeys = new Set<string>();
   private lastChunksBuiltSeen = 0;
@@ -237,6 +254,12 @@ export class Game {
   private pathSampleTimer = 0;
   private attract = { x: 8, z: 8, t: 0 };
   private loopArmedUntil = 0;
+  /** Spatial-anomaly runtime; rebuilt with the director on every run. */
+  private anomalies: AnomalySystem | null = null;
+  /** Reversible per-chunk mutation ledger feeding the anomaly decor drift. */
+  private readonly deltas = new ChunkDeltas();
+  /** Stand-in point light the migrating-lights anomaly steers around. */
+  private ghostLight: PointLight | null = null;
   private lastBlackoutVisual = false;
   private prevCell: { x: number; z: number } | null = null;
   /** fixtures forced ON during blackouts, key -> until-seconds */
@@ -301,6 +324,13 @@ export class Game {
     this.chunks = new ChunkManager(this.scene, this.mats, 1);
     this.chunks.consumedBatteries = this.consumedBatteries;
     this.chunks.discoveredLandmarks = this.seenLandmarks;
+    this.chunks.deltas = this.deltas;
+    // the migrating-lights anomaly steers this detached fixture light;
+    // parked out of the world until an anomaly claims it
+    this.ghostLight = new PointLight('ghost-migrant', new Vector3(0, -100, 0), this.scene);
+    this.ghostLight.diffuse = new Color3(1.0, 0.97, 0.86);
+    this.ghostLight.intensity = 0;
+    this.ghostLight.range = 11;
     this.dust = new DustMotes(this.scene);
     this.humans = new HumanManager(this.scene);
     this.humans.onWatcherVanish = () => {
@@ -445,6 +475,8 @@ export class Game {
       elapsed: () => this.playtimeSec,
     };
     this.director = new HorrorDirector(host, this.seed);
+    this.anomalies?.dispose();
+    this.anomalies = new AnomalySystem(this.anomalyHost(), this.seed, this.director.events);
     this.story = new StorySystem(this.scene, this.seed);
 
     // ---- Wave A (A-2b/A-2c/A-5a): text/state machines + day drift ----
@@ -461,6 +493,8 @@ export class Game {
 
     this.player.events.on('footstep', ({ running }) => {
       this.audio.footstep(running);
+      // mirror-steps anomaly duplicates rare footsteps 400 ms behind
+      this.anomalies?.noteFootstep(running);
       // Integration: district/puddle-aware footstep material.
       try {
         if (this.surfaceFootsteps && this.surfaceDetector) {
@@ -671,6 +705,10 @@ export class Game {
       playerPosition: () => ({ x: this.player.body.x, z: this.player.body.z }),
       elapsed: () => this.playtimeSec,
     }, this.seed);
+    this.anomalies?.dispose();
+    this.anomalies = new AnomalySystem(this.anomalyHost(), this.seed, this.director.events);
+    this.deltas.revertAll(); // a fresh expedition finds the canonical world
+    if (this.ghostLight) { this.ghostLight.intensity = 0; this.ghostLight.position.set(0, -100, 0); }
     this.loopArmedUntil = 0;
     this.prevCell = null;
     // Wave A: per-run resets for pure-logic state machines
@@ -779,6 +817,45 @@ export class Game {
     this.forceDeadLights.add(best.x + ',' + best.z);
     this.audio.lightCrack();
     return true;
+  }
+
+  /** Plain-data view of the game the anomaly system is allowed to touch. */
+  private anomalyHost(): AnomalyHost {
+    return {
+      playerPosition: () => ({ x: this.player.body.x, z: this.player.body.z }),
+      playerYaw: () => this.player.yaw,
+      elapsed: () => this.playtimeSec,
+      blackoutActive: () => this.playtimeSec < this.blackoutUntil,
+      edgeCodeBetweenCell: (fx, fz, tx, tz) => this.chunks.edgeCodeBetweenCell(fx, fz, tx, tz),
+      teleportPlayer: (x, z) => {
+        // build the immediate area synchronously so we never land in void,
+        // then resolve against destination walls like nonEuclideanNudge
+        for (let i = 0; i < 4; i++) this.chunks.update(x, z);
+        this.player.teleport(x, z, this.player.yaw);
+        moveCircle(this.player.body, 0, 0, this.chunks.collidersAround(x, z));
+      },
+      bumpChunkDrift: (cx, cz) => {
+        this.deltas.bump(cx, cz);
+        this.chunks.rebuildChunk(cx, cz); // no-op when the chunk is not loaded
+      },
+      nearestAliveFixture: (x, z, maxDist) => {
+        let best: { x: number; z: number; key: string } | null = null;
+        let bd = maxDist * maxDist;
+        for (const f of this.chunks.allFixtures()) {
+          if (!f.alive) continue;
+          const d = (f.x - x) ** 2 + (f.z - z) ** 2;
+          if (d < bd) { bd = d; best = { x: f.x, z: f.z, key: f.x + ',' + f.z }; }
+        }
+        return best;
+      },
+      setGhostLight: (x, z, intensity) => {
+        if (!this.ghostLight) return;
+        this.ghostLight.position.set(x, 2.86, z);
+        this.ghostLight.intensity = intensity;
+      },
+      echoFootstep: (pan, volumeMul) => this.audio.echoFootstep(pan, 0, volumeMul),
+      say: (text, seconds) => this.ui.say(text, seconds),
+    };
   }
 
   private nonEuclideanNudge(): void {
@@ -1073,15 +1150,31 @@ export class Game {
     const key = pcx + ':' + pcz;
     if (key === this.prevAudioChunk) return;
     this.prevAudioChunk = key;
-    if (this.fanAudio) {
+    if (this.cabinetCreaks) {
+      const cabs: { x: number; z: number }[] = [];
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const layout = this.chunks.layoutAt(pcx + dx, pcz + dz);
+          if (!layout) continue;
+          for (const p of layout.props) {
+            if (p.kind === 'cabinet') cabs.push({ x: p.x, z: p.z });
+          }
+        }
+      }
+      try { this.cabinetCreaks.setCabinets(cabs); }
+      catch (e) { console.warn('[bmb] cabinet feed failed', e); }
+    }
+    if (this.fanSpeedAudio || this.fanAudio) {
       // deterministic stand-in until the fan mesh wiring lands: ~57% of
       // chunks host a spinning ceiling fan, speed rolled per chunk
       const roll = hash2i(pcx, pcz, 0xfa17) % 7;
-      const revs = (roll === 3) ? 1.7 : (roll === 5) ? 2.6 : (roll === 1 || roll === 4 || roll === 6) ? 0.9 : 0;
-      if (revs > 0) {
-        try { this.fanAudio.setSpeed(revs); }
-        catch (e) { console.warn('[bmb] fan speed feed failed', e); }
-      }
+      const states: FanSpeedState[] = ['SLOW', 'OFF', 'OFF', 'MEDIUM', 'SLOW', 'FAST', 'MEDIUM'];
+      const state = states[roll] ?? 'OFF';
+      try { this.fanSpeedAudio?.setState(state); }
+      catch (e) { console.warn('[bmb] fan state feed failed', e); }
+      const revs = state === 'OFF' ? 0 : state === 'SLOW' ? 0.9 : state === 'MEDIUM' ? 1.7 : 2.6;
+      try { this.fanAudio?.setSpeed(revs); }
+      catch (e) { console.warn('[bmb] fan speed feed failed', e); }
     }
   }
 
@@ -1112,14 +1205,26 @@ export class Game {
     catch (e) { console.warn('[bmb] DoorCreaks unavailable', e); this.doorCreaks = null; }
     try { this.groans = new StructureGroans(ctx, dest); }
     catch (e) { console.warn('[bmb] StructureGroans unavailable', e); this.groans = null; }
+    try { this.vents = new VentAudio(ctx, dest); }
+    catch (e) { console.warn('[bmb] VentAudio unavailable', e); this.vents = null; }
+    try { this.elevatorAmb = new ElevatorAmbience(ctx, dest); }
+    catch (e) { console.warn('[bmb] ElevatorAmbience unavailable', e); this.elevatorAmb = null; }
     try { this.crowd = new CrowdAmbience(ctx, dest); }
     catch (e) { console.warn('[bmb] CrowdAmbience unavailable', e); this.crowd = null; }
     try { this.loreStings = new LoreStings(ctx, dest); }
     catch (e) { console.warn('[bmb] LoreStings unavailable', e); this.loreStings = null; }
     try { this.batteryCues = new BatteryCues(ctx, dest); }
     catch (e) { console.warn('[bmb] BatteryCues unavailable', e); this.batteryCues = null; }
+    try { this.electricPops = new ElectricPops(ctx, dest); }
+    catch (e) { console.warn('[bmb] ElectricPops unavailable', e); this.electricPops = null; }
     try { this.fanAudio = new FanAudio(ctx, dest); }
     catch (e) { console.warn('[bmb] FanAudio unavailable', e); this.fanAudio = null; }
+    try { this.fanSpeedAudio = new FanSpeedAudio(ctx, dest); }
+    catch (e) { console.warn('[bmb] FanSpeedAudio unavailable', e); this.fanSpeedAudio = null; }
+    try { this.cabinetCreaks = new CabinetCreaks(ctx, dest); }
+    catch (e) { console.warn('[bmb] CabinetCreaks unavailable', e); this.cabinetCreaks = null; }
+    try { this.echoSites = new EchoSites(ctx, dest); }
+    catch (e) { console.warn('[bmb] EchoSites unavailable', e); this.echoSites = null; }
     // ---- Wave B (B-2m): fauna skitter voice joins the shared graph ----
     try { this.fauna?.attachAudio(ctx); }
     catch (e) { console.warn('[bmb] fauna audio unavailable', e); }
@@ -1222,9 +1327,21 @@ export class Game {
       this.lighting.setWeatherTint(this.weather.fogTint(), dt);
       // scars: more relocations = heavier permanent vignette
       this.lighting.setVignetteWeight(2.6 + Math.min(3, this.erosion.relocations * 0.8));
+      // contamination atmosphere: reconstruction zones breathe denser, warmer murk
+      {
+        const layouts = this.chunks.loadedLayouts();
+        this.fogVar.updateContamSet(layouts.map((l) => ({ cx: l.cx, cz: l.cz, intensity: l.memIntensity })));
+        this.fogVar.updatePuddleSet(layouts.flatMap((l) => l.puddles));
+        this.lighting.setContamination(
+          this.fogVar.multiplierAt(this.player.body.x, this.player.body.z),
+          this.fogVar.warmthAt(this.player.body.x, this.player.body.z),
+        );
+      }
       const dist = this.chunks.districtAtPos(this.player.body.x, this.player.body.z);
       if (dist !== null) this.lighting.setDistrictFog(dist, dt);
       this.director.update(dt);
+      // spatial anomalies: consume director windows, drive the wrongness
+      this.anomalies?.update(dt);
       // Wave A (A-2c): ambient story beats surface as quiet observations.
       if (this.beats) {
         try {
@@ -1353,6 +1470,8 @@ export class Game {
         sprinting: this.player.sprinting,
       });
       if (verdict && verdict.relocate) {
+        try { this.echoSites?.markSite(this.player.body.x, this.player.body.z); }
+        catch (e) { console.warn('[bmb] echo site mark failed', e); }
         const ang = Math.random() * Math.PI * 2;
         const dist = 220 + Math.random() * 200;
         const nx = this.player.body.x + Math.cos(ang) * dist;
@@ -1390,6 +1509,8 @@ export class Game {
       // armed doorway loop: the next door you pass through repeats itself
       const cell = { x: Math.floor(this.player.body.x / CELL_SIZE), z: Math.floor(this.player.body.z / CELL_SIZE) };
       if (this.prevCell && (cell.x !== this.prevCell.x || cell.z !== this.prevCell.z)) {
+        // spatial anomalies watch every crossing too (deja-vu, stretch feed)
+        this.anomalies?.noteCellCrossing(this.prevCell.x, this.prevCell.z, cell.x, cell.z);
         const code = this.chunks.edgeCodeBetweenCell(this.prevCell.x, this.prevCell.z, cell.x, cell.z);
         if (code === 2) {
           this.audio.doorway();
@@ -1554,9 +1675,21 @@ export class Game {
       try { this.groans.update(dt, tension); }
       catch (e) { console.warn('[bmb] structure groans update failed', e); }
     }
+    if (this.vents) {
+      try { this.vents.update(dt, bDistrict, focus.x, focus.z); }
+      catch (e) { console.warn('[bmb] vent audio update failed', e); }
+    }
+    if (this.elevatorAmb) {
+      try { this.elevatorAmb.update(dt, bDistrict); }
+      catch (e) { console.warn('[bmb] elevator ambience update failed', e); }
+    }
     if (this.crowd) {
       try { this.crowd.update(dt, bDistrict, tension); }
       catch (e) { console.warn('[bmb] crowd ambience update failed', e); }
+    }
+    if (this.echoSites) {
+      try { this.echoSites.update(dt, focus.x, focus.z); }
+      catch (e) { console.warn('[bmb] echo sites update failed', e); }
     }
     if (this.batteryCues) {
       try {
@@ -1564,9 +1697,21 @@ export class Game {
         this.batteryCues.update(this.flashlight.battery, charging);
       } catch (e) { console.warn('[bmb] battery cues update failed', e); }
     }
+    if (this.electricPops) {
+      try { this.electricPops.update(dt); }
+      catch (e) { console.warn('[bmb] electric pops update failed', e); }
+    }
     if (this.fanAudio) {
       try { this.fanAudio.update(dt); }
       catch (e) { console.warn('[bmb] fan audio update failed', e); }
+    }
+    if (this.fanSpeedAudio) {
+      try { this.fanSpeedAudio.update(dt); }
+      catch (e) { console.warn('[bmb] fan speed audio update failed', e); }
+    }
+    if (this.cabinetCreaks) {
+      try { this.cabinetCreaks.update(dt, focus.x, focus.z); }
+      catch (e) { console.warn('[bmb] cabinet creaks update failed', e); }
     }
     // lore stings: cluster-complete sting when the story arc advances
     if (this.loreStings && this.story.stage !== this.prevArcStage) {
