@@ -4,3 +4,8 @@ shots/
 *.log
 
 
+
+# test transpile artifacts
+test/**/.*gen.mjs
+test/**/.*build.mjs
+test/**/*-build/
