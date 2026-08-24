@@ -22,9 +22,20 @@
  *
  * Everything routes through per-voice muffle filters at quiet levels -
  * these sounds never belong to this place, they only leak in.
+ *
+ * All pacing and per-event rolls come from one seeded RNG stream
+ * (`(seed ^ EXTERIOR_SALT) >>> 0`, src/core/rng.ts); only sample-data
+ * buffer fills keep Math.random under the DSP carve-out.
  */
 
+import { RNG } from '../core/rng';
+
 const TWO_PI = Math.PI * 2;
+
+/** Stream salt so exterior pacing never correlates with other seeded systems. */
+const EXTERIOR_SALT = 0x45585401;
+/** Default stream seed used when no run seed reaches the constructor. */
+const DEFAULT_EXTERIOR_SEED = 0x1e57a7c5;
 
 /**
  * How much of the outside each memory zone lets through. Domestic and
@@ -71,13 +82,15 @@ interface RainLayer {
 export class ExteriorBleed {
   private readonly ctx: AudioContext;
   private readonly out: AudioNode;
+  /** Seeded stream driving every pacing/jitter roll (determinism law). */
+  private readonly rng: RNG;
 
   /** Seconds until the next birdsong sequence. */
-  private nextBirdIn = 8 + Math.random() * 20;
+  private nextBirdIn = 0;
   /** Seconds until the next traffic whoosh. */
-  private nextTrafficIn = 20 + Math.random() * 50;
+  private nextTrafficIn = 0;
   /** Seconds until the next fragment of children playing. */
-  private nextChildrenIn = 40 + Math.random() * 80;
+  private nextChildrenIn = 0;
   private stopped = false;
 
   /** Shared white-noise buffer for traffic and rain, built lazily. */
@@ -87,9 +100,13 @@ export class ExteriorBleed {
   /** Voices still sounding, so stop() can silence them immediately. */
   private readonly live = new Set<AudioScheduledSourceNode>();
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = DEFAULT_EXTERIOR_SEED) {
     this.ctx = ctx;
     this.out = destination;
+    this.rng = new RNG((seed ^ EXTERIOR_SALT) >>> 0);
+    this.nextBirdIn = this.rng.range(8, 28);
+    this.nextTrafficIn = this.rng.range(20, 70);
+    this.nextChildrenIn = this.rng.range(40, 120);
   }
 
   /**
@@ -112,7 +129,7 @@ export class ExteriorBleed {
     if (tension < 0.45) {
       this.nextBirdIn -= dt / (1 + tension);
       if (this.nextBirdIn <= 0) {
-        this.nextBirdIn = 45 + Math.random() * 75; // calm pacing: 45-120 s
+        this.nextBirdIn = this.rng.range(45, 120); // calm pacing: 45-120 s
         this.birdsong(bleed);
       }
     } else {
@@ -123,13 +140,13 @@ export class ExteriorBleed {
     // Traffic and children still leak under tension, just further apart.
     this.nextTrafficIn -= dt / (1 + tension);
     if (this.nextTrafficIn <= 0) {
-      this.nextTrafficIn = 180 + Math.random() * 240; // rare: 3-7 min
+      this.nextTrafficIn = this.rng.range(180, 420); // rare: 3-7 min
       this.trafficPass(bleed);
     }
 
     this.nextChildrenIn -= dt / (1 + 2 * tension);
     if (this.nextChildrenIn <= 0) {
-      this.nextChildrenIn = 600 + Math.random() * 300; // very rare: 10-15 min
+      this.nextChildrenIn = this.rng.range(600, 900); // very rare: 10-15 min
       this.childrenPlaying(bleed);
     }
 
@@ -150,9 +167,9 @@ export class ExteriorBleed {
     this.live.clear();
   }
 
-  /** Random spot for an event: any bearing, 8-30 m beyond the wall. */
+  /** Seeded spot for an event: any bearing, 8-30 m beyond the wall. */
   private place(): Placement {
-    return { bearing: Math.random() * TWO_PI, dist: 8 + Math.random() * 22 };
+    return { bearing: this.rng.range(0, TWO_PI), dist: this.rng.range(8, 30) };
   }
 
   /** Register a voice so stop() can cut it short. */
@@ -175,7 +192,7 @@ export class ExteriorBleed {
     const ctx = this.ctx;
     const t0 = ctx.currentTime;
     const { bearing, dist } = this.place();
-    const chirps = 2 + Math.floor(Math.random() * 3); // 2-4
+    const chirps = this.rng.int(2, 5); // 2-4
 
     // The wall between us and the impossible garden.
     const muffle = ctx.createBiquadFilter();
@@ -193,16 +210,16 @@ export class ExteriorBleed {
     // Vibrato LFO is shared by every chirp of this one bird.
     const lfo = ctx.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.value = 18 + Math.random() * 22; // fast trill rate
+    lfo.frequency.value = this.rng.range(18, 40); // fast trill rate
     const lfoDepth = ctx.createGain();
-    lfoDepth.gain.value = 120 + Math.random() * 180; // Hz of wobble
+    lfoDepth.gain.value = this.rng.range(120, 300); // Hz of wobble
     lfo.connect(lfoDepth);
     lfo.start(t0);
 
     let at = t0 + 0.05;
     for (let i = 0; i < chirps; i++) {
       at = this.chirp(at, lfoDepth, seqGain, rolloff(dist) * bleed);
-      at += 0.08 + Math.random() * 0.16; // gap between chirps
+      at += this.rng.range(0.08, 0.24); // gap between chirps
     }
     this.track(lfo, at);
   }
@@ -212,15 +229,15 @@ export class ExteriorBleed {
     const ctx = this.ctx;
     const o = ctx.createOscillator();
     o.type = 'sine';
-    const f1 = 2000 + Math.random() * 1500;
-    const f2 = 2000 + Math.random() * 2000;
+    const f1 = this.rng.range(2000, 3500);
+    const f2 = this.rng.range(2000, 4000);
     o.frequency.setValueAtTime(f1, at);
     o.frequency.exponentialRampToValueAtTime(f2, at + 0.09);
     lfoDepth.connect(o.frequency); // vibrato rides the sweep
 
     const g = ctx.createGain();
     const peak = 0.045 * level; // quiet even before the wall eats it
-    const dur = 0.07 + Math.random() * 0.06;
+    const dur = this.rng.range(0.07, 0.13);
     g.gain.setValueAtTime(0.0001, at);
     g.gain.linearRampToValueAtTime(peak, at + 0.012);
     g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
@@ -253,9 +270,9 @@ export class ExteriorBleed {
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
     bp.Q.value = 0.9;
-    const fLow = 140 + Math.random() * 80;
-    const fHigh = fLow + 260 + Math.random() * 240;
-    const dur = 2 + Math.random() * 2; // 2-4 s
+    const fLow = this.rng.range(140, 220);
+    const fHigh = fLow + this.rng.range(260, 500);
+    const dur = this.rng.range(2, 4); // 2-4 s
     bp.frequency.setValueAtTime(fLow, t0);
     bp.frequency.linearRampToValueAtTime(fHigh, t0 + dur * 0.5);
     bp.frequency.linearRampToValueAtTime(fLow * 0.85, t0 + dur);
@@ -273,7 +290,7 @@ export class ExteriorBleed {
 
     // Pass-by drift: starts off one side, exits the other.
     const p = ctx.createStereoPanner();
-    const dir = Math.random() < 0.5 ? 1 : -1;
+    const dir = this.rng.chance(0.5) ? 1 : -1;
     p.pan.setValueAtTime(-0.8 * dir, t0);
     p.pan.linearRampToValueAtTime(0.8 * dir, t0 + dur);
 
@@ -306,10 +323,10 @@ export class ExteriorBleed {
 
     deep.connect(p).connect(this.out);
 
-    const fragments = 2 + Math.floor(Math.random() * 2); // 2-3 calls
+    const fragments = this.rng.int(2, 4); // 2-3 calls
     let at = t0 + 0.1;
     for (let i = 0; i < fragments; i++) {
-      at = this.childCall(at, deep, bleed) + 0.25 + Math.random() * 0.5;
+      at = this.childCall(at, deep, bleed) + this.rng.range(0.25, 0.75);
     }
   }
 
@@ -320,10 +337,10 @@ export class ExteriorBleed {
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
     // Voice fundamentals pitched up ~1.5x: small, quick, not-quite-words.
-    const base = 420 + Math.random() * 280;
+    const base = this.rng.range(420, 700);
     o.frequency.setValueAtTime(base, at);
-    o.frequency.linearRampToValueAtTime(base * (1.35 + Math.random() * 0.3), at + 0.12);
-    o.frequency.linearRampToValueAtTime(base * (0.95 + Math.random() * 0.2), at + 0.24);
+    o.frequency.linearRampToValueAtTime(base * (1.35 + this.rng.range(0, 0.3)), at + 0.12);
+    o.frequency.linearRampToValueAtTime(base * (0.95 + this.rng.range(0, 0.2)), at + 0.24);
 
     // Two vowel-ish formants above the fundamental, scaled up with it.
     const scale = base / 500;
@@ -338,7 +355,7 @@ export class ExteriorBleed {
 
     const g = ctx.createGain();
     const peak = 0.03 * bleed; // barely there, even at full bleed
-    const dur = 0.22 + Math.random() * 0.12;
+    const dur = this.rng.range(0.22, 0.34);
     g.gain.setValueAtTime(0.0001, at);
     g.gain.linearRampToValueAtTime(peak, at + 0.04);
     g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
@@ -406,6 +423,7 @@ export class ExteriorBleed {
       const len = Math.max(1, Math.floor(this.ctx.sampleRate * 0.25));
       const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = buf.getChannelData(0);
+      // audio DSP buffer fill (white noise source) — sim PRNG law carve-out
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
       this.noiseBuf = buf;
     }
