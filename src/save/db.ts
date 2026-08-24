@@ -30,6 +30,21 @@ export interface SaveSlot {
   /** downsampled movement trail from the previous session (max ~200) */
   pathEcho?: { x: number; z: number }[];
   story?: { stage: number; discoveries: number; found: [number, number, boolean][] };
+  /** F26: photographs taken of the Archivist, keyed by run id; the tally
+   * drives the next session's reaction tier (see entities/archivist.ts). */
+  archivistEncounters?: Record<string, number>;
+  /** F32: Custodian night count + removal ledger so erased markings stay
+   * gone across sessions (see entities/custodian.ts). */
+  custodian?: {
+    version: 1;
+    nights: number;
+    removals: {
+      markingId: string; chunkKey: string; kind: string;
+      appliedSession: number; nightOrdinal: number; removedAtNightTime: number;
+    }[];
+  };
+  /** F66: prior-session decision sites the Double cites and revisits. */
+  choices?: { id: string; kind: string; x: number; z: number }[];
 }
 
 export interface SettingsData {
