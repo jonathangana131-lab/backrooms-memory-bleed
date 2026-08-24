@@ -397,34 +397,64 @@ class StorageIsland implements Island {
  * the same update(dt, district, tension) feed; call seed() once per run so
  * the office phone placements hash deterministically, and feed listener
  * position so phones can detect earshot.
+ *
+ * Construction is fully lazy: nothing touches the AudioContext until the
+ * first update() frame, and the five islands are then built together in
+ * fixed district order so island i always belongs to district i.
  */
 export class AreaIdentityBeds {
-  private readonly islands: Island[];
-  private readonly office: OfficeIsland;
+  private islands: Island[] | null;
+  private office: OfficeIsland | null;
+  private readonly destination: AudioNode;
   private enabled = true;
   private stopped = false;
-  private readonly builtFlags: boolean[];
+  private builtFlags: boolean[];
+  /** seed()/setListener() values arriving before the first update() frame. */
+  private pendingSeed: number | null = null;
+  private pendingListener: readonly [number, number] | null = null;
 
   private readonly ctx: AudioContext;
 
   constructor(ctx: AudioContext, destination: AudioNode) {
     this.ctx = ctx;
-    this.office = new OfficeIsland(ctx, destination);
+    this.destination = destination;
+    this.islands = null;
+    this.office = null;
+    this.builtFlags = [];
+  }
+
+  /**
+   * Build every island exactly once, in district order, on first use.
+   * Islands live here rather than in the constructor so a mounted-but-not-
+   * yet-ticking beds instance never allocates audio nodes.
+   */
+  private ensureIslands(): Island[] {
+    if (this.islands) return this.islands;
+    // Construct strictly in district order — callers index gates by district.
+    const maze = new MazeIsland(this.ctx, this.destination);
+    const office = new OfficeIsland(this.ctx, this.destination);
     this.islands = [
-      new MazeIsland(ctx, destination),
-      this.office,
-      new HoneycombIsland(ctx, destination),
-      new CorridorIsland(ctx, destination),
-      new StorageIsland(ctx, destination),
+      maze,
+      office,
+      new HoneycombIsland(this.ctx, this.destination),
+      new CorridorIsland(this.ctx, this.destination),
+      new StorageIsland(this.ctx, this.destination),
     ];
+    this.office = office;
+    if (this.pendingSeed !== null) office.seed(this.pendingSeed);
+    if (this.pendingListener) office.listener = this.pendingListener;
     this.builtFlags = this.islands.map(() => false);
+    return this.islands;
   }
 
   /**
    * Bind the office phone placements to the session seed.
    * @param seed session/world seed
    */
-  seed(seed: number): void { this.office.seed(seed); }
+  seed(seed: number): void {
+    if (this.office) this.office.seed(seed);
+    else this.pendingSeed = seed;
+  }
 
   /**
    * Feed the listener position used for earshot checks (office phones).
@@ -432,13 +462,15 @@ export class AreaIdentityBeds {
    * @param z player world z
    */
   setListener(x: number, z: number): void {
-    this.office.listener = [x, z];
+    const pos: readonly [number, number] = [x, z];
+    if (this.office) this.office.listener = pos;
+    else this.pendingListener = pos;
   }
 
-  /** Kill-switch: false fades every island out immediately. */
+  /** Kill-switch: false fades every open gate out immediately. */
   setEnabled(on: boolean): void {
     this.enabled = on;
-    if (!on) {
+    if (!on && this.islands) {
       const t = this.ctx.currentTime;
       for (const island of this.islands) island.gate.gain.setTargetAtTime(0, t, 0.02);
     }
@@ -452,9 +484,10 @@ export class AreaIdentityBeds {
    */
   update(dt: number, district: number, tension = 0): void {
     if (this.stopped || !this.enabled) return;
+    const islands = this.ensureIslands();
     const t = this.ctx.currentTime;
-    for (let i = 0; i < this.islands.length; i++) {
-      const island = this.islands[i];
+    for (let i = 0; i < islands.length; i++) {
+      const island = islands[i];
       const active = island.district === district;
       island.gate.gain.setTargetAtTime(active ? 1 : 0, t, GATE_TAU);
       if (!active) continue;
@@ -470,6 +503,6 @@ export class AreaIdentityBeds {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
-    for (const island of this.islands) island.stop();
+    if (this.islands) for (const island of this.islands) island.stop();
   }
 }
