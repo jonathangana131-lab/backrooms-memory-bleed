@@ -8,7 +8,7 @@ import '@babylonjs/core/Engines/Extensions/engine.dynamicTexture';
 import '@babylonjs/core/Engines/WebGPU/Extensions/engine.dynamicTexture';
 import { Scene } from '@babylonjs/core/scene';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { TargetCamera } from '@babylonjs/core/Cameras/targetCamera';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { Input } from './input';
@@ -21,7 +21,7 @@ import { ChunkManager } from '../world/chunkManager';
 import { PlayerController } from '../player/controller';
 import { Flashlight } from '../player/flashlight';
 import { DustMotes } from '../gfx/dust';
-import type { HumanType } from '../entities/humans';
+import { attachClipboardProp, HumanFigure, type HumanType } from '../entities/humans';
 import { AudioEngine } from '../audio/audio';
 import { SelfRadio, type FeedEntry } from '../audio/selfradio';
 import { VoiceMemoStore, ZONE_GEN_MAX } from '../audio/voicememo';
@@ -85,9 +85,9 @@ import { createStainGrowth, type StainGrowth } from '../world/stains-growth';
 import { createGraffitiEvolution, type GraffitiEvolution } from '../world/graffiti-evolution';
 import { DayCycle } from '../gfx/daycycle';
 import { EmergencyWiring } from '../gfx/emergency-wiring';
-import { HeatShimmer } from '../gfx/heatshimmer';
+import { HeatShimmer, MAX_SHIMMER_ZONES, shimmerIntensity, type FixtureScreen } from '../gfx/heatshimmer';
 import { PhotoMode } from '../ui/photomode';
-import { CHUNK_SIZE } from '../world/constants';
+import { CHUNK_SIZE, WALL_H } from '../world/constants';
 // Wave B: audio pack (ctx-gated, constructed in ensureAudioIntegrations())
 import { DoorCreaks } from '../audio/doors';
 import { StructureGroans } from '../audio/groans';
@@ -159,9 +159,32 @@ import { FlickerBattery } from '../player/flickerbattery';
 import { GossipSource, type VisitedSite } from '../entities/gossip';
 import { LyingCompass, type MemoryWell } from '../ui/lyingcompass';
 import { degradationIndex, entryJournalFont } from '../ui/journalfont';
+// Social-entity mounts (F26/F32/F61): archivist, custodian, chapel hymn
+import { Archivist, ARCHIVIST_STORE_PREFIX, reactionForPhotos } from '../entities/archivist';
+import { CustodianWiring, parseGraffitiMarkingId, type GraffitiHit } from '../entities/custodian';
+import { ChapelChoir, HYMN_CHOIR_COUNT, type ChapelAnchor } from '../entities/hymn';
+import type { DiscoveryEntry } from '../audio/hymn';
+import { CartSqueaks } from '../audio/cartsqueak';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { Ray } from '@babylonjs/core/Culling/ray';
+// F47: date-derived shared daily seed + discovery checklist
+import { DailyRite } from '../ui/dailyrite';
+// F49: independent accessibility pack effectors (zero-when-off guarantees)
+import { createAccessibilityPack, type AccessibilityPack } from '../ui/accessibilitypack';
+// F93: diegetic menu projection math + textured wall plane
+import { faceTowards, type MenuContent, type WallPlane } from '../ui/diegmenus';
+import { WallMenuPlane } from '../ui/wallmenu';
+// F97: stamped bureaucratic achievement forms
+import { FormToasts, type FormDocumentLike, type FormElementLike } from '../ui/formtoasts';
+import { setAchievementToastSink } from '../ui/tracker-wiring';
+// F27: coordinated multi-watcher stalks at story stage >= 3
+import { WatcherPack, STAGE_GATE, type PackInput } from '../entities/watcherpacks';
+// F28: furniture mimics - crate/chair/locker entities frozen while observed
+import { MimicPropWiring, type MimicPropAnchor, type MimicVariant } from '../entities/mimicwiring';
+// F66: doppelganger letters drafted over the recorded choice ledger
+import { DoubleLetters, CHOICE_KINDS, type ChoiceLedgerEntry, type ChoiceKind, type DoppelLetter } from '../story/doubleletters';
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'credits';
 
@@ -173,12 +196,51 @@ const TILT_MAX_RAD = (5 * Math.PI) / 180;
 /** F29: per-run salt for the gossip RNG, so identical seeds replay identically. */
 const GOSSIP_SALT = 0x60a55;
 
+/** F26: camera range inside which a capture counts as photographing the Archivist. */
+const SOCIAL_PHOTO_RANGE_M = 14;
+/** F61: distance from the chapel inside which hymn lines surface as captions. */
+const SOCIAL_CHOIR_EARSHOT_M = 26;
+
 /** F94: seconds between coarse memory-well sweeps of the neighborhood. */
 const COMPASS_RESAMPLE_SEC = 2;
 /** F94: coarse sample-grid spacing in meters for well detection. */
 const COMPASS_WELL_GRID_M = 15;
 /** F94: minimum memory intensity for a grid sample to count as a well. */
 const COMPASS_WELL_MIN_INTENSITY = 0.25;
+
+/** F97: bureaucratic REQUEST text printed on each achievement's form. */
+const ACHIEVEMENT_FORM_REQUESTS: Readonly<Record<string, string>> = {
+  first_steps: 'RECOGNITION_OF_MOTION',
+  first_beacon: 'VERIFICATION_OF_SIGNAL',
+  half_way: 'PARTIAL_SURVEY_CREDIT',
+  all_beacons: 'FULL_SURVEY_CERTIFICATION',
+  landmark_visitor: 'ROOM_TOURISM_PERMIT',
+  note_collector: 'ARCHIVAL_READING_LICENSE',
+  survivor: 'EXTENDED_STAY_WAIVER',
+  threshold_crosser: 'PERMIT_TO_LEAVE',
+};
+
+/** F93: menu content projected onto the title-screen wall. */
+const TITLE_WALL_MENU: MenuContent = {
+  id: 'title-wall',
+  title: 'BACKROOMS: MEMORY BLEED',
+  items: [
+    { id: 'new', label: 'NEW EXPEDITION' },
+    { id: 'continue', label: 'CONTINUE' },
+    { id: 'settings', label: 'SETTINGS' },
+  ],
+};
+
+/** F93: menu content projected onto the pause wall. */
+const PAUSE_WALL_MENU: MenuContent = {
+  id: 'pause-wall',
+  title: 'SIGNAL HELD',
+  items: [
+    { id: 'resume', label: 'RESUME' },
+    { id: 'settings', label: 'SETTINGS' },
+    { id: 'quit', label: 'SAVE & QUIT' },
+  ],
+};
 
 /** F96: seconds between journal-hand restyles of an open note body. */
 const JOURNAL_RESTYLE_SEC = 1;
@@ -209,6 +271,10 @@ const WAKE_POS_Y_MID_M = 0.85;
 const WAKE_LOOK_GAIN_RAD = 0.08;
 /** F91: radians of lens breath per unit of normalized staged fov deviation. */
 const WAKE_FOV_GAIN_RAD = 0.35;
+
+/** Wave C: local +Z fed to camera direction queries (same convention the
+ *  compass marker cull uses for world-space forward). */
+const CAMERA_FORWARD = new Vector3(0, 0, 1);
 
 /** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
 function presetToQualityNum(q: string): number {
@@ -401,6 +467,34 @@ export class Game {
   /** Scroll speed of the credits column, px per walk-second. */
   private static readonly CREDITS_PX_PER_SEC = 64;
 
+  // ---- F27 watcher packs ----
+  /** F27: live coordinated stalk over a subset of the watcher population. */
+  private watcherPack: WatcherPack | null = null;
+  /** F27: figures driving the pack, indexed by stable pack member id. */
+  private packMembers: HumanFigure[] = [];
+  /** F27: seconds until another pack may form after one dissolves. */
+  private packCooldownSec = 30;
+
+  // ---- F28 mimic props ----
+  /** F28: furniture-mimic wiring rebuilt with each run. */
+  private mimicWiring: MimicPropWiring | null = null;
+  /** F28: chunk keys already rolled for a mimic spawn this run. */
+  private mimicRolledChunks = new Set<string>();
+  /** F28: seconds until the next chunk-stream spawn roll (1 s cadence). */
+  private mimicRollTimer = 0;
+
+  // ---- F66 doppelganger letters ----
+  /** F66: decision ledger keyed by choice id; feeds letter drafting. */
+  private choiceSites = new Map<string, { id: string; kind: ChoiceKind; x: number; z: number }>();
+  /** F66: sites restored from save meta awaiting their letter delivery. */
+  private pendingLetters = new Map<string, DoppelLetter>();
+  /** F66: drafter over the choice ledger; rebuilt when the ledger grows. */
+  private doubleLetters: DoubleLetters | null = null;
+  /** F66: ledger size the current drafter was built over (-1 = none). */
+  private lettersBuiltRev = -1;
+  /** F66: seconds until the next proximity sweep for letter delivery. */
+  private letterTickTimer = 0;
+
   // ---- Batch C mounts (F29/F94/F96) ----
   /** F29: landmark visit ledger keyed by landmark name; entries are replaced
    * on revisit so lastVisitedAt always carries the freshest occupancy tick. */
@@ -419,6 +513,31 @@ export class Game {
   private journalFontTimer = 0;
   /** F96: stable page id (note coords) seeding the per-entry hand wobble. */
   private journalEntryId = 'note:unread';
+
+  // ---- Social entity mounts (F26/F32/F61) ----
+  /** F26: this session's Archivist sim; mounted lazily once landmarks stream in. */
+  private archivist: Archivist | null = null;
+  /** F26: visual-only clipboard figure driven by the sim body, never self-updated. */
+  private archivistFigure: HumanFigure | null = null;
+  /** F26: photos per run id; mirrors the save slot's archivistEncounters meta. */
+  private readonly archivistPhotos = new Map<string, number>();
+  /** F26: run id this session's encounters are recorded under. */
+  private archivistRunId = '';
+  /** F32: overnight removal pass over the live graffiti marking ledger. */
+  private custodianWiring: CustodianWiring | null = null;
+  /** F32: ids of markings removed ever; feeds ChunkManager.removedGraffiti so
+   * erasures survive chunk rebuilds and session loads. */
+  private readonly custodianRemovedKeys = new Set<string>();
+  /** F32: true while the day cycle sits inside its night stretch. */
+  private custodianNightActive = false;
+  /** F32: cart-squeak loop voices (ctx-gated like the Wave-B audio pack). */
+  private cartSqueaks: CartSqueaks | null = null;
+  /** F61: choir at the first streamed-in CHAPEL landmark. */
+  private chapelChoir: ChapelChoir | null = null;
+  /** F61: discovery-ledger revision the choir's lyric pool was built over. */
+  private choirBuiltRev = -1;
+  /** F61: visual-only believer figures parked on the choir seats. */
+  private readonly choirFigures: HumanFigure[] = [];
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -442,6 +561,22 @@ export class Game {
   private tracker: Tracker | null = null;
   private trackerFeed: TrackerFeed | null = null;
   private trackerTimer = 0;
+  // ---- F47/F49/F93/F97 meta-UI mounts ----
+  /** F47: today's shared-seed rite (checklist model + rollover clock). */
+  private dailyRite: DailyRite | null = null;
+  /** F47: session stats already reported into the active rite day. */
+  private dailyNotesReported = 0;
+  private dailyLandmarksReported = 0;
+  private wasBlackoutForRite = false;
+  private dailyTickTimer = 0;
+  /** F97: stamped-form toast queue fed by achievement unlocks. */
+  private forms: FormToasts | null = null;
+  /** F49: composed pack rebuilt whenever settings or a11y flags change. */
+  private a11yPack: AccessibilityPack | null = null;
+  /** F93: title/pause menu projections on in-world walls. */
+  private wallTitle: WallMenuPlane | null = null;
+  private wallPause: WallMenuPlane | null = null;
+  private wallMenuTimer = 0;
   private checkpointsMgr: CheckpointManager | null = null;
   private saveScreen: SaveScreen | null = null;
   private watcherIntro: WatcherIntroController | null = null;
@@ -643,6 +778,8 @@ export class Game {
     }
     this.chunks = new ChunkManager(this.scene, this.mats, 1);
     this.chunks.consumedBatteries = this.consumedBatteries;
+    // F32: the build filter consults the same set the Custodian drains into
+    this.chunks.removedGraffiti = this.custodianRemovedKeys;
     this.chunks.discoveredLandmarks = this.seenLandmarks;
     this.chunks.deltas = this.deltas;
     // the migrating-lights anomaly steers this detached fixture light;
@@ -772,6 +909,71 @@ export class Game {
       }
     } catch (e) {
       console.warn('[bmb] settings panel unavailable', e);
+    }
+
+    // ---- F47/F49/F93/F97: meta-UI mounts ----
+    // F47 daily rite: shared UTC-date seed + persisted checklist model.
+    try {
+      const g = globalThis as {
+        localStorage?: { getItem(key: string): string | null; setItem(key: string, value: string): void };
+      };
+      this.dailyRite = new DailyRite({
+        storage: {
+          get: (key) => (g.localStorage ? g.localStorage.getItem(key) : null),
+          set: (key, value) => {
+            try { g.localStorage?.setItem(key, value); } catch { /* quota: day stays session-local */ }
+          },
+        },
+      });
+      this.ui.setDailyRite(
+        "TODAY'S RITE \u2014 SEED 0x" +
+          (this.dailyRite.seed >>> 0).toString(16).toUpperCase().padStart(8, '0'),
+      );
+    } catch (e) {
+      console.warn('[bmb] daily rite unavailable', e);
+    }
+    // F97 stamped forms + revived tracker chain: fresh unlocks print FORMS.
+    try {
+      this.forms = new FormToasts({
+        document: document as unknown as FormDocumentLike,
+        container: document.body as unknown as FormElementLike,
+      });
+    } catch (e) {
+      console.warn('[bmb] form toasts unavailable', e);
+    }
+    try {
+      this.tracker = new Tracker(document.body);
+      setAchievementToastSink((info) => {
+        try {
+          this.forms?.push({
+            id: info.id.toUpperCase(),
+            request: ACHIEVEMENT_FORM_REQUESTS[info.id] ??
+              info.title.toUpperCase().replace(/ /g, '_'),
+          });
+        } catch { /* form routing must never break the unlock path */ }
+      });
+      this.trackerFeed = new TrackerFeed(this.tracker);
+    } catch (e) {
+      console.warn('[bmb] achievement chain unavailable', e);
+    }
+    // F49 accessibility pack: rebuilt on every settings/a11y change.
+    try {
+      this.a11yMgr?.onChange(() => {
+        try { this.applyAccessibilityPack(); }
+        catch (err) { console.warn('[bmb] a11y pack reapply failed', err); }
+      });
+      this.applyAccessibilityPack();
+    } catch (e) {
+      console.warn('[bmb] accessibility pack unavailable', e);
+    }
+    // F93 diegetic menu planes (remounted onto walls per state below).
+    try {
+      this.wallTitle = new WallMenuPlane(this.scene);
+      this.wallPause = new WallMenuPlane(this.scene);
+    } catch (e) {
+      console.warn('[bmb] wall menus unavailable', e);
+      this.wallTitle = null;
+      this.wallPause = null;
     }
 
     // ---- Wave A (A-3a): expedition debrief overlay (invoked at ending) ----
@@ -989,7 +1191,117 @@ export class Game {
       }
       this.syncingSettings = false;
     }
+    try { this.applyAccessibilityPack(); } catch { /* pack stays stale */ }
     void SaveDB.saveSettings(this.settings).catch(() => {});
+  }
+
+  /**
+   * F49: rebuild the accessibility pack from the live settings + a11y
+   * flags and rewire its effectors. Each toggle reaches exactly one
+   * consumer: motionSafety gates controller bob/sway (injected read) and
+   * the camera-shake/gravity-tilt mounts; speakerTags feeds the UI
+   * subtitle tagger; highContrast swaps the theme tokens on the root
+   * element. With every toggle off the outputs are byte-identical to the
+   * pre-pack behavior.
+   */
+  private applyAccessibilityPack(): void {
+    if (!this.settingsManager) return;
+    const gs = this.settingsManager.settings;
+    const hc = this.a11yMgr ? this.a11yMgr.options.highContrast : false;
+    const pack = createAccessibilityPack({
+      motionSafety: gs.motionSafety,
+      speakerTags: gs.speakerTags,
+      highContrast: hc,
+    });
+    this.a11yPack = pack;
+    this.player.getSettings = () => ({ motionSafety: pack.options.motionSafety });
+    this.ui.subtitleTagger = (speaker, line) => pack.tagSubtitle(speaker, line);
+    // high-contrast theme token swap on <html>
+    try {
+      const style = document.documentElement.style;
+      const palette = pack.palette();
+      if (!palette) {
+        style.removeProperty('--bmb-hc-bg-lift');
+        style.removeProperty('--bmb-hc-text-boost');
+        style.removeProperty('--bmb-hc-outline-strength');
+      } else {
+        style.setProperty('--bmb-hc-bg-lift', palette.bgLift.toFixed(3));
+        style.setProperty('--bmb-hc-text-boost', palette.textBoost.toFixed(3));
+        style.setProperty('--bmb-hc-outline-strength', palette.outlineStrength.toFixed(3));
+      }
+    } catch { /* styleless hosts keep the model-level effects */ }
+  }
+
+  /** F49 live read for the per-frame anomaly displacement mounts. */
+  private motionSafetyOn(): boolean {
+    return this.a11yPack?.options.motionSafety === true;
+  }
+
+  /**
+   * F47: report fresh discovery progress into today's rite and roll the
+   * rite over at UTC midnight. Idempotent: counters baseline at beginRun
+   * and only deltas are reported.
+   */
+  private dailyRiteTick(): void {
+    const rite = this.dailyRite;
+    if (!rite) return;
+    rite.tick();
+    if (this.notesRead > this.dailyNotesReported) {
+      const delta = this.notesRead - this.dailyNotesReported;
+      this.dailyNotesReported += delta;
+      rite.report('notes', delta);
+    }
+    if (this.seenLandmarks.size > this.dailyLandmarksReported) {
+      this.dailyLandmarksReported = this.seenLandmarks.size;
+      rite.report('landmark', 1);
+    }
+    const blackoutNow = this.playtimeSec < this.blackoutUntil;
+    if (this.wasBlackoutForRite && !blackoutNow && this.blackoutUntil > 0) {
+      rite.report('blackout', 1);
+    }
+    this.wasBlackoutForRite = blackoutNow;
+  }
+
+  /**
+   * F93: mount the active state's menu onto a wall seen by the current
+   * camera. A raycast hit supplies origin + wall normal; faceTowards()
+   * flips the readable side at the viewer; the resulting normal becomes
+   * a yaw for these axis-aligned walls. No hit falls back to a floating
+   * plane four meters ahead facing the viewer.
+   */
+  private remountDiegeticMenus(): void {
+    const menu = this.state === 'paused' ? this.wallPause : this.wallTitle;
+    const other = this.state === 'paused' ? this.wallTitle : this.wallPause;
+    other?.unmount();
+    if (!menu || (this.state !== 'menu' && this.state !== 'paused')) return;
+    const content = this.state === 'paused' ? PAUSE_WALL_MENU : TITLE_WALL_MENU;
+    menu.refresh(content, 0);
+    const cam = this.camera.position;
+    let dir = new Vector3(0, 0, 1);
+    try { dir = this.camera.getDirection(new Vector3(0, 0, 1)); } catch { /* default forward */ }
+    let mounted = false;
+    try {
+      const ray = new Ray(cam.clone(), dir.scale(10), 10);
+      const pick = this.scene.pickWithRay(
+        ray,
+        (m) => m.isEnabled() && m.isPickable && !m.name.startsWith('wallmenu'),
+      );
+      const p = pick?.pickedPoint;
+      const n = pick?.hit && pick.getNormal(true);
+      if (pick?.hit && p && n && Math.abs(n.y) < 0.5) {
+        // diegmenus mounting helpers: wrap the hit as a WallPlane and aim
+        // the readable side at the viewer before deriving the yaw.
+        const faced = faceTowards(
+          { origin: [p.x, p.y, p.z], normal: [n.x, n.y, n.z], up: [0, 1, 0] },
+          [cam.x, cam.y, cam.z],
+        );
+        menu.mountAt({ x: p.x, z: p.z }, Math.atan2(faced.normal[0], faced.normal[2]));
+        mounted = true;
+      }
+    } catch { /* picking unsupported here - fall through to floating */ }
+    if (!mounted) {
+      menu.mountAt({ x: cam.x + dir.x * 4, z: cam.z + dir.z * 4 }, Math.atan2(-dir.x, -dir.z));
+    }
   }
   /** Wave A (A-1a): map the panel-store schema onto the game's SettingsData. */
   private panelToGameSettings(gs: GameSettings): SettingsData {
@@ -1121,6 +1433,23 @@ export class Game {
       try { this.learning = DirectorLearning.deserialize(lraw); }
       catch (e) { console.warn('[bmb] director-learning save unusable', e); }
     }
+    // F26/F32: social-entity persistence — photo tallies shape the next
+    // session's Archivist mood; the removal ledger keeps erased scrawls gone.
+    const aenc = slot.archivistEncounters;
+    if (aenc) {
+      for (const [k, v] of Object.entries(aenc)) {
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          this.archivistPhotos.set(k, Math.max(0, Math.floor(v)));
+        }
+      }
+    }
+    if (slot.custodian && !this.custodianWiring) {
+      try { this.custodianWiring = CustodianWiring.restore(slot.custodian, { seed: this.seed }); }
+      catch (e) { console.warn('[bmb] custodian save unusable', e); this.custodianWiring = null; }
+      if (this.custodianWiring) {
+        for (const r of this.custodianWiring.removalLedger) this.custodianRemovedKeys.add(r.markingId);
+      }
+    }
     if (this.flashlight.has) {
       this.ui.toast('TORCH RESTORED — charge ' + Math.round(this.flashlight.battery * 100) + '% [F]', 6000);
     }
@@ -1131,6 +1460,11 @@ export class Game {
     this.chunks.seed = this.seed;
     this.chunks.reset();
     this.humans.reset();
+    this.disposeSocialFigures(); // per-run visuals remount from the fresh seed
+    this.archivist = null;
+    this.chapelChoir = null;
+    this.choirBuiltRev = -1;
+    this.custodianNightActive = false;
     this.forceDeadLights.clear();
     // Wave C: forget accumulated emergency-light chunks for the fresh run
     try { this.emergencyWiring?.reset(); }
@@ -1300,6 +1634,13 @@ export class Game {
     this.markedBeaconKeys.clear();
     this.prevMiniChunk = null;
     this.prevArcStage = this.story.stage;
+    // F47: baseline the rite counters so only fresh progress counts today.
+    this.dailyNotesReported = this.notesRead;
+    this.dailyLandmarksReported = this.seenLandmarks.size;
+    this.wasBlackoutForRite = false;
+    // F93: no diegetic projection follows you into the run.
+    this.wallTitle?.unmount();
+    this.wallPause?.unmount();
     this.player.teleport(pos.x, pos.z, pos.yaw);
     this.setState('playing');
     this.ui.showHud();
@@ -1318,6 +1659,9 @@ export class Game {
       Math.round(this.erosion.stability * 100) + '%',
     );
     this.ui.showPause();
+    // F93: project the pause menu onto the wall the player faces.
+    this.wallMenuTimer = 0;
+    try { this.remountDiegeticMenus(); } catch { /* projection is cosmetic */ }
     this.input.releaseLock();
     // Wave C (C-6): never leave the mix ducked if the intro is interrupted
     try { if (this.watcherIntro?.isActive()) this.audio.setMasterVolume(this.settings.volume); }
@@ -1329,6 +1673,7 @@ export class Game {
     if (this.state !== 'paused') return;
     this.setState('playing');
     this.ui.hidePause();
+    this.wallPause?.unmount(); // F93: take the projected menu down with the DOM one
     this.input.requestLock();
     this.audio.unlock();
   }
@@ -1345,6 +1690,7 @@ export class Game {
     this.setState('menu');
     this.story.clearMeshes();
     this.humans.reset();
+    this.disposeSocialFigures();
     this.ui.showTitle(true, Math.floor(s.playtimeSec / 60) + ' min · ' + (s.seed >>> 0).toString(16).toUpperCase().slice(0, 8));
     this.input.releaseLock();
   }
@@ -1374,6 +1720,15 @@ export class Game {
     // save/db.ts). deserialize() validates strictly, so older or malformed
     // slots fall back to a fresh model at load time.
     if (this.learning) (slot as { learning?: string }).learning = this.learning.serialize();
+    // F26: photo tallies ride the slot so the next session's Archivist comes
+    // back changed per the reaction table.
+    if (this.archivistPhotos.size > 0) {
+      slot.archivistEncounters = Object.fromEntries(this.archivistPhotos);
+    }
+    // F32: the removal ledger rides the slot so erasures survive sessions.
+    if (this.custodianWiring && this.custodianWiring.removalLedger.length > 0) {
+      slot.custodian = this.custodianWiring.serialize();
+    }
     return slot;
   }
 
@@ -1915,6 +2270,9 @@ export class Game {
     catch (e) { console.warn('[bmb] CabinetCreaks unavailable', e); this.cabinetCreaks = null; }
     try { this.echoSites = new EchoSites(ctx, dest); }
     catch (e) { console.warn('[bmb] EchoSites unavailable', e); this.echoSites = null; }
+    // ---- F32: cart-squeak approach loop joins the shared graph ----
+    try { this.cartSqueaks = new CartSqueaks(ctx, dest); }
+    catch (e) { console.warn('[bmb] CartSqueaks unavailable', e); this.cartSqueaks = null; }
     // ---- Wave B (B-2m): fauna skitter voice joins the shared graph ----
     try { this.fauna?.attachAudio(ctx); }
     catch (e) { console.warn('[bmb] fauna audio unavailable', e); }
@@ -2059,7 +2417,8 @@ export class Game {
     // F22: gravity ambivalence — inside memory-saturated zones the horizon
     // tilts toward the veer the walk history settles on. The summed roll is
     // clamped to the tilt cap (±5°) on top of the lean bound.
-    if (this.gravityTilt) {
+    // F49: motion-safety also zeroes the tilt displacement force.
+    if (this.gravityTilt && !this.motionSafetyOn()) {
       try {
         if (active && dt > 0) {
           const vx = (this.player.body.x - this.tiltPrevX) / dt;
@@ -2202,6 +2561,55 @@ export class Game {
         try { this.daycycle.update(dt, this.playtimeSec < this.blackoutUntil); }
         catch (e) { console.warn('[bmb] day cycle failed', e); }
       }
+      // Wave C world-FX: heat-shimmer feed. Project the nearest alive fixture
+      // heads to CSS-pixel rects and hand them to the DOM overlay; pure DOM
+      // work downstream, no scene or render-loop cost beyond the projection.
+      if (this.state === 'playing' && this.heatShimmer) {
+        try {
+          const rw = this.engine.getRenderWidth();
+          const rh = this.engine.getRenderHeight();
+          if (rw >= 2 && rh >= 2) {
+            const vp = this.camera.viewport.toGlobal(rw, rh);
+            const transform = this.scene.getTransformMatrix();
+            const camPos = this.camera.globalPosition;
+            const fwd = this.camera.getDirection(CAMERA_FORWARD);
+            // Tubes hang just under the ceiling plane and span one corridor cell.
+            const headY = WALL_H - 0.12;
+            const halfTubeM = CELL_SIZE / 2;
+            const fLen = Math.hypot(fwd.x, fwd.z) || 1;
+            const rightX = fwd.z / fLen;
+            const rightZ = -fwd.x / fLen;
+            const candidates: { x: number; z: number; d2: number }[] = [];
+            for (const l of this.chunks.loadedLayouts()) {
+              for (const f of l.lights.filter((f) => f.alive)) {
+                const dx = f.x - camPos.x;
+                const dz = f.z - camPos.z;
+                candidates.push({ x: f.x, z: f.z, d2: dx * dx + dz * dz });
+              }
+            }
+            candidates.sort((a, b) => a.d2 - b.d2);
+            const rects: FixtureScreen[] = [];
+            for (const c of candidates) {
+              if (rects.length >= MAX_SHIMMER_ZONES) break;
+              const wx = c.x - camPos.x;
+              const wy = headY - camPos.y;
+              const wz = c.z - camPos.z;
+              // behind-camera cull: fixture must lie in the forward half-space
+              if (wx * fwd.x + wy * fwd.y + wz * fwd.z <= 0) continue;
+              const center = Vector3.Project(new Vector3(c.x, headY, c.z), Matrix.Identity(), transform, vp);
+              if (center.z < 0 || center.z > 1) continue;
+              const endA = Vector3.Project(new Vector3(c.x - rightX * halfTubeM, headY, c.z - rightZ * halfTubeM), Matrix.Identity(), transform, vp);
+              const endB = Vector3.Project(new Vector3(c.x + rightX * halfTubeM, headY, c.z + rightZ * halfTubeM), Matrix.Identity(), transform, vp);
+              const width = Math.abs(endB.x - endA.x);
+              if (!(width > 0)) continue;
+              rects.push({ left: center.x - width / 2, top: center.y, width });
+            }
+            let intensity = 0.5; // neutral default before day-cycle phase data exists
+            if (this.daycycle) intensity = shimmerIntensity(false, this.daycycle.dayProgress());
+            this.heatShimmer.update(rects, intensity);
+          }
+        } catch (e) { console.warn('[bmb] heat shimmer feed failed', e); }
+      }
       // Wave A (A-4): world-decay stage bookkeeping.
       try { this.wallCracks?.addActivity(this.player.body.x, this.player.body.z, dt); }
       catch (e) { console.warn('[bmb] crack activity failed', e); }
@@ -2246,6 +2654,10 @@ export class Game {
         }
       }
       this.humans.update(dt, this.player.body.x, this.player.body.z, this.player.yaw, colliders, { on: this.flashlight.on });
+      // Social entities (F26/F32/F61): archivist circuit, custodian night
+      // pass + cart squeaks, chapel hymn. Guarded: flavor never breaks frames.
+      try { this.updateSocialEntities(dt, colliders); }
+      catch (e) { console.warn('[bmb] social entities failed', e); }
       // F7: footstep DNA — learn each earshot walker's gait and flag wrong
       // cadence before line of sight. Energy fractions come from the same
       // seeded archetype signature the step synth uses (documented prior).
@@ -2950,7 +3362,8 @@ export class Game {
     }
     // F75: adrenaline dumps add their own bounded hand shake on top
     shakeAmt += this.adrenaline.handShakeAmp;
-    if (shakeAmt > 0.001 && this.state === 'playing') {
+    // F49: motion-safety zeroes this anomaly displacement force entirely.
+    if (shakeAmt > 0.001 && this.state === 'playing' && !this.motionSafetyOn()) {
       // F3: camera shake jitter is a seeded draw per frame-tick (replay-stable)
       const shakeRng = new RNG(hash2i(Math.floor(this.playtimeSec * 60), 1868, this.seed));
       this.camera.position.x += (shakeRng.next() - 0.5) * shakeAmt;
@@ -3064,6 +3477,20 @@ export class Game {
         console.warn('[bmb] tracker update failed', e);
       }
     }
+    // ---- F47/F93/F97 meta pumps ----
+    this.wallMenuTimer -= dt;
+    if ((this.state === 'menu' || this.state === 'paused') && this.wallMenuTimer <= 0) {
+      this.wallMenuTimer = 2;
+      try { this.remountDiegeticMenus(); }
+      catch (e) { console.warn('[bmb] wall menu failed', e); }
+    }
+    this.dailyTickTimer -= dt;
+    if (this.dailyTickTimer <= 0) {
+      this.dailyTickTimer = 10;
+      try { this.dailyRiteTick(); }
+      catch (e) { console.warn('[bmb] daily rite failed', e); }
+    }
+    try { this.forms?.update(dt * 1000); } catch { /* forms never block the frame */ }
     // Wave C (C-8): extended-debrief telemetry accumulation
     if (active) {
       if (this.flashlight.on) this.torchLitSec += dt;
@@ -3245,6 +3672,177 @@ export class Game {
     };
   }
 
+  // ---------- Social entities (F26/F32/F61) ----------
+
+  /**
+   * Per-frame social-entity tick, called from the playing-frame path right
+   * after the human-manager update. Mounts lazily: the Archivist circuit
+   * and the chapel choir appear as their landmark chunks stream in; the
+   * Custodian runs its overnight pass only inside the day cycle's night
+   * stretch.
+   */
+  private updateSocialEntities(dt: number, colliders: readonly import('../world/architect').Box2[]): void {
+    const layouts = this.chunks.loadedLayouts();
+
+    // ---- F26 The Archivist ----
+    if (!this.archivist && layouts.some((l) => l.landmark)) this.mountArchivist(layouts);
+    if (this.archivist) {
+      this.archivist.update(dt, this.player.body.x, this.player.body.z, colliders);
+      const f = this.archivistFigure;
+      if (f) {
+        f.root.position.set(this.archivist.body.x, 0, this.archivist.body.z);
+        f.root.rotation.y = this.archivist.facingYaw;
+      }
+    }
+
+    // ---- F32 The Custodian ----
+    if (!this.custodianWiring) this.custodianWiring = new CustodianWiring({ seed: this.seed });
+    const wiring = this.custodianWiring;
+    const hits: GraffitiHit[] = [];
+    for (const l of layouts) {
+      // layouts are already filtered by removedGraffiti, so erased scrawls
+      // never re-register
+      for (const g of l.graffiti) hits.push({ cx: l.cx, cz: l.cz, x: g.x, z: g.z });
+    }
+    if (hits.length > 0) wiring.registerGraffiti(hits);
+    const night = this.daycycle?.currentPhase() === 'night';
+    if (night && !this.custodianNightActive) {
+      this.custodianNightActive = true;
+      wiring.beginNight(wiring.nightCount + 1);
+    } else if (!night && this.custodianNightActive) {
+      this.custodianNightActive = false;
+    }
+    wiring.update(night ? dt : 0);
+    for (const s of wiring.drainSqueaks()) {
+      const at = parseGraffitiMarkingId(s.markingId);
+      if (at) this.cartSqueaks?.cue(s.markingId, at);
+      this.showAudioCaption('CART'); // F32: squeak precedes every removal
+    }
+    for (const r of wiring.drainRemovals()) {
+      this.custodianRemovedKeys.add(r.markingId);
+      this.cartSqueaks?.stop(r.markingId);
+      const at = parseGraffitiMarkingId(r.markingId);
+      if (at) {
+        try { this.chunks.rebuildChunk(at.cx, at.cz); }
+        catch (e) { console.warn('[bmb] custodian rebuild failed', e); }
+        this.ui.toast('Somewhere, a wall has been scrubbed clean.', 5000);
+      }
+    }
+    this.cartSqueaks?.update(dt, this.player.body.x, this.player.body.z);
+
+    // ---- F61 The Congregation's Hymn ----
+    // Rebuild over fresh discoveries whenever the visit ledger moves, so a
+    // beacon contacted mid-session joins the lyric pool by nightfall.
+    const chapelLayout = layouts.find((l) => l.landmark === 'CHAPEL');
+    if (chapelLayout && (!this.chapelChoir || this.choirBuiltRev !== this.gossipLedgerRev)) {
+      this.mountChoir(chapelLayout);
+    }
+    if (this.chapelChoir) {
+      this.chapelChoir.update(dt);
+      const active = this.chapelChoir.active;
+      for (const f of this.choirFigures) f.root.setEnabled(active);
+      const dx = this.chapelChoir.chapel.x - this.player.body.x;
+      const dz = this.chapelChoir.chapel.z - this.player.body.z;
+      const earshot = Math.hypot(dx, dz) <= SOCIAL_CHOIR_EARSHOT_M;
+      for (const line of this.chapelChoir.drainLines()) {
+        if (earshot) this.ui.say('\u201c' + line.text + '\u201d', 4);
+      }
+    }
+  }
+
+  /**
+   * F26 mount: build one session's Archivist over a landmark circuit and an
+   * injected store that mirrors archivistPhotos into the save slot meta.
+   * Prior run tallies come from the same map, so a reloaded save returns
+   * with the mood its photographs earned.
+   */
+  private mountArchivist(layouts: ReturnType<ChunkManager['loadedLayouts']>): void {
+    const anchors = layouts
+      .filter((l) => l.landmark)
+      .slice(0, 5)
+      .map((l) => ({ x: l.cx * CHUNK_SIZE + CHUNK_SIZE / 2, z: l.cz * CHUNK_SIZE + CHUNK_SIZE / 2 }));
+    this.archivistRunId = 'r' + (this.seed >>> 0).toString(16) + '-' + Date.now().toString(36);
+    const storeKey = (key: string): string => key.slice(ARCHIVIST_STORE_PREFIX.length);
+    const store = {
+      get: (key: string): unknown => {
+        const v = this.archivistPhotos.get(storeKey(key));
+        return v === undefined ? undefined : { version: 1, photos: v };
+      },
+      set: (key: string, value: unknown): void => {
+        const photos = (value as { photos?: unknown } | null)?.photos;
+        if (typeof photos === 'number') {
+          this.archivistPhotos.set(storeKey(key), Math.max(0, Math.floor(photos)));
+        }
+      },
+    };
+    this.archivist = new Archivist({
+      landmarks: anchors.length > 0 ? anchors : [{ x: this.player.body.x + 6, z: this.player.body.z + 6 }],
+      store,
+      runId: this.archivistRunId,
+      priorRunIds: [...this.archivistPhotos.keys()],
+      seed: (this.seed ^ 0x417c1b15) >>> 0,
+    });
+    try {
+      // visual-only wanderer body carrying the clipboard prop; driven by the
+      // sim each frame, never handed to HumanManager
+      const fig = new HumanFigure('wanderer', this.scene, this.archivist.body.x, this.archivist.body.z, (this.seed ^ 0x6117c1) >>> 0);
+      attachClipboardProp(fig, this.scene);
+      this.archivistFigure = fig;
+    } catch (e) {
+      console.warn('[bmb] archivist figure unavailable', e);
+      this.archivistFigure = null;
+    }
+  }
+
+  /**
+   * F61 mount: build the chapel choir over a discovery ledger grounded in
+   * what the player actually found this run — landmark rooms entered and
+   * beacons contacted (the same real-discovery discipline as the gossip
+   * and radio feeds). Singer visuals park on the formation seats.
+   */
+  private mountChoir(chapel: { cx: number; cz: number }): void {
+    const anchor: ChapelAnchor = {
+      name: 'CHAPEL',
+      x: chapel.cx * CHUNK_SIZE + CHUNK_SIZE / 2,
+      z: chapel.cz * CHUNK_SIZE + CHUNK_SIZE / 2,
+    };
+    const discoveries: DiscoveryEntry[] = [];
+    for (const name of this.seenLandmarks) discoveries.push({ id: 'landmark:' + name, name });
+    for (const [key, b] of this.story.beacons) {
+      if (b.found) discoveries.push({ id: 'beacon:' + key, name: 'the beacon at ' + b.cx + ',' + b.cz });
+    }
+    this.chapelChoir = new ChapelChoir(
+      anchor,
+      discoveries,
+      (this.seed ^ 0x68796d) >>> 0,
+      () => (this.daycycle ? this.daycycle.dayProgress() : 0),
+    );
+    this.choirBuiltRev = this.gossipLedgerRev;
+    for (const f of this.choirFigures) f.dispose();
+    this.choirFigures.length = 0;
+    try {
+      for (let i = 0; i < HYMN_CHOIR_COUNT; i++) {
+        const seat = this.chapelChoir.seats[i];
+        const f = new HumanFigure('believer', this.scene, seat.x, seat.z, hash2i(i, 77, (this.seed ^ 0xbe1101)) >>> 0);
+        f.root.position.set(seat.x, 0, seat.z);
+        f.root.rotation.y = seat.yaw; // face the altar
+        f.root.setEnabled(false); // the service has not started yet
+        this.choirFigures.push(f);
+      }
+    } catch (e) {
+      console.warn('[bmb] choir figures unavailable', e);
+    }
+  }
+
+  /** Dispose the per-run social-entity visuals (data models survive). */
+  private disposeSocialFigures(): void {
+    if (this.archivistFigure) {
+      this.archivistFigure.dispose();
+      this.archivistFigure = null;
+    }
+    for (const f of this.choirFigures) f.dispose();
+    this.choirFigures.length = 0;
+  }
   // ---------- F34: self-tuning radio ----------
 
   /**
@@ -3300,6 +3898,21 @@ export class Game {
         3,
       );
     } catch (e) { console.warn('[bmb] voice memo capture failed', e); }
+    // F26: photographing the Archivist records an encounter under this run
+    // id; the tally lands in the save slot and shapes the NEXT session's
+    // mood per the reaction table in entities/archivist.ts.
+    if (this.archivist) {
+      const d = Math.hypot(
+        this.archivist.body.x - this.camera.position.x,
+        this.archivist.body.z - this.camera.position.z,
+      );
+      if (d <= SOCIAL_PHOTO_RANGE_M) {
+        const total = this.archivist.photograph();
+        this.archivistPhotos.set(this.archivistRunId, total);
+        this.ui.say('the lens finds the Archivist. it does not look up. (' +
+          reactionForPhotos(total) + ' · photo ' + total + ')', 4);
+      }
+    }
   }
 
   // ---------- F31: roach ecosystems ----------
@@ -3528,6 +4141,7 @@ export class Game {
       this.setState('menu');
       this.story.clearMeshes();
       this.humans.reset();
+      this.disposeSocialFigures();
       this.ui.showEnding([
         'The push-bar clicks. The door was never on any floor plan.',
         'You step into white. Not light — just white, patient and total.',
