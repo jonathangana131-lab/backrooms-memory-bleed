@@ -31,6 +31,9 @@ const DISTRICT_FOG_COLORS: Color3[] = [
 /** Weather-front tints whose fronts are wet-memory zones (TRANSIT / HOSPITAL). */
 const WET_TINTS: [number, number, number][] = [[0.92, 0.94, 1.0], [0.88, 0.97, 1.04]];
 
+/** Fog colour contamination warms toward: dense amber-brown reconstruction murk. */
+const WARM_MURK = new Color3(0.115, 0.078, 0.032);
+
 /**
  * Screen-space rain: a fixed-position div overlay of thin animated lines
  * falling under a CSS keyframe animation. Pure DOM/CSS - no shader, no
@@ -165,11 +168,27 @@ export class LightingRig {
   /** effective pre-tint fog base; setWeatherTint multiplies this */
   private effectiveFogBase = this.baseFog.clone();
   private tmpFogA = new Color3();
+  /** contamination density multiplier fed by FogVariation (1 = classic air) */
+  private contamMult = 1;
+  /** contamination warmth 0..1; fog colour lerps toward WARM_MURK by this */
+  private contamWarmth = 0;
+
+  /**
+   * Feed the memory-contamination atmosphere factors for the player's
+   * surroundings. Density multiplies the per-district fog preset; warmth
+   * pulls the blended fog base toward the warm reconstruction murk.
+   * @param densityMult fog density multiplier, 1 = uncontaminated
+   * @param warmth contamination density 0..1 driving the warm colour shift
+   */
+  setContamination(densityMult: number, warmth: number): void {
+    this.contamMult = densityMult;
+    this.contamWarmth = Math.max(0, Math.min(1, warmth));
+  }
 
   /** District-driven fog depth + boundary-blended colour per district. */
   setDistrictFog(district: number, dt: number): void {
     const presets = [0.040, 0.021, 0.032, 0.026, 0.046]; // maze/office/honeycomb/corridor/storage
-    this.targetFogDensity = presets[district] ?? 0.028;
+    this.targetFogDensity = (presets[district] ?? 0.028) * this.contamMult;
     const k = Math.min(1, dt * 0.4);
     this.scene.fogDensity += (this.targetFogDensity - this.scene.fogDensity) * k;
 
@@ -186,6 +205,10 @@ export class LightingRig {
     const s = this.fogBlendT * this.fogBlendT * (3 - 2 * this.fogBlendT); // smoothstep
     Color3.LerpToRef(this.fogFrom, DISTRICT_FOG_COLORS[this.curDistrict], s, this.tmpFogA);
     this.effectiveFogBase.copyFrom(this.tmpFogA);
+    if (this.contamWarmth > 0) {
+      // reconstruction zones breathe warmer murk than any district baseline
+      Color3.LerpToRef(this.effectiveFogBase, WARM_MURK, this.contamWarmth * 0.6, this.effectiveFogBase);
+    }
   }
 
   /** Scars: increase vignette weight based on relocation count. */
