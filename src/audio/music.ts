@@ -13,7 +13,19 @@
  *
  * Every layer change is a gain crossfade (~3 s settle) driven by
  * setTargetAtTime, so zone/tension switches never click.
+ *
+ * Determinism: melody pacing and every per-pluck roll (degree, octave,
+ * volume, duration, pan) draw from one seeded RNG stream
+ * (`(seed ^ SCORE_SALT) >>> 0`, src/core/rng.ts). No buffer fills exist
+ * in this file, so no Math.random remains.
  */
+import { RNG } from '../core/rng';
+
+/** Stream salt so score rolls never correlate with other seeded systems. */
+const SCORE_SALT = 0x35c03e;
+/** Default stream seed used when no run seed reaches the constructor. */
+const DEFAULT_SCORE_SEED = 0x6d55231c;
+
 export class DynamicScore {
   private ctx: AudioContext;
   private out: GainNode;
@@ -24,12 +36,15 @@ export class DynamicScore {
   private melodyNextIn = 5;
   private cluster: ClusterLayer | null = null;
   private stopped = false;
+  /** Seeded stream driving melody pacing and per-pluck rolls (determinism law). */
+  private readonly rng: RNG;
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = DEFAULT_SCORE_SEED) {
     this.ctx = ctx;
     this.out = ctx.createGain();
     this.out.gain.value = 1;
     this.out.connect(destination);
+    this.rng = new RNG((seed ^ SCORE_SALT) >>> 0);
   }
 
   /**
@@ -72,7 +87,7 @@ export class DynamicScore {
       const i = this.tension;
       const lo = 12 - 8 * i;
       const hi = 20 - 14 * i;
-      this.melodyNextIn = lo + Math.random() * (hi - lo);
+      this.melodyNextIn = this.rng.range(lo, hi);
       this.pluck();
     }
   }
@@ -140,21 +155,21 @@ export class DynamicScore {
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const root = rootMidiForZone(this.zoneKind);
-    const degree = PENTA[Math.floor(Math.random() * PENTA.length)];
-    const oct = Math.random() < 0.3 ? 36 : 24; // mostly +2 octaves, sometimes +3
+    const degree = PENTA[this.rng.int(0, PENTA.length)];
+    const oct = this.rng.chance(0.3) ? 36 : 24; // mostly +2 octaves, sometimes +3
     const freq = midiToFreq(root + degree + oct);
 
     const o = ctx.createOscillator();
     o.type = 'sine';
     o.frequency.value = freq;
     const g = ctx.createGain();
-    const vol = 0.04 + Math.random() * 0.02;
-    const dur = 1.1 + Math.random() * 1.1;
+    const vol = this.rng.range(0.04, 0.06);
+    const dur = this.rng.range(1.1, 2.2);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(vol, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     const pan = ctx.createStereoPanner();
-    pan.pan.value = Math.random() * 1.2 - 0.6;
+    pan.pan.value = this.rng.range(-0.6, 0.6);
     o.connect(g).connect(pan).connect(this.out);
     o.start(t);
     o.stop(t + dur + 0.05);
