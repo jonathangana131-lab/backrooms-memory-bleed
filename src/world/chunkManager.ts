@@ -15,7 +15,8 @@ import { getLayoutPool } from '../workers/layoutPool';
 import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
 import type { GraffitiInstance, PropInstance } from './architect';
-import { hash2i, RNG } from '../core/rng';
+import { hash2i, RNG, seedFromString } from '../core/rng';
+import { graffitiTilt, signGrimeRects } from './textureDressing';
 import { ChunkDeltas, applyDecorDrift } from './chunkDeltas';
 import type { MaterialSet } from '../gfx/materials';
 import type { MemoryField } from '../memory/field';
@@ -300,8 +301,8 @@ export class ChunkManager {
     ctx.textBaseline = 'middle';
     ctx.fillText(s.text, 256, 70);
     ctx.fillStyle = 'rgba(60,50,30,0.25)';
-    for (let i = 0; i < 40; i++) {
-      ctx.fillRect(Math.random() * 512, Math.random() * 128, 3, 2);
+    for (const r of signGrimeRects(s.text, s.kind.valueOf())) {
+      ctx.fillRect(r.x, r.y, r.w, r.h);
     }
     if (discoveredTick) {
       // cyan underline stripe marking a room you have entered before
@@ -368,7 +369,7 @@ export class ChunkManager {
       ctx.textBaseline = 'middle';
       ctx.save();
       ctx.translate(256, 64);
-      ctx.rotate(-0.05 + Math.random() * 0.1);
+      ctx.rotate(graffitiTilt(gf.text));
       ctx.fillText(gf.text, 0, 0);
       ctx.restore();
       tex.update(false);
