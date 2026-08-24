@@ -69,7 +69,7 @@ ok(!src.includes('KeyJ'), 'C-3 J toggle left to the Journal module (no double-fi
 ok(src.includes("from '../ui/tracker'") && src.includes("from '../ui/tracker-wiring'"), 'C-4 imports Tracker + TrackerFeed');
 if (src.includes('new Tracker(document.body)') && src.includes('new TrackerFeed(')) {
   ok(true, 'C-4 Tracker constructed');
-  ok(src.includes('setAchievementToastSink(') && src.includes('this.ui.toast(info.icon'), 'C-4 achievement toasts routed through ui.toast');
+  ok(src.includes('setAchievementToastSink(') && src.includes('this.forms?.push({'), 'C-4 achievement unlocks routed through the diegetic form-toast sink (F97)');
   ok(src.includes('new TrackerFeed(this.tracker)'), 'C-4 TrackerFeed wired to the Tracker');
 } else {
   console.log('  SKIP (defect) C-4: DEFECT:tracker-chain-not-mounted -- imports + nullable fields + feed-site code exist but Tracker/TrackerFeed are never constructed, so the feed site is dead and no toast sink is registered');
