@@ -18,6 +18,24 @@ pnpm run typecheck  # strict TS check
 Requires a browser with WebGL2 (or WebGPU). All assets — textures, sounds,
 signage text — are generated procedurally at boot; there are no downloads.
 
+Requires a browser with WebGL2 (or WebGPU). All assets — textures, sounds,
+signage text — are generated procedurally at boot; there are no downloads.
+
+## v1.0.0 — what shipped
+
+All 100 planned features (F1–F100) shipped in v1: embodiment systems (stamina,
+breath, lean, tremor, adrenaline), deeper wrongness (pocket dimensions,
+blackout rearrangement, impossible windows, the mezzanine), entity society
+(the archivist, watcher packs, congregations, funerals, the negotiator),
+audio dread (binaural whispers, infrasound beds, dread silence, the
+congregation's hymn singing your discoveries), visual expansion (god-rays,
+wet floors, VHS degradation, breathing wallpaper), and meta/endings (New Game+,
+the exit that isn't, colorblind signals, the credits walk).
+
+Every feature carries a committed acceptance test; the full suite is 270
+suites, all green (`node test/run-all.mjs`). The next hundred features are
+charted in [docs/GAME-PLAN-V1.1.md](docs/GAME-PLAN-V1.1.md).
+
 ## Controls
 
 | Input | Action |
