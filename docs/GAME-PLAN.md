@@ -89,13 +89,13 @@ with infinite possibility and no end.
 ### CATEGORY D — entities & society
 
 - F25 Believer congregations — chapel landmarks host kneeling night services. AC: formation/dispersal tests.
-- F26 The Archivist — harmless cataloguer; photographing it changes next-session behavior. AC: reaction table test.
+- F26 The Archivist — harmless cataloguer; photographing it changes next-session behavior. AC: reaction table test. SHIPPED ✅ (evidence: reaction-table + cross-session + stand-off blocks in test/social-entities-test.mjs ALL PASS; mounted in core/game.ts — landmark-circuit sim, clipboard prop figure via humans.ts attachClipboardProp, PhotoMode capture hook, tally persisted through SaveSlot.archivistEncounters)
 - F27 Watcher packs — coordinated multi-watcher stalks at stage ≥3, spacing discipline. AC: spacing + shared-aggression tests.
 - F28 Mimic props — furniture that is an entity until observed. AC: observation-freeze consistent with watcher rules.
 - F29 Entity gossip — vocals reference places the PLAYER actually visited. AC: grounding test vs journal feed. SHIPPED ✅ (evidence: test/gossip-test.mjs ALL PASS; mounted src/core/game.ts mount batch C — GossipSource fed VisitedSite records)
 - F30 Your Double — doppelgänger learns route habits across saves, walks YOUR paths. AC: path-replay fidelity.
 - F31 Roach ecosystems — colonies migrate moisture→food; cabinets infest over sessions. AC: migration stability.
-- F32 The Custodian — removes graffiti/markings overnight; cart squeak precedes removals. AC: removal ledger test.
+- F32 The Custodian — removes graffiti/markings overnight; cart squeak precedes removals. AC: removal ledger test. SHIPPED ✅ (evidence: removal-table + squeak-precedes + wiring blocks in test/social-entities-test.mjs ALL PASS; wired via entities/custodian.ts CustodianWiring over story/custodian.ts pass, ChunkManager.removedGraffiti build filter keeps erasures rebuilt-out, cart-squeak loop audio/cartsqueak.ts)
 
 ### CATEGORY E — audio dread
 
@@ -136,7 +136,7 @@ with infinite possibility and no end.
 - F58 Sub-floor crawlspaces — floor gaps reveal crawlspace darkness beneath. AC: nav flag + fall safety.
 - F59 Landmark echoes — landmark rooms repeat identically exactly 7 chunks apart. AC: spacing invariant test.
 - F60 The Loading Dock — infinite exterior-look dock with an idling engine that never arrives. AC: audio bed + no-arrival proof.
-- F61 The Congregation's Hymn — believers sing rounds naming YOUR discoveries. AC: lyric-grounding test.
+- F61 The Congregation's Hymn — believers sing rounds naming YOUR discoveries. AC: lyric-grounding test. SHIPPED ✅ (evidence: grounding/gating/stagger blocks in test/social-entities-test.mjs ALL PASS over audio/hymn.ts; chapel choirs via entities/hymn.ts ChapelChoir, discovery ledger fed from seenLandmarks + found beacons, captions within earshot during the night service)
 - F62 Watcher molt — vacated skins keep watching. AC: decoy behavior test.
 - F63 Entity funerals — processions for their own dead at erosion sites. AC: procession route test.
 - F64 The Negotiator — trades items for passage via gesture language. AC: trade-state machine test.
