@@ -899,7 +899,9 @@ export class Game {
 
   private nonEuclideanNudge(): void {
     const yaw = this.player.yaw;
-    const back = 28 + Math.random() * 18;
+    // F3: nudge distance is a seeded draw so replays of the same run match
+    const rng = new RNG(hash2i(Math.floor(this.playtimeSec * 10), 863, this.seed));
+    const back = 28 + rng.range(0, 18);
     const dx = Math.sin(yaw) * -back;
     const dz = Math.cos(yaw) * -back;
     const colliders = this.chunks.collidersAround(this.player.body.x + dx, this.player.body.z + dz);
@@ -954,7 +956,7 @@ export class Game {
         if (!revisited && this.staffedLandmarks.has(lm.key)) continue;
         if (revisited) this.staffedLandmarks.add(lm.key + ':r');
         else this.staffedLandmarks.add(lm.key);
-        const ang2 = Math.random() * Math.PI * 2;
+        const ang2 = new RNG(hash2i(Math.floor(this.playtimeSec * 10), 957, this.seed)).range(0, Math.PI * 2);
         const wx = lm.x + Math.cos(ang2) * (revisited ? 2 : 3);
         const wz = lm.z + Math.sin(ang2) * (revisited ? 2 : 3);
         const type: HumanType = (() => {
@@ -1077,10 +1079,12 @@ export class Game {
   ];
 
   private helperDialogue(): void {
+    // F3: line picks are seeded draws (stable per run timeline)
+    const rng = new RNG(hash2i(Math.floor(this.playtimeSec * 10), 1083, this.seed));
     const h = this.humans.nearestOf(this.player.body.x, this.player.body.z, ['helper']);
     if (h && !h.said) {
       h.said = true;
-      const i = Math.floor(Math.random() * Game.HELPER_LINES.length);
+      const i = rng.int(0, Game.HELPER_LINES.length);
       this.ui.say(Game.HELPER_LINES[i], 5);
     }
     const b = this.humans.nearestOf(this.player.body.x, this.player.body.z, ['believer']);
@@ -1094,7 +1098,7 @@ export class Game {
       } else if (this.story.discoveries >= 2) {
         line = 'You keep finding their beacons. They keep not finding you.';
       } else {
-        line = Game.BELIEVER_LINES[Math.floor(Math.random() * Game.BELIEVER_LINES.length)];
+        line = Game.BELIEVER_LINES[rng.int(0, Game.BELIEVER_LINES.length)];
       }
       this.ui.say(line, 4.5);
     }
@@ -1367,7 +1371,8 @@ export class Game {
             '...somewhere behind the walls, your name is being pronounced badly...',
             '...this hallway was copied from a memory of you copying it...',
           ];
-          this.ui.say(cues[Math.floor(Math.random() * cues.length)], 5);
+          // F3: cue pick is a seeded draw (replay-stable)
+          this.ui.say(cues[new RNG(hash2i(Math.floor(this.playtimeSec * 10), 1374, this.seed)).int(0, cues.length)], 5);
           setTimeout(() => { this.audio.footstep(false); }, 700);
           setTimeout(() => { this.audio.footstep(false); }, 1500);
           this.mem.inject(this.player.body.x, this.player.body.z, MemoryKind.PERSONAL, 0.3);
@@ -1526,11 +1531,13 @@ export class Game {
       if (verdict && verdict.relocate) {
         try { this.echoSites?.markSite(this.player.body.x, this.player.body.z); }
         catch (e) { console.warn('[bmb] echo site mark failed', e); }
-        const ang = Math.random() * Math.PI * 2;
-        const dist = 220 + Math.random() * 200;
+        // F3: relocation replays identical per seed (same timeline up to the verdict)
+        const rng = new RNG(hash2i(Math.floor(this.playtimeSec), 1529, this.seed));
+        const ang = rng.range(0, Math.PI * 2);
+        const dist = 220 + rng.range(0, 200);
         const nx = this.player.body.x + Math.cos(ang) * dist;
         const nz = this.player.body.z + Math.sin(ang) * dist;
-        this.player.teleport(nx, nz, Math.random() * Math.PI * 2);
+        this.player.teleport(nx, nz, rng.range(0, Math.PI * 2));
         // build the immediate area synchronously so we never wake up in void
         for (let i = 0; i < 4; i++) this.chunks.update(nx, nz);
         // where you wake becomes someone's remembered home
@@ -1578,7 +1585,8 @@ export class Game {
         }
         if (code === 2 && this.playtimeSec < this.loopArmedUntil) {
           this.loopArmedUntil = 0;
-          const back = 26 + Math.random() * 14;
+          // F3: loop-back offset is a seeded draw (replay-stable)
+          const back = 26 + new RNG(hash2i(Math.floor(this.playtimeSec * 10), 1581, this.seed)).range(0, 14);
           const yaw = this.player.yaw;
           const nx = this.player.body.x + Math.sin(yaw) * back;
           const nz = this.player.body.z + Math.cos(yaw) * back;
@@ -1618,15 +1626,17 @@ export class Game {
         ? new Color3(0.012, 0.012, 0.01)
         : new Color3(1.0, 0.98, 0.86);
     }
-    if (blackout && Math.random() < dt * 0.12) {
+    // F3: ghost-light fights are seeded per frame-tick (replay-stable)
+    const ghostRng = new RNG(hash2i(Math.floor(this.playtimeSec * 60), 1621, this.seed));
+    if (blackout && ghostRng.chance(dt * 0.12)) {
       // one distant light fights back
       const cands = this.chunks.allFixtures().filter((f) => {
         const d = Math.hypot(f.x - this.player.body.x, f.z - this.player.body.z);
         return f.alive && d > 22 && d < 60;
       });
       if (cands.length) {
-        const pick = cands[Math.floor(Math.random() * cands.length)];
-        const dur = 2 + Math.random() * 5;
+        const pick = cands[ghostRng.int(0, cands.length)];
+        const dur = 2 + ghostRng.range(0, 5);
         this.ghostLit.set(pick.x + ',' + pick.z, this.playtimeSec + dur);
         this.audio.lightCrack();
       }
@@ -1865,9 +1875,11 @@ export class Game {
       if (blackout) shakeAmt *= 1.5;
     }
     if (shakeAmt > 0.001 && this.state === 'playing') {
-      this.camera.position.x += (Math.random() - 0.5) * shakeAmt;
-      this.camera.position.y += (Math.random() - 0.5) * shakeAmt;
-      this.camera.rotation.z += (Math.random() - 0.5) * shakeAmt * 0.5;
+      // F3: camera shake jitter is a seeded draw per frame-tick (replay-stable)
+      const shakeRng = new RNG(hash2i(Math.floor(this.playtimeSec * 60), 1868, this.seed));
+      this.camera.position.x += (shakeRng.next() - 0.5) * shakeAmt;
+      this.camera.position.y += (shakeRng.next() - 0.5) * shakeAmt;
+      this.camera.rotation.z += (shakeRng.next() - 0.5) * shakeAmt * 0.5;
     }
     this.ui.setStamina(this.player.stamina);
     this.ui.setBattery(this.flashlight.has ? this.flashlight.battery : null);
