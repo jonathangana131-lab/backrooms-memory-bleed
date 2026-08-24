@@ -55,16 +55,16 @@ with infinite possibility and no end.
   earns it — log them into this file with the next free F-number and full AC.
 ### CATEGORY A — v1 wiring blockers
 
-- F1 Wave-B/C wiring restoration — journal/tracker/checkpoint-savescreen/watcher-intro chains constructed + fed in game.ts init/frame; frameUpdate + onChunkFixtures emergency hooks re-added. AC: wave-c + emergency suites exit 0 with ZERO DEFECT skips.
+- F1 Wave-B/C wiring restoration — journal/tracker/checkpoint-savescreen/watcher-intro chains constructed + fed in game.ts init/frame; frameUpdate + onChunkFixtures emergency hooks re-added. AC: wave-c + emergency suites exit 0 with ZERO DEFECT skips. SHIPPED ✅ (evidence: wave-c WAVE_C_PASS, emergency wiring+game ALL PASS, zero SKIP(defect) lines; chains live in game.ts imports/init)
 - F2 Central integration mounts — applyRenderClarity / breath / areaidentity / ShadowMesherPass consumers mounted from game.ts per report snippets. AC: clarity tiers visibly switch; breathing audible under sprint; district beds change on district change; playthrough unaffected.
-- F3 Determinism audit — replace verbatim Math.random sites (relocation/camera-shake) with hash2i/RNG draws; add test/determinism-audit.mjs scanning sim/gen paths. AC: audit exits 0; relocation replays identical per seed.
-- F4 Hardware-GL QA sweep — qa-shots + playthrough on real GPU (non-swiftshader); six screenshots into shots/. AC: zero console errors; crisp-render verified.
+- F3 Determinism audit — replace verbatim Math.random sites (relocation/camera-shake) with hash2i/RNG draws; add test/determinism-audit.mjs scanning sim/gen paths. AC: audit exits 0; relocation replays identical per seed. SHIPPED ✅ (evidence: game.ts 0 Math.random — all sim sites seeded via hash2i/RNG; director/hints/chunkManager seeded by wave agents; test/determinism-audit.mjs ALL PASS incl. same-seed director timeline replay; RESIDUE_LEDGER tracks remaining audio/gfx/entities sites, shrinking per scrub waves)
+- F4 Hardware-GL QA sweep — qa-shots + playthrough on real GPU (non-swiftshader); six screenshots into shots/. AC: zero console errors; crisp-render verified. SHIPPED ✅ (evidence: test/qa-shots.mjs HWGL_QA_PASS — ANGLE Metal on AMD Radeon RX Ellesmere, 6 shots in shots/hwgl/, PAGE_ERRORS=0)
 
 ### CATEGORY B — embodiment
 
-- F5 Binaural whisper field — HRTF-panned whispers fixed in world space while ears move. AC: panning inverts with 180° turn (graph test).
-- F6 Dread silence — director-commanded total mix duck (<-24 dB, 8–20 s) before major anomalies + recovery exhale. AC: automation provable; capped 1/25 min.
-- F7 Footstep DNA — per-archetype gait signatures identifiable before line-of-sight. AC: classifier ≥95% accuracy on synthetic trains.
+- F5 Binaural whisper field — HRTF-panned whispers fixed in world space while ears move. AC: panning inverts with 180° turn (graph test). SHIPPED ✅ (evidence: test/whisperfield-test.mjs 26 checks incl. graph-level pan inversion, ALL PASS; mounted to live listener pose)
+- F6 Dread silence — director-commanded total mix duck (<-24 dB, 8–20 s) before major anomalies + recovery exhale. AC: automation provable; capped 1/25 min. SHIPPED ✅ (evidence: test/dreadsilence-test.mjs 28 checks, ALL PASS; mounted on masterBus, fired on peak-entry + relocation, ration enforced on session clock)
+- F7 Footstep DNA — per-archetype gait signatures identifiable before line-of-sight. AC: classifier ≥95% accuracy on synthetic trains. SHIPPED ✅ (evidence: test/footstepdna-test.mjs 97.9–100% across seeds, ALL PASS; mounted pre-LOS with wrong-cadence caption flag)
 - F8 Gait-synced dread — high tension drifts footstep micro-timing toward heartbeat interval. AC: phase-coherence metric monotone with tension.
 - F9 Stamina embodiment — low stamina alters breath rate, stride sound, FOV pulse. AC: three outputs scale monotonically.
 - F10 Lean/peek Q/E around doorframes — camera roll + parallax. AC: collision-safe lean envelope.
