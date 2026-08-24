@@ -10,6 +10,7 @@ import { moveCircle, type CircleBody } from '../world/collision';
 import type { Box2 } from '../world/architect';
 import { Emitter } from '../core/events';
 import { Stamina } from './stamina';
+import { LeanPeek, LeanPeekMode, LEAN_HEAD_RADIUS, LEAN_MARGIN } from './leanpeek';
 
 export const PLAYER_RADIUS = 0.34;
 export const EYE_STAND = 1.62;
@@ -69,6 +70,12 @@ export class PlayerController {
   }
   /** F14: external control-damp multiplier applied to movement this frame. */
   inputScale = 1;
+  /** F8: external micro-timing scale on stride onset advance (1 = neutral). */
+  strideRateScale = 1;
+  /** F10: Q/E lean envelope with collision-safe lateral offset. */
+  private readonly lean = new LeanPeek(LeanPeekMode.Hold);
+  /** F9: FOV pulse oscillator phase (radians). */
+  private pulsePhase = 0;
   eye = EYE_STAND;
   private bobPhase = 0;
   private idleTime = 0;
@@ -197,9 +204,10 @@ export class PlayerController {
 
     // ---- head bob: sine wave while walking, amplitude/frequency tied to
     // the EASED speed so bob swells through the first steps and fades out
-    // as momentum bleeds off ----
+    // as momentum bleeds off. F8: strideRateScale pulls onsets toward the
+    // heartbeat under tension (set externally each frame). ----
     const hspeed = this.speed;
-    this.bobPhase += dt * hspeed * BOB_FREQUENCY;
+    this.bobPhase += dt * hspeed * BOB_FREQUENCY * this.strideRateScale;
     const bobAmp = Math.min(1, hspeed / 4) * BOB_AMPLITUDE * (this.crouching ? 0.7 : 1);
     const bobY = moving ? Math.sin(this.bobPhase * 2) * bobAmp : 0;
     const bobX = moving ? Math.cos(this.bobPhase) * bobAmp * 0.7 : 0;
@@ -214,6 +222,17 @@ export class PlayerController {
       // re-arm while idle so a stale peak can't fire on the first step after stopping
       this.lastBobPeak = peakIdx;
     }
+
+    // F10: Q/E lean envelope — hold Q leans left, hold E leans right.
+    // E doubles as the interact key; a brief roll while interacting is
+    // harmless and the collision clamp keeps the head out of walls.
+    const leanState = this.lean.update(dt, {
+      leanLeft: this.input.down('KeyQ'),
+      leanRight: this.input.down('KeyE'),
+      yaw: this.yaw,
+      bodyX: this.body.x,
+      bodyZ: this.body.z,
+    }, { headBlocked: (x, z) => this.headBlockedAt(x, z, colliders) });
 
     // waking intro overrides stance until risen
     if (this.wakeT > 0) {
@@ -231,8 +250,9 @@ export class PlayerController {
     }
 
     // ---- apply to camera ----
-    const cx = this.body.x + bobX * Math.cos(this.yaw);
-    const cz = this.body.z - bobX * Math.sin(this.yaw);
+    // F10: lateral eye offset rides the yaw frame alongside bob sway
+    const cx = this.body.x + bobX * Math.cos(this.yaw) + leanState.offsetX;
+    const cz = this.body.z - bobX * Math.sin(this.yaw) + leanState.offsetZ;
     // idle sway: barely-there breathing so stillness never looks frozen
     let swayY = 0, swayP = 0;
     if (!moving) {
@@ -242,9 +262,12 @@ export class PlayerController {
     } else {
       this.idleTime = 0;
     }
-    // sprint speed-feel: fov kick eased with smoothstep over FOV_EASE_TIME
+    // sprint speed-feel: fov kick eased with smoothstep over FOV_EASE_TIME,
+    // plus F9 exertion pulse whose amplitude rises as stamina drains
     const BASE_FOV = 1.25;
     const MAX_FOV_KICK = 0.06;
+    const FOV_PULSE_MAX = 0.022;
+    this.pulsePhase += dt * 5.4;
     // same input ramp as before: kick grows from 2.5 m/s, capped by MAX_FOV_KICK
     const desiredBlend = Math.max(0, Math.min(1, (hspeed - 2.5) / 3));
     const fovStep = dt / FOV_EASE_TIME;
@@ -252,10 +275,33 @@ export class PlayerController {
     else if (desiredBlend < this.fovBlend) this.fovBlend = Math.max(desiredBlend, this.fovBlend - fovStep);
     const camAny = this.camera as unknown as { fov: number };
     if (camAny.fov === undefined) camAny.fov = BASE_FOV;
-    camAny.fov = BASE_FOV * (1 + MAX_FOV_KICK * smoothstep01(this.fovBlend));
+    camAny.fov = BASE_FOV
+      * (1 + MAX_FOV_KICK * smoothstep01(this.fovBlend)
+        + FOV_PULSE_MAX * this.staminaEngine.fovPulseAmp * Math.sin(this.pulsePhase));
 
     this.camera.position.set(cx, this.eye + this.body.y + bobY + landY, cz);
-    this.camera.rotation.set(this.pitch + swayP, this.yaw + swayY, 0);
+    // F10: lean roll rides the camera z-axis; idle sway keeps pitch/yaw alive
+    this.camera.rotation.set(this.pitch + swayP, this.yaw + swayY, leanState.roll);
+  }
+
+  /**
+   * F10 collision probe: would a head circle (LEAN_HEAD_RADIUS, inflated by
+   * LEAN_MARGIN) centred at (x, z) overlap any solid collider?
+   * @param x candidate head-centre world x
+   * @param z candidate head-centre world z
+   * @param colliders solid boxes around the player this frame
+   * @returns true when the position is too tight to lean into
+   */
+  private headBlockedAt(x: number, z: number, colliders: readonly Box2[]): boolean {
+    const r = LEAN_HEAD_RADIUS + LEAN_MARGIN;
+    for (const b of colliders) {
+      const nx = Math.max(b.minX, Math.min(x, b.maxX));
+      const nz = Math.max(b.minZ, Math.min(z, b.maxZ));
+      const dx = x - nx;
+      const dz = z - nz;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
   }
   /** waking intro: >0 while rising from the carpet */
   wakeT = 0;
