@@ -76,6 +76,10 @@ import { FanSpeedAudio, type FanSpeedState } from '../audio/fanspeeds';
 import { CabinetCreaks } from '../audio/cabinetcreak';
 import { EchoSites } from '../audio/echoes';
 import { FanAudio } from '../audio/fanaudio';
+// F2 central mounts: breath embodiment + district identity beds + clarity policy
+import { mountPlayerBreath, type BreathHandle } from '../audio/breath';
+import { AreaIdentityBeds } from '../audio/areaidentity';
+import { applyRenderClarity, type RenderClarityHandle } from '../gfx/renderclarity';
 // Wave B: scene pack
 import { PostFX } from '../gfx/postfx';
 import { FaunaWiring } from '../entities/faunawiring';
@@ -176,6 +180,12 @@ export class Game {
   private cabinetCreaks: CabinetCreaks | null = null;
   private echoSites: EchoSites | null = null;
   private fanAudio: FanAudio | null = null;
+  // ---- F2 central integration mounts ----
+  private breathHandle: BreathHandle | null = null;
+  private areaBeds: AreaIdentityBeds | null = null;
+  /** dream-state clarity policy handle; rebuilt when the quality preset changes */
+  private clarityHandle: RenderClarityHandle | null = null;
+  private clarityQuality: string | null = null;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -313,6 +323,17 @@ export class Game {
     } catch (e) {
       console.warn('[bmb] PostFX unavailable', e);
       this.postfx = null;
+    }
+    // ---- F2: dream-state clarity policy (resolution/aniso/AA/fog cap) ----
+    // Runs after PostFX so the rig's DefaultRenderingPipeline exists for FXAA.
+    try {
+      const preset = qualityNumToPreset(this.settings.quality);
+      this.clarityHandle = applyRenderClarity(this.engine, this.scene, { quality: preset });
+      this.clarityQuality = preset;
+    } catch (e) {
+      console.warn('[bmb] render clarity unavailable', e);
+      this.clarityHandle = null;
+      this.clarityQuality = null;
     }
     this.lighting.onLightDied = () => {
       this.audio.lightCrack();
@@ -585,6 +606,21 @@ export class Game {
     this.player.sensitivity = 0.0022 * this.settings.sensitivity;
     this.audio.setMasterVolume(this.settings.volume);
     this.engine.setHardwareScalingLevel(1 / Math.max(0.4, Math.min(1, this.settings.quality)));
+    // F2: dream-state clarity follows the quality preset; rebuild on change.
+    {
+      const preset = qualityNumToPreset(this.settings.quality);
+      if (this.clarityHandle && preset !== this.clarityQuality) {
+        try { this.clarityHandle.dispose(); } catch (e) { console.warn('[bmb] clarity dispose failed', e); }
+        this.clarityHandle = null;
+        this.clarityQuality = null;
+      }
+      if (!this.clarityHandle && this.scene) {
+        try {
+          this.clarityHandle = applyRenderClarity(this.engine, this.scene, { quality: preset });
+          this.clarityQuality = preset;
+        } catch (e) { console.warn('[bmb] clarity reapply failed', e); }
+      }
+    }
     // Wave A (A-1a): keep the canonical settings store in agreement.
     if (!this.syncingSettings && this.settingsManager) {
       this.syncingSettings = true;
@@ -626,7 +662,10 @@ export class Game {
   }
 
   startNew(seedText: string): void {
-    this.seed = seedText ? seedFromString(seedText) : (Math.random() * 0xffffffff) >>> 0;
+    this.seed = seedText ? seedFromString(seedText) : seedFromString(String(Date.now()));
+    // F2: re-bind district identity beds (office phones) to the fresh seed
+    try { this.areaBeds?.seed(this.seed); }
+    catch (e) { console.warn('[bmb] area beds seed failed', e); }
     this.beginRun({ x: SPAWN_X, z: SPAWN_Z, yaw: Math.PI * 0.75 });
     this.player.beginWake();
     this.story.anchors(); // materialize guaranteed beacons
@@ -1228,6 +1267,21 @@ export class Game {
     // ---- Wave B (B-2m): fauna skitter voice joins the shared graph ----
     try { this.fauna?.attachAudio(ctx); }
     catch (e) { console.warn('[bmb] fauna audio unavailable', e); }
+    // ---- F2: player breath embodiment cycles on the shared graph ----
+    try {
+      this.breathHandle = mountPlayerBreath({
+        ctx,
+        destination: dest,
+        playerEvents: this.player.events,
+        tension: () => this.director.tension,
+        blackout: () => this.playtimeSec < this.blackoutUntil,
+      });
+    } catch (e) { console.warn('[bmb] breath mount unavailable', e); this.breathHandle = null; }
+    // ---- F2: per-district identity beds (maze/office/honeycomb/corridor/storage) ----
+    try {
+      this.areaBeds = new AreaIdentityBeds(ctx, dest);
+      this.areaBeds.seed(this.seed);
+    } catch (e) { console.warn('[bmb] area beds unavailable', e); this.areaBeds = null; }
     this.audioModulesReady = true;
   }
 
@@ -1712,6 +1766,23 @@ export class Game {
     if (this.cabinetCreaks) {
       try { this.cabinetCreaks.update(dt, focus.x, focus.z); }
       catch (e) { console.warn('[bmb] cabinet creaks update failed', e); }
+    }
+    // ---- F2: district identity beds follow district + listener pose ----
+    if (this.areaBeds) {
+      try {
+        this.areaBeds.setListener(focus.x, focus.z);
+        this.areaBeds.update(dt, bDistrict, tension);
+      } catch (e) { console.warn('[bmb] area beds update failed', e); }
+    }
+    // ---- F2: player breath cycles with effort/tension/blackout providers ----
+    if (this.breathHandle) {
+      try { this.breathHandle.update(dt); }
+      catch (e) { console.warn('[bmb] breath update failed', e); }
+    }
+    // ---- F2: re-assert the clarity fog cap (LightingRig eases density back up) ----
+    if (this.clarityHandle) {
+      try { this.clarityHandle.update(bDistrict); }
+      catch (e) { console.warn('[bmb] clarity update failed', e); }
     }
     // lore stings: cluster-complete sting when the story arc advances
     if (this.loreStings && this.story.stage !== this.prevArcStage) {
