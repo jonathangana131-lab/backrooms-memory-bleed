@@ -65,13 +65,13 @@ with infinite possibility and no end.
 - F5 Binaural whisper field — HRTF-panned whispers fixed in world space while ears move. AC: panning inverts with 180° turn (graph test). SHIPPED ✅ (evidence: test/whisperfield-test.mjs 26 checks incl. graph-level pan inversion, ALL PASS; mounted to live listener pose)
 - F6 Dread silence — director-commanded total mix duck (<-24 dB, 8–20 s) before major anomalies + recovery exhale. AC: automation provable; capped 1/25 min. SHIPPED ✅ (evidence: test/dreadsilence-test.mjs 28 checks, ALL PASS; mounted on masterBus, fired on peak-entry + relocation, ration enforced on session clock)
 - F7 Footstep DNA — per-archetype gait signatures identifiable before line-of-sight. AC: classifier ≥95% accuracy on synthetic trains. SHIPPED ✅ (evidence: test/footstepdna-test.mjs 97.9–100% across seeds, ALL PASS; mounted pre-LOS with wrong-cadence caption flag)
-- F8 Gait-synced dread — high tension drifts footstep micro-timing toward heartbeat interval. AC: phase-coherence metric monotone with tension.
-- F9 Stamina embodiment — low stamina alters breath rate, stride sound, FOV pulse. AC: three outputs scale monotonically.
-- F10 Lean/peek Q/E around doorframes — camera roll + parallax. AC: collision-safe lean envelope.
+- F8 Gait-synced dread — high tension drifts footstep micro-timing toward heartbeat interval. AC: phase-coherence metric monotone with tension. SHIPPED ✅ (evidence: test/gaitdread-test.mjs coherence monotone 0.501→0.978 across sweep, ALL PASS; controller bob advance scaled per-frame from dreadOffset/excitedHeartbeatPeriod)
+- F9 Stamina embodiment — low stamina alters breath rate, stride sound, FOV pulse. AC: three outputs scale monotonically. SHIPPED ✅ (evidence: test/stamina-test.mjs monotone sweeps ALL PASS; mounts live — fatigue folds into breath tension, fovPulseAmp drives camera pulse; stride-intensity audio gain rides existing footstep path)
+- F10 Lean/peek Q/E around doorframes — camera roll + parallax. AC: collision-safe lean envelope. SHIPPED ✅ (evidence: test/leanpeek-test.mjs ALL PASS; mounted in controller — Q/E hold lean, head-circle clamp against live colliders, roll+offset applied to camera)
 - F11 Torch view-model — visible flashlight hand, sway, battery-swap beat <1.2s. AC: light follows mesh.
 - F12 Surface wading — puddles slow stride, splash, wet-footprint trail. AC: penalty + spawn tests.
 - F13 Vault/mantle crates — choreographed camera dip. AC: no collider clip; dip curve test.
-- F14 Fall stagger — postfx blur + control damp after hard falls. AC: recovery timeline test.
+- F14 Fall stagger — postfx blur + control damp after hard falls. AC: recovery timeline test. SHIPPED ✅ (evidence: test/fallstagger-test.mjs 8/8 incl. exact settle + proportionality, ALL PASS; mounted via controller 'hardfall' event → inputScale damp + backdrop-blur veil)
 
 ### CATEGORY C — deeper wrongness
 
