@@ -28,10 +28,13 @@ for (let round = 1; round <= 5; round++) {
     g.seenLandmarks.add('CHAPEL');
     void r2;
   }, round);
-  // fire multiple saves back-to-back without awaiting
-  await page.evaluate(() => {
+  // fire multiple saves back-to-back. They serialize through SaveDB's write
+  // queue; we must AWAIT them because the headless sw-rendered frame loop
+  // starves IndexedDB completions (a fixed sleep alone left writes pending
+  // when the reload tore the page down).
+  await page.evaluate(async () => {
     const g = (window).__BMB__.game;
-    g.saveNow(); g.saveNow(); g.saveNow();
+    await g.saveNow(); await g.saveNow(); await g.saveNow();
   });
   await page.waitForTimeout(1400);
   await page.reload({ waitUntil: 'networkidle' });
@@ -44,8 +47,8 @@ for (let round = 1; round <= 5; round++) {
     const g = (window).__BMB__.game;
     // position survived (any axis naming: read back via the same teleport axes)
     const p = g.player;
-    const px = p.x ?? p.position?.x;
-    const py = p.z ?? p.position?.z ?? p.y ?? p.position?.y;
+    const px = p.body?.x ?? p.x ?? p.position?.x;
+    const py = p.body?.z ?? p.z ?? p.position?.z ?? p.y ?? p.position?.y;
     const posOk = Math.abs(px - r2 * 10) < 2 && Math.abs(py - -r2 * 5) < 2;
     const flashOk = !g.flashlight || (g.flashlight.has === true);
     return posOk && flashOk && g.consumedBatteries.has('9:9:' + r2)

@@ -88,7 +88,7 @@ try {
   } catch { /* systems may stay absent headlessly; sampled as inactive */ }
 
   // Install instrumentation (prototype level, double-wrap guarded).
-  await page.evaluate(() => {
+  const active = await page.evaluate(() => {
     const g = (window).__BMB__.game;
     window.__G0__ = g; // identity anchor for drift detection
     const P = window.__PERF__ = {
@@ -151,7 +151,7 @@ try {
     }
 
     // Newly wired systems.
-    const active = {
+    return {
       dynamicScore: protoWrapTimed(g.score, 'setState', P.score) || protoWrapTimed(g.score, 'update', P.score),
       exteriorBleed: protoWrapTimed(g.exterior, 'update', P.exterior),
       heartbeat: (() => {
@@ -175,10 +175,6 @@ try {
         if (!g.minimap) return false;
         const u = protoWrapTimed(g.minimap, 'update', P.minimap);
         const m = protoWrapCount(g.minimap, 'markVisited', () => P.minimap.marks++)
-      minimap: (() => {
-        if (!g.minimap) return false;
-        const u = protoWrapTimed(g.minimap, 'update', P.minimap);
-        const m = protoWrapCount(g.minimap, 'markVisited', () => P.minimap.marks++)
           || protoWrapCount(g.minimap, 'markLandmark', () => P.minimap.marks++)
           || protoWrapCount(g.minimap, 'markBeacon', () => P.minimap.marks++);
         window.__PERF_DIAG__ = {
@@ -197,16 +193,14 @@ try {
           }
         }
         return u || m;
+      })(),
+    };
+  });
 
+  // allow budgeted builds to settle before the sampling loop
+  await page.waitForTimeout(900);
 
-    await page.waitForTimeout(900); // allow budgeted builds
-
-    const s = await page.evaluate(() => {
-      const g = (window).__BMB__.game;
-      const p = window.__PERF__;
-      // Collect garbage before sampling: chunk builds allocate short-lived
-
-
+  const samples = [];
   for (let hop = 1; hop <= HOPS; hop++) {
     await page.evaluate((hop) => {
       const g = (window).__BMB__.game;
@@ -220,7 +214,6 @@ try {
       const heap = performance.memory ? performance.memory.usedJSHeapSize : null;
       const avg = (calls, ms) => calls > 0 ? +(ms / calls).toFixed(4) : 0;
       return {
-        hop: null,
         sameGame: window.__G0__ === g,
         fps: Math.round(g.engine.getFps()),
         simMsPerFrame: p.frames > 0 ? +(p.simMs / p.frames).toFixed(3) : 0,
@@ -235,18 +228,14 @@ try {
         mmPx: g.minimap ? { px: g.minimap.px, pz: g.minimap.pz } : null,
         minimap: { updates: p.minimap.updates, avgMs: avg(p.minimap.updates, p.minimap.ms), marks: p.minimap.marks },
       };
-        frames: p.frames,
-        score: { calls: p.score.calls, avgMs: avg(p.score.calls, p.score.ms), msTotal: +p.score.ms.toFixed(2) },
-        exterior: { calls: p.exterior.calls, avgMs: avg(p.exterior.calls, p.exterior.ms), msTotal: +p.exterior.ms.toFixed(2) },
-        heartbeat: { calls: p.hbCalls, changes: p.hbChanges, lastIntensity: p.hbLast, distinct: Object.keys(p.hbDistinct).length },
-        dustTicks: p.dustTicks,
-        mmPx: g.minimap ? { px: g.minimap.px, pz: g.minimap.pz } : null,
-        minimap: { updates: p.minimap.updates, avgMs: avg(p.minimap.updates, p.minimap.ms), marks: p.minimap.marks },
-      };
     });
     s.hop = hop;
 
-
+    // per-hop measurement windows: zero every counter after sampling
+    await page.evaluate(() => {
+      const p = window.__PERF__;
+      p.simMs = 0; p.renderMs = 0; p.frames = 0;
+      p.score.calls = 0; p.score.ms = 0;
       p.exterior.calls = 0; p.exterior.ms = 0;
       p.minimap.updates = 0; p.minimap.ms = 0; p.minimap.marks = 0;
       p.hbCalls = 0; p.hbChanges = 0; p.hbDistinct = {};
@@ -273,20 +262,15 @@ try {
       callsTotal: calls,
       callsPerFrame: totalFrames > 0 ? +(calls / totalFrames).toFixed(3) : 0,
       avgMsPerCall: calls > 0 ? +(ms / calls).toFixed(4) : 0,
+    };
+  };
+
+  const hbTotals = samples.reduce(
+    (a, s) => ({ calls: a.calls + s.heartbeat.calls, changes: a.changes + s.heartbeat.changes }),
+    { calls: 0, changes: 0 });
 
   const overhead = {
     dynamicScore: aggTimed((s) => ({ calls: s.score.calls, msTotal: s.score.avgMs * s.score.calls })),
-    exteriorBleed: aggTimed((s) => ({ calls: s.exterior.calls, msTotal: s.exterior.avgMs * s.exterior.calls })),
-    minimapUpdate: aggTimed((s) => ({ calls: s.minimap.updates, msTotal: s.minimap.avgMs * s.minimap.updates })),
-    // heartbeat cost is inlined in the frame loop (no separable span), so we
-    // report measured activity instead of a timing estimate; its cost is
-    // included in avgSimMs either way.
-    heartbeatActivity: hbTotals,
-    minimapMarkCalls: samples.reduce((a, s) => a + s.minimap.marks, 0),
-    gameIdentityStable: identityStable,
-    bmbSystemWarnings: [...bmbWarns],
-
-
     exteriorBleed: aggTimed((s) => ({ calls: s.exterior.calls, msTotal: s.exterior.avgMs * s.exterior.calls })),
     minimapUpdate: aggTimed((s) => ({ calls: s.minimap.updates, msTotal: s.minimap.avgMs * s.minimap.updates })),
     // heartbeat cost is inlined in the frame loop (no separable span), so we
@@ -315,5 +299,3 @@ try {
 } finally {
   await browser.close();
 }
-
-

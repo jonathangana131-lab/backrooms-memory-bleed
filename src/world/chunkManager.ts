@@ -189,7 +189,7 @@ export class ChunkManager {
       // ../gfx/shadowmesher does not exist yet; widening the specifier to a plain
       // string defers resolution to runtime, where the surrounding catch
       // already handles its absence.
-      const { ShadowMesherPass } = await import('../gfx/shadowmesher' as string);
+      const { ShadowMesherPass } = await import('../gfx/shadowmesher');
       const pass = new ShadowMesherPass();
       layout.shadowQuads = pass.generate(layout.props);
     } catch (e) { console.warn('[bmb] contact shadows unavailable', e); }
