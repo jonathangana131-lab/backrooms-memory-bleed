@@ -150,30 +150,31 @@ try {
   // 4. melody pacing at peak tension: watch the score schedule pluck voices.
   // (Amplitude-threshold detection is unreliable here: the tension cluster
   // lifts the bed median, so pluck peaks never clear bed*1.8.)
-  const plucks = await evalStable(async () => {
+  // The fast-forward runs synchronously in virtual time: a setTimeout-driven
+  // pump is throttled to ~15 iterations/s in this headless browser, which
+  // delivered only ~14 of the intended ~90 virtual seconds and starved the
+  // pluck count below the transient threshold even though pacing was correct.
+  const plucks = await evalStable(() => {
     const t = window.__scoreTest;
     const ctx = t.ctx;
-    const created = [];
+    const createdAt = [];
+    let vtime = 0; // pumped scheduler time: ctx.currentTime stays wall-bound
     const orig = ctx.createOscillator.bind(ctx);
     ctx.createOscillator = (...a) => {
       const o = orig(...a);
-      if (o.type === 'sine') created.push(performance.now());
+      if (o.type === 'sine') createdAt.push(vtime);
       return o;
     };
-    const t0 = performance.now();
-    while (performance.now() - t0 < 9000) {
-      t.score.update(0.1);          // fast-forward the scheduler ~3x wall time
-      await new Promise((r2) => setTimeout(r2, 10));
-    }
+    for (let i = 0; i < 900; i++) { t.score.update(0.1); vtime += 0.1; } // 90 virtual seconds
     ctx.createOscillator = orig;
     // pacing: consecutive plucks land in the documented 4-6 s virtual window
     const gaps = [];
-    for (let i = 1; i < created.length; i++) gaps.push(created[i] - created[i - 1]);
-    return { count: created.length, gaps };
+    for (let i = 1; i < createdAt.length; i++) gaps.push(createdAt[i] - createdAt[i - 1]);
+    return { count: createdAt.length, gaps };
   });
   check('melody plucks scheduled at peak tension',
     transientLanded(plucks.count),
-    'plucks=' + plucks.count + ' gapsMs=' + JSON.stringify(plucks.gaps.map((g) => Math.round(g))));
+    'plucks=' + plucks.count + ' gapsVirtualS=' + JSON.stringify(plucks.gaps.map((g) => +g.toFixed(2))));
 
   // 5. stop() fades everything to silence
   await evalStable(() => { window.__scoreTest.score.stop(); window.__scoreTest.stopped = true; });
