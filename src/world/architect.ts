@@ -1,11 +1,21 @@
 /**
  * The Architect: decides the structure of every chunk deterministically
  * from (seed, chunk coords), warped by the Memory Contamination field.
- * Pure data - no Babylon dependencies.
+ * Pure data - no Babylon dependencies. Authored content pools (waves,
+ * arcs, graffiti) surface here through hash-selected, tag-filtered picks.
  */
 import { RNG, hash2i, fbm2, rand2 } from '../core/rng';
 import { CELL, CHUNK_CELLS, SALTS, EdgeCode, District } from './constants';
 import { MemoryField, MemoryKind } from '../memory/field';
+import { MORE_NOTES } from '../content/morenotes';
+import { NOTE_WAVE3 as LEGACY_WAVE3_TEXTS } from '../content/notewave3';
+import { NOTE_WAVE1 } from '../content/notes-wave1';
+import { NOTE_WAVE2 } from '../content/notes-wave2';
+import { NOTE_WAVE3_POOL } from '../content/notes-wave3';
+import { STORY_ARCS } from '../content/clusters';
+import { GRAFFITI_POOL } from '../content/graffiti-pool';
+import { isEligible, pickEligible } from '../content/tags';
+import type { TaggedEntry } from '../content/tags';
 
 export interface Box2 {
   minX: number; minZ: number; maxX: number; maxZ: number;
@@ -308,7 +318,13 @@ const SIGN_TEXTS: Record<number, string[]> = {
   [MemoryKind.PERSONAL]: ['YOU WERE HERE', 'YOU AGAIN', 'THIS WAY HOME', 'REMEMBER?', 'YOU LIVE HERE', 'ALMOST HOME', 'STILL YOURS', 'WELCOME BACK', 'NOT YOUR HOUSE', 'YOU FORGOT THIS'],
 };
 
-export function generateLayout(seed: number, cx: number, cz: number, mem?: MemoryField): ChunkLayout {
+/** Plain-data generation context gating stage-tagged authored content. */
+export interface LayoutContext {
+  /** Current StorySystem.stage; defaults to 0 when absent. */
+  stage?: number;
+}
+
+export function generateLayout(seed: number, cx: number, cz: number, mem?: MemoryField, ctx?: LayoutContext): ChunkLayout {
   const N = CHUNK_CELLS;
   const centerX = (cx + 0.5) * N * CELL;
   const centerZ = (cz + 0.5) * N * CELL;
@@ -368,13 +384,14 @@ export function generateLayout(seed: number, cx: number, cz: number, mem?: Memor
   generateLights(seed, layout);
   generateProps(seed, layout);
   generateSigns(seed, layout);
-  generateNotes(seed, layout);
+  generateNotes(seed, layout, ctx);
   generateBatteries(seed, layout);
   generatePuddles(seed, layout);
   generateWires(seed, layout);
   generateCables(seed, layout);
   generateStains(seed, layout);
-  generateGraffiti(seed, layout);
+  generateGraffiti(seed, layout, ctx);
+  generateBleedDecals(seed, layout);
   return layout;
 }
 
@@ -880,12 +897,57 @@ function applyLandmark(seed: number, cx: number, cz: number, layout: ChunkLayout
   });
 }
 
-function generateNotes(seed: number, layout: ChunkLayout): void {
+/**
+ * Selection context for authored-content filtering: the chunk's eternal
+ * district and contamination kind plus the caller's story stage.
+ */
+function selectionContextFor(layout: ChunkLayout, ctx?: LayoutContext) {
+  return { district: layout.district, memKind: layout.memKind, stage: ctx?.stage ?? 0 };
+}
+
+/** Tag-filtered arc pool: embedded stories always, tagged arcs when eligible. */
+function eligibleArcTexts(layout: ChunkLayout, ctx?: LayoutContext): string[][] {
+  const selCtx = selectionContextFor(layout, ctx);
+  return [
+    ...CLUSTER_STORIES,
+    ...STORY_ARCS
+      .filter((arc) => arc.beats.every((beat) => isEligible(beat, selCtx)))
+      .map((arc) => arc.beats.map((beat) => beat.text)),
+  ];
+}
+
+/** Untagged legacy notes restated as tag-free entries so one picker covers them. */
+const LEGACY_NOTES: readonly TaggedEntry[] = [
+  ...NOTE_TEXTS,
+  ...MORE_NOTES,
+  ...LEGACY_WAVE3_TEXTS,
+].map((text) => ({ text }));
+
+/**
+ * Every standalone field document in deterministic pick order: legacy
+ * untagged texts first (always eligible, so ambient notes never run dry),
+ * then the three authored waves whose tags filter per chunk.
+ */
+const TAGGED_NOTES: readonly TaggedEntry[] = [
+  ...LEGACY_NOTES,
+  ...NOTE_WAVE1,
+  ...NOTE_WAVE2,
+  ...NOTE_WAVE3_POOL,
+];
+
+/** Salt isolating authored-note selection from every other hashed feature. */
+const NOTE_SALT = 0x7e3c;
+
+/** Salt isolating authored-graffiti selection from every other hash. */
+const GRAFFITI_POOL_SALT = 0x67a1;
+
+function generateNotes(seed: number, layout: ChunkLayout, ctx?: LayoutContext): void {
   const N = CHUNK_CELLS;
   // every ~9 chunks: a clustered micro-story (3-4 notes in one room)
   if ((hash2i(layout.cx, layout.cz, seed ^ 0xc105) % 9) === 0) {
     const crng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x57a7));
-    const story = CLUSTER_STORIES[hash2i(layout.cx, layout.cz, seed ^ 0x5702) % CLUSTER_STORIES.length];
+    const arcs = eligibleArcTexts(layout, ctx);
+    const story = arcs[hash2i(layout.cx, layout.cz, seed ^ 0x5702) % arcs.length];
     const bx = (layout.cx * N + crng.range(3, N - 3)) * CELL;
     const bz = (layout.cz * N + crng.range(3, N - 3)) * CELL;
     for (let i = 0; i < story.length; i++) {
@@ -903,12 +965,96 @@ function generateNotes(seed: number, layout: ChunkLayout): void {
   const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ 0x4e07));
   const lx = rng.int(1, N - 1);
   const lz = rng.int(1, N - 1);
+  // one hash picks across legacy + authored waves; tag filtering happens
+  // inside pickEligible and the untagged head keeps the pick non-null
+  const picked = pickEligible(
+    TAGGED_NOTES,
+    selectionContextFor(layout, ctx),
+    hash2i(layout.cx, layout.cz + 91, seed ^ NOTE_SALT),
+  );
   layout.notes.push({
     x: (layout.cx * N + lx + rng.range(0.3, 0.7)) * CELL,
     z: (layout.cz * N + lz + rng.range(0.3, 0.7)) * CELL,
     rot: rng.next() * Math.PI * 2,
-    text: NOTE_TEXTS[hash2i(layout.cx, layout.cz + 91, seed) % NOTE_TEXTS.length],
+    text: picked ? picked.text : LEGACY_NOTES[0].text,
   });
+}
+
+
+// ---- CONTAMINATION BLEED DECALS ------------------------------------------
+
+/** Salt isolating bleed-decal scattering from every other hashed feature. */
+const BLEED_SALT = 0x6eed;
+
+/** Bleed-decal budget at full contamination (density scales as intensity^2). */
+const BLEED_MAX_DECALS = 12;
+
+/**
+ * Stain blooms and wallpaper-peel curls where the memory field runs hot.
+ * Density is proportional to memIntensity - zero contamination adds nothing,
+ * saturated reconstruction zones read visibly diseased. Reuses the landmark
+ * detail decal pipeline (layout.details consumed by the mesher's addDetails)
+ * and the seeded-scatter placement pattern of generateStains/generateGraffiti.
+ */
+function generateBleedDecals(seed: number, layout: ChunkLayout): void {
+  const intensity = layout.memIntensity;
+  if (intensity <= 0) return;
+  const rng = new RNG(hash2i(layout.cx, layout.cz, seed ^ BLEED_SALT));
+  const N = CHUNK_CELLS;
+  const budget = intensity * intensity * BLEED_MAX_DECALS;
+  let count = Math.floor(budget);
+  if (rng.next() < budget - count) count++;
+  const det = layout.details ?? (layout.details = []);
+  for (let i = 0; i < count; i++) {
+    const lx = rng.int(1, N - 1);
+    const lz = rng.int(1, N - 1);
+    const x = (layout.cx * N + lx + rng.range(0.2, 0.8)) * CELL;
+    const z = (layout.cz * N + lz + rng.range(0.2, 0.8)) * CELL;
+    // keep the spawn plaza clean like every other dressing pass
+    if (Math.hypot(x, z) < 9) continue;
+    if (rng.chance(0.55)) {
+      // stain bloom: memory bleed soaking through the carpet
+      const r = rng.range(0.22, 0.85) * (0.5 + intensity);
+      det.push({
+        tag: 'blood',
+        x, z,
+        y: 0.005,
+        w: r * 2,
+        h: r * rng.range(0.7, 1.4),
+        rot: rng.next() * Math.PI,
+        rgb: rng.chance(0.5) ? 0x241019 : 0x30160e, // bruised purple / rust brown
+      });
+      continue;
+    }
+    // wallpaper peel: pale backing curl clinging to a solid wall face
+    const heIdx = lz * N + lx;
+    const veIdx = lz * (N + 1) + lx;
+    if (layout.hEdges[heIdx] === EdgeCode.SOLID) {
+      det.push({
+        tag: 'lint',
+        x: x + rng.range(-0.4, 0.4),
+        z: (layout.cz * N + lz) * CELL,
+        y: rng.range(0.4, 1.8),
+        w: rng.range(0.08, 0.26),
+        h: rng.range(0.06, 0.2),
+        rot: 0,
+        face: rng.chance(0.5) ? 0 : 1,
+        rgb: 0x8a7c55,
+      });
+    } else if (layout.vEdges[veIdx] === EdgeCode.SOLID) {
+      det.push({
+        tag: 'lint',
+        x: (layout.cx * N + lx) * CELL,
+        z: z + rng.range(-0.4, 0.4),
+        y: rng.range(0.4, 1.8),
+        w: rng.range(0.08, 0.26),
+        h: rng.range(0.06, 0.2),
+        rot: 0,
+        face: rng.chance(0.5) ? 2 : 3,
+        rgb: 0x8a7c55,
+      });
+    }
+  }
 }
 
 /** Damp floors in transit/hospital corridors: reflective puddles. */
@@ -975,7 +1121,7 @@ const KIND_GRAFFITI: Record<number, string[]> = {
 };
 
 /** Scrawled marks in strongly-personal or high-contamination chunks. */
-function generateGraffiti(seed: number, layout: ChunkLayout): void {
+function generateGraffiti(seed: number, layout: ChunkLayout, ctx?: LayoutContext): void {
   const strong = layout.memKind === MemoryKind.PERSONAL && layout.memIntensity > 0.3;
   const heavy = layout.memIntensity > 0.62;
   if (!strong && !heavy) return;
@@ -988,14 +1134,23 @@ function generateGraffiti(seed: number, layout: ChunkLayout): void {
     // find a solid wall to scrawl on (horizontal edges preferred)
     const heIdx = lz * N + lx;
     const veIdx = lz * (N + 1) + lx;
+    // authored wall texts first (tag-filtered per chunk); legacy kind
+    // graffiti keeps the scrawl legible when nothing eligible remains
     const pool = KIND_GRAFFITI[layout.memKind] ?? GRAFFITI_TEXTS;
+    const authored = pickEligible(
+      GRAFFITI_POOL,
+      selectionContextFor(layout, ctx),
+      hash2i(layout.cx * 8 + i, layout.cz, seed ^ GRAFFITI_POOL_SALT),
+    );
+    const legacyText = pool[hash2i(layout.cx + i, layout.cz, seed) % pool.length];
+    const text = authored ? authored.text : legacyText;
     if (layout.hEdges[heIdx] === EdgeCode.SOLID) {
       layout.graffiti.push({
         x: (layout.cx * N + lx + rng.range(0.25, 0.75)) * CELL,
         z: (layout.cz * N + lz) * CELL,
         face: rng.chance(0.5) ? 0 : 1,
         y: rng.range(1.2, 1.9),
-        text: pool[hash2i(layout.cx + i, layout.cz, seed) % pool.length],
+        text,
       });
     } else if (layout.vEdges[veIdx] === EdgeCode.SOLID) {
       layout.graffiti.push({
@@ -1003,7 +1158,7 @@ function generateGraffiti(seed: number, layout: ChunkLayout): void {
         z: (layout.cz * N + lz + rng.range(0.25, 0.75)) * CELL,
         face: rng.chance(0.5) ? 2 : 3,
         y: rng.range(1.2, 1.9),
-        text: pool[hash2i(layout.cx, layout.cz + i, seed) % pool.length],
+        text,
       });
     }
   }
