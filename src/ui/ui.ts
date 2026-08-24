@@ -44,6 +44,14 @@ export class UI {
   private loadingDotsTimer: ReturnType<typeof setInterval> | null = null;
   private loadingSafetyTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingSeed = '';
+  /** F47: title-screen daily rite line ('TODAY'S RITE' + shared seed). */
+  private dailyRiteEl!: HTMLElement;
+  /**
+   * F49 speaker-tag hook for subtitles. Null (default) leaves every line
+   * unchanged; the game installs the accessibility-pack tagger so lines
+   * gain '[SPEAKER]' prefixes only while the setting is on.
+   */
+  subtitleTagger: ((speaker: string, line: string) => string) | null = null;
   private toastQueue: {
     el: HTMLElement;
     expiresAt: number;
@@ -180,6 +188,11 @@ export class UI {
     this.seedInput = this.el('input', 'seed-input', menu) as HTMLInputElement;
     this.seedInput.placeholder = 'seed (blank = random)';
     this.seedInput.spellcheck = false;
+
+    // F47 daily rite: TODAY'S RITE banner + shared seed, filled by the
+    // game once the date-derived seed is computed.
+    this.dailyRiteEl = this.el('div', 'daily-rite', s);
+    this.dailyRiteEl.style.display = 'none';
 
     const panel = this.el('div', 'settings-panel', s);
     panel.id = 'settings-panel';
@@ -397,11 +410,29 @@ export class UI {
     if (this.objectiveEl.textContent !== t) this.objectiveEl.textContent = t;
   }
 
-  say(text: string, sec = 4): void {
+  say(text: string, sec = 4, speaker = 'system'): void {
     if (!this.subtitlesOn) return;
-    this.subtitleEl.textContent = text;
+    // F49: the injected tagger is an identity when speaker tags are off,
+    // so untagged output is byte-identical to the pre-F49 path.
+    this.subtitleEl.textContent = this.subtitleTagger
+      ? this.subtitleTagger(speaker, text)
+      : text;
     this.subtitleTimer = sec;
     this.subtitleEl.style.opacity = '1';
+  }
+
+  /**
+   * F47: show the daily rite banner on the title screen. Passing null
+   * hides the element again (used when no rite state could be built).
+   */
+  setDailyRite(line: string | null): void {
+    if (!this.dailyRiteEl) return;
+    if (line === null) {
+      this.dailyRiteEl.style.display = 'none';
+      return;
+    }
+    this.dailyRiteEl.textContent = line;
+    this.dailyRiteEl.style.display = 'block';
   }
 
   tickSubtitles(dt: number): void {
