@@ -121,6 +121,9 @@ import { ResidueField, RESIDUE_KINDS, type ResidueKind } from '../memory/residue
 import { TorchView, type TorchViewTarget } from '../gfx/torchview';
 // F42: night-vision camcorder — IR ramp mode draining the torch cell
 import { NightVision } from '../gfx/nightvision';
+// F22: gravity ambivalence — saturation zones tilt the camera horizon
+import { GravityTilt } from './gravitytilt';
+import { LEAN_ROLL_MAX } from '../player/leanpeek';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -129,6 +132,8 @@ export type GameState = 'menu' | 'playing' | 'paused';
 
 const SPAWN_X = 1.25;
 const SPAWN_Z = 1.25;
+/** F22: hard roll cap of the gravity tilt, in radians (GravityTilt.TILT_MAX_DEG). */
+const TILT_MAX_RAD = (5 * Math.PI) / 180;
 
 /** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
 function presetToQualityNum(q: string): number {
@@ -273,6 +278,16 @@ export class Game {
    * gain caps the level at NV_ARTIFACT_GAIN = 0.8, so the threshold must
    * sit inside the reachable range) */
   private readonly NV_ARTIFACT_CAPTION_LEVEL = 0.72;
+
+  // ---- F22 gravity ambivalence: per-run tilt model + roll bookkeeping ----
+  /** rebuilt every run so the veer thresholds re-jitter from the fresh seed */
+  private gravityTilt: GravityTilt | null = null;
+  /** roll offset we last added to camera.rotation.z (rad); stripped from
+   * the pre-update baseline so lean/shake never double-count the tilt */
+  private gravityTiltAppliedRad = 0;
+  /** previous body position for the per-frame lateral velocity estimate */
+  private tiltPrevX = 0;
+  private tiltPrevZ = 0;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -954,6 +969,13 @@ export class Game {
         { seed: (this.seed ^ 0x1eca7a) >>> 0, batteryLevel: () => this.flashlight.battery },
       );
     } catch (e) { console.warn('[bmb] night vision unavailable', e); this.nightvision = null; }
+    // F22: fresh balance-tilt model per run (seed-jittered thresholds);
+    // the lateral-velocity history starts empty at the spawn point.
+    try { this.gravityTilt = new GravityTilt(this.seed); }
+    catch (e) { console.warn('[bmb] gravity tilt unavailable', e); this.gravityTilt = null; }
+    this.gravityTiltAppliedRad = 0;
+    this.tiltPrevX = pos.x;
+    this.tiltPrevZ = pos.z;
     this.knownChunkKeys.clear();
     this.lastChunksBuiltSeen = 0;
     this.markedBeaconKeys.clear();
@@ -1557,6 +1579,11 @@ export class Game {
       this.state === 'menu' ? this.attract.x : this.player.body.x,
       this.state === 'menu' ? this.attract.z : this.player.body.z,
     );
+    // F22 baseline capture: the controller REWRITES rotation.z every update
+    // (lean roll), so strip our own prior tilt contribution from the
+    // pre-update roll to recover lean + shake as the baseline the new tilt
+    // adds onto — the tilt can then never accumulate frame over frame.
+    const tiltBaselineZ = this.camera.rotation.z - this.gravityTiltAppliedRad;
     this.player.update(active ? dt : 0, colliders);
     // F8: stride onsets drift toward the heartbeat under tension — the
     // controller advances its bob cycle by this externally computed scale.
@@ -1572,6 +1599,34 @@ export class Game {
     this.player.inputScale = active ? this.fallStagger.inputScale : 1;
     if (this.fallStagger.active) this.fallStagger.update(dt);
     this.updateStaggerBlur(this.fallStagger.blurAmp);
+
+    // F22: gravity ambivalence — inside memory-saturated zones the horizon
+    // tilts toward the veer the walk history settles on. The summed roll is
+    // clamped to the tilt cap (±5°) on top of the lean bound.
+    if (this.gravityTilt) {
+      try {
+        if (active && dt > 0) {
+          const vx = (this.player.body.x - this.tiltPrevX) / dt;
+          const vz = (this.player.body.z - this.tiltPrevZ) / dt;
+          // right vector of the yaw frame — the same basis Flashlight aims with
+          const lateral = vx * Math.cos(this.player.yaw) - vz * Math.sin(this.player.yaw);
+          const sat = Math.max(0, Math.min(1, this.mem.sampleAt(this.player.body.x, this.player.body.z).intensity));
+          this.gravityTiltAppliedRad = (this.gravityTilt.update(sat, lateral, dt) * Math.PI) / 180;
+        } else {
+          this.gravityTilt.reset();
+          this.gravityTiltAppliedRad = 0;
+        }
+        this.tiltPrevX = this.player.body.x;
+        this.tiltPrevZ = this.player.body.z;
+        const maxRoll = TILT_MAX_RAD + LEAN_ROLL_MAX;
+        this.camera.rotation.z = Math.max(-maxRoll, Math.min(maxRoll, tiltBaselineZ + this.gravityTiltAppliedRad));
+      } catch (e) {
+        console.warn('[bmb] gravity tilt failed', e);
+        this.gravityTilt.reset();
+        this.gravityTiltAppliedRad = 0;
+        this.camera.rotation.z = tiltBaselineZ;
+      }
+    }
 
     if (active) {
       this.mem.recordPresence(this.player.body.x, this.player.body.z, dt);
