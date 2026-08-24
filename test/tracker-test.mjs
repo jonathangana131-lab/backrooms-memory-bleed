@@ -10,12 +10,16 @@ import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 
 const require_ = createRequire(import.meta.url);
-// esbuild ships as a pnpm-store transitive dep of vite; find it in .pnpm.
+// npm layout installs esbuild at node_modules/esbuild; pnpm layout only
+// exposes it as a store transitive inside node_modules/.pnpm. Try direct
+// resolution first, then fall back to scanning the store.
 function loadEsbuild() {
-  const pnpmDir = process.cwd() + '/node_modules/.pnpm';
-  const entry = readdirSync(pnpmDir).find((d) => d.startsWith('esbuild@'));
-  if (!entry) throw new Error('esbuild not found in node_modules/.pnpm');
-  return require_(pnpmDir + '/' + entry + '/node_modules/esbuild');
+  try { return require_('esbuild'); } catch { /* not a directly resolvable dependency */ }
+  let entries = [];
+  try { entries = readdirSync(process.cwd() + '/node_modules/.pnpm'); } catch { /* no pnpm store directory */ }
+  const entry = entries.find((d) => d.startsWith('esbuild@'));
+  if (!entry) throw new Error('esbuild not found in node_modules/esbuild or node_modules/.pnpm');
+  return require_(process.cwd() + '/node_modules/.pnpm/' + entry + '/node_modules/esbuild');
 }
 const esbuild = loadEsbuild();
 
