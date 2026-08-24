@@ -111,6 +111,8 @@ import { WatcherIntroController } from '../story/watcherintro';
 import { PhotoGallery } from '../ui/gallery';
 import { formatExtended, type ExtendedStats } from '../ui/endstatsext';
 import { createFogVariation } from '../gfx/fogvariation';
+// F17: echo geography — the halls record your sounds and give them back
+import { EchoGeography } from '../story/echogeography';
 
 export type GameState = 'menu' | 'playing' | 'paused';
 
@@ -212,6 +214,17 @@ export class Game {
   private fallStagger = new FallStagger();
   /** F14: lazy full-screen backdrop-blur veil (grain-overlay pattern) */
   private staggerBlurEl: HTMLDivElement | null = null;
+
+  // ---- F17 echo geography: per-run recorder + replay queue ----
+  private echoGeo: EchoGeography | null = null;
+  /** player footstep bursts since run start (every 4th is recorded) */
+  private echoFootstepCount = 0;
+  /** 12 m site key the player last occupied */
+  private echoSiteKey: string | null = null;
+  /** cues waiting to play: due session-second + verbatim memo text if any */
+  private echoCueQueue: { dueSec: number; text?: string }[] = [];
+  /** echoes played during the current site entry (capped at 2) */
+  private echoPlaysThisEntry = 0;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -556,6 +569,18 @@ export class Game {
       } catch (e) {
         console.warn('[bmb] surface footsteps failed', e);
       }
+      // F17: every fourth footstep burst is recorded into the halls' memory
+      try {
+        this.echoFootstepCount++;
+        if (this.echoGeo && this.echoFootstepCount % 4 === 0) {
+          this.echoGeo.recordFootstepBurst(
+            Math.floor(this.player.body.x / 12) + ',' + Math.floor(this.player.body.z / 12),
+            this.playtimeSec,
+          );
+        }
+      } catch (e) {
+        console.warn('[bmb] echo geography footstep feed failed', e);
+      }
     });
 
     canvas.addEventListener('click', () => {
@@ -800,6 +825,13 @@ export class Game {
     catch (e) { console.warn('[bmb] fauna reset failed', e); }
     try { this.weatherUi?.reset(); }
     catch (e) { console.warn('[bmb] weather ui reset failed', e); }
+    // F17: fresh echo-geography recorder + replay state per run
+    try { this.echoGeo = new EchoGeography(this.seed); }
+    catch (e) { console.warn('[bmb] echo geography unavailable', e); this.echoGeo = null; }
+    this.echoFootstepCount = 0;
+    this.echoSiteKey = null;
+    this.echoCueQueue.length = 0;
+    this.echoPlaysThisEntry = 0;
     this.knownChunkKeys.clear();
     this.lastChunksBuiltSeen = 0;
     this.markedBeaconKeys.clear();
@@ -1645,6 +1677,33 @@ export class Game {
           }
         }
       }
+      // F17: re-entering a recorded site queues its echo schedule; frame
+      // processing plays at most two distant echoes per entry.
+      if (this.echoGeo) {
+        try {
+          const sk = Math.floor(this.player.body.x / 12) + ',' + Math.floor(this.player.body.z / 12);
+          if (sk !== this.echoSiteKey) {
+            this.echoSiteKey = sk;
+            this.echoPlaysThisEntry = 0;
+            this.echoCueQueue.length = 0; // echoes belong to their entry only
+            for (const cue of this.echoGeo.enterSite(sk)) {
+              this.echoCueQueue.push({ dueSec: this.playtimeSec + cue.delaySec, text: cue.memoText });
+            }
+          }
+          while (
+            this.echoPlaysThisEntry < 2 &&
+            this.echoCueQueue.length > 0 &&
+            this.echoCueQueue[0].dueSec <= this.playtimeSec
+          ) {
+            const cue = this.echoCueQueue.shift()!;
+            this.audio.whisper();
+            this.ui.say(cue.text ?? '...your own footsteps come back wrong...', 4);
+            this.echoPlaysThisEntry++;
+          }
+        } catch (e) {
+          console.warn('[bmb] echo geography replay failed', e);
+        }
+      }
       this.entityScheduler(dt);
       this.helperDialogue();
       // reality erosion / relocation
@@ -2200,6 +2259,19 @@ export class Game {
       this.erosion.stability = Math.min(1, this.erosion.stability + 0.25);
       this.mem.inject(this.player.body.x, this.player.body.z, MemoryKind.PERSONAL, 0.45);
       if (lore.includes('THRESHOLD')) this.triggerEnding();
+    }
+    // F17/F21: any note read is a voice-memo moment for the halls' echo
+    // memory and a potential prior-tenant residue touch.
+    else if (prompt === '[E] READ NOTE' && note) {
+      try {
+        this.echoGeo?.recordMemoMoment(
+          Math.floor(note.x / 12) + ',' + Math.floor(note.z / 12),
+          this.playtimeSec,
+          note.text,
+        );
+      } catch (e) {
+        console.warn('[bmb] echo geography memo feed failed', e);
+      }
     }
     // Wave A (A-2a): NoteReread ledger + bleed distortion on re-reads.
     else if (prompt === '[E] READ NOTE' && note && this.reread) {
