@@ -43,6 +43,11 @@ const STUBS = new Map([
 function resolveDep(spec, fromFile) {
   if (STUBS.has(spec)) return STUBS.get(spec);
   if (spec === '../core/events') return loadModule('events', 'src/core/events.ts');
+  // stamina.ts is a pure state machine with no imports; load the real module
+  // so the controller runs against the actual F9 drain/regen surface.
+  if (spec === './stamina') return loadModule('stamina', 'src/player/stamina.ts');
+  // leanpeek.ts is likewise a pure state machine; load the real module.
+  if (spec === './leanpeek') return loadModule('leanpeek', 'src/player/leanpeek.ts');
   throw new Error('unexpected import: ' + spec + ' from ' + fromFile);
 }
 
@@ -163,7 +168,13 @@ function run(rig, seconds) {
   rig.keys.delete('ShiftLeft');
   rig.keys.delete('KeyW');
   run(rig, 0.5);
-  check('FOV eases back once sprinting ends',
+  // Since F9 the FOV carries an exertion pulse (FOV_PULSE_MAX * fovPulseAmp *
+  // sin(pulsePhase)) that keeps oscillating while drained stamina regenerates,
+  // so stock FOV is reached only after recovery, not within the 0.22 s kick ease.
+  check('FOV kick eases out once sprinting ends', rig.camera.fov < 1.26,
+    String(rig.camera.fov));
+  run(rig, 3); // STAMINA_REGEN_RATE refills a 1 s sprint drain (~0.11) in ~1.5 s
+  check('FOV settles at stock once stamina fully recovers',
     Math.abs(rig.camera.fov - 1.25) < 0.001, String(rig.camera.fov));
 }
 {
