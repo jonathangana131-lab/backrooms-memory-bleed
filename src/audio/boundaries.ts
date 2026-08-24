@@ -90,6 +90,7 @@ export class BoundaryCue {
       const len = Math.floor(this.ctx.sampleRate);
       this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = this.noiseBuf.getChannelData(0);
+      // audio DSP buffer fill — sim PRNG law carve-out
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     }
     return this.noiseBuf;
