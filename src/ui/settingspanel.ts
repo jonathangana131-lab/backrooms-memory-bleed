@@ -41,6 +41,8 @@ const GAME_SETTING_DEFAULTS: Readonly<Record<string, unknown>> =
     fov: 90,
     subtitles: true,
     showMinimap: true,
+    motionSafety: false,
+    speakerTags: false,
   });
 
 /**
@@ -373,6 +375,8 @@ export function defaultSections(): SectionSpec[] {
         { kind: 'toggle', key: 'motionReduction', label: 'REDUCE MOTION' },
         { kind: 'toggle', key: 'highContrast', label: 'HIGH CONTRAST' },
         { kind: 'toggle', key: 'instantInteract', label: 'INSTANT INTERACT' },
+        { kind: 'toggle', key: 'motionSafety', label: 'MOTION SAFETY' },
+        { kind: 'toggle', key: 'speakerTags', label: 'SPEAKER TAGS' },
       ],
     },
   ];
