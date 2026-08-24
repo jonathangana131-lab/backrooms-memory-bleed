@@ -77,11 +77,11 @@ with infinite possibility and no end.
 
 - F15 Pocket dimensions — seeded doors open into interiors larger than the building. AC: interior byte-identical regen; exterior unchanged.
 - F16 Blackout rearrangement — props drift one slot, one door bricks after blackouts. AC: deltas reversible.
-- F17 Echo geography — halls return YOUR earlier footsteps/memos as distant echoes. AC: deterministic replay per site.
-- F18 Time slippage — clocks/camcorder/session timer disagree inside saturation zones. AC: offsets consistent per zone seed.
+- F17 Echo geography — halls return YOUR earlier footsteps/memos as distant echoes. AC: deterministic replay per site. SHIPPED ✅ (evidence: test/echogeography-test.mjs 4/0 ALL PASS; mounted — footstep bursts + memo moments recorded per site, re-entry replays ≤2 cues)
+- F18 Time slippage — clocks/camcorder/session timer disagree inside saturation zones. AC: offsets consistent per zone seed. SHIPPED ✅ (evidence: test/timeslippage-test.mjs 4/0; mounted on live memory-zone saturation, 60 s disagreement warning once per zone visit)
 - F19 Impossible windows — lit rooms visible where exterior should be. AC: registry + culling test.
 - F20 Unobserved stairwell loop — loops only while gaze-away >2s. AC: trigger iff condition (reuses stretch logic).
-- F21 Memory residue touch — tagged objects play ghost replays of prior tenants. AC: one-shot per visit.
+- F21 Memory residue touch — tagged objects play ghost replays of prior tenants. AC: one-shot per visit. SHIPPED ✅ (evidence: test/residue-test.mjs 4/0; mounted on note-read path with seeded tenant scripts + frame-queue playback, 1/90 s rate limit)
 - F22 Gravity ambivalence — saturation zones tilt balance ±5° with veering walk. AC: bounded, exits cleanly.
 - F23 Door/wall swaps — door opens into wall; adjacent wall becomes a door. AC: nav+collision+mesh atomic swap test.
 - F24 Aging corridors — revisits accumulate decay proportional to sessions since first seen. AC: persists via ChunkDeltas.
