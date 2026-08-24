@@ -124,6 +124,12 @@ import { NightVision } from '../gfx/nightvision';
 // F22: gravity ambivalence — saturation zones tilt the camera horizon
 import { GravityTilt } from './gravitytilt';
 import { LEAN_ROLL_MAX } from '../player/leanpeek';
+// Mount batch B: player-body signals (pure logic, no Scene/AudioContext)
+import { HandTremor } from '../player/tremor';
+import { BlinkScheduler } from '../player/blinks';
+import { AdrenalineSystem } from '../player/adrenaline';
+import { HungerPangs } from '../player/hunger';
+import { FlickerBattery } from '../player/flickerbattery';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -288,6 +294,25 @@ export class Game {
   /** previous body position for the per-frame lateral velocity estimate */
   private tiltPrevX = 0;
   private tiltPrevZ = 0;
+
+  // ---- Mount batch B: player-body signals (F72/F73/F74/F75/F95) ----
+  /** F72: low-battery camcorder aim wobble, sampled once per playing frame */
+  private tremor: HandTremor | null = null;
+  /** F74: sleep-pressure micro-blink scheduler driving the eyelid veil */
+  private blinks: BlinkScheduler | null = null;
+  /** F74: lazy full-screen black eyelid veil (stagger-blur pattern) */
+  private blinkVeilEl: HTMLDivElement | null = null;
+  /** F75: near-miss adrenaline dumps feeding camera shake + hearing gain */
+  private adrenaline = new AdrenalineSystem();
+  /** F75: hearing-gain multiplier snapshot for the future audio-layer consumer */
+  private adrenalineHearingGainMul = 1;
+  /** F73: expedition-length stomach pangs (schedule restarts per run — not serialized) */
+  private hunger: HungerPangs | null = null;
+  /** F73: playtime second of the last HUNGER caption (>= 20 s gap) */
+  private hungerCaptionLastSec = -1e9;
+  /** F95: opt-in hardcore flicker battery model; mode stays off until a
+   * settings-schema toggle exists (see beginRun) */
+  private flickerBattery: FlickerBattery | null = null;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -976,6 +1001,25 @@ export class Game {
     this.gravityTiltAppliedRad = 0;
     this.tiltPrevX = pos.x;
     this.tiltPrevZ = pos.z;
+    // ---- Mount batch B: fresh per-run player-body models, re-seeded from
+    // the run seed so identical seeds replay identically.
+    this.tremor = new HandTremor((this.seed ^ 0x74f2) >>> 0);
+    this.blinks = new BlinkScheduler((this.seed ^ 0xb121) >>> 0);
+    this.updateBlinkVeil(0);
+    this.adrenaline = new AdrenalineSystem();
+    this.adrenalineHearingGainMul = 1;
+    // F73 gap: the pang schedule is not part of the save slot, so a
+    // continued expedition restarts the grace period from its resume point.
+    this.hunger = new HungerPangs((this.seed ^ 0x4e71) >>> 0);
+    this.hungerCaptionLastSec = -1e9;
+    // F95 gap: no hardcore toggle exists in the settings/a11y schema yet, so
+    // the mode boots off (identity frames); expose via this flag when a
+    // settings section lands.
+    this.flickerBattery = new FlickerBattery((this.seed ^ 0xf11c9) >>> 0);
+    this.flickerBattery.setHardcore(false);
+    // near-miss telemetry + adrenaline arming reset with the fresh run
+    this.nearMisses = 0;
+    this.nearMissArmed = true;
     this.knownChunkKeys.clear();
     this.lastChunksBuiltSeen = 0;
     this.markedBeaconKeys.clear();
@@ -1552,6 +1596,25 @@ export class Game {
     this.nvTintEl.style.opacity = String(Math.max(0, Math.min(0.08, envelope * 0.08)));
   }
 
+  /**
+   * F74: full-screen black eyelid veil whose opacity tracks the blink
+   * closure envelope (same lazy fixed-div pattern as the stagger-blur veil).
+   * The 0.85 opacity ceiling keeps even peak blinks readable-through.
+   */
+  private updateBlinkVeil(closure: number): void {
+    if (typeof document === 'undefined') return;
+    if (!this.blinkVeilEl) {
+      const el = document.createElement('div');
+      el.id = 'bmb-blink-veil';
+      el.style.cssText =
+        'position:fixed;inset:0;pointer-events:none;z-index:7;' +
+        'background:#000;opacity:0';
+      document.body.appendChild(el);
+      this.blinkVeilEl = el;
+    }
+    this.blinkVeilEl.style.opacity = String(Math.max(0, Math.min(0.85, 0.85 * closure)));
+  }
+
   // ---------- frame ----------
 
   private frame(): void {
@@ -1882,6 +1945,67 @@ export class Game {
           }
         } catch (e) {
           console.warn('[bmb] night vision update failed', e);
+        }
+      }
+      // ---- Mount batch B: player-body signals (playing frames only) ----
+      // F75 adrenaline: advance dump envelopes, run the armed near-miss
+      // detector over watcher/double proximity (a figure closing inside 3 m
+      // fires one severity-by-closeness dump; re-armed past 6 m), and keep
+      // the hearing-gain snapshot for the audio layer.
+      try {
+        this.adrenaline.update(dt);
+        let adWd = Infinity;
+        for (const f of this.humans.figures) {
+          if (f.type !== 'watcher' && f.type !== 'double') continue;
+          const d = Math.hypot(f.body.x - this.player.body.x, f.body.z - this.player.body.z);
+          if (d < adWd) adWd = d;
+        }
+        if (isFinite(adWd)) {
+          if (this.nearMissArmed && adWd < 3) {
+            this.nearMissArmed = false;
+            this.nearMisses++;
+            this.adrenaline.pushNearMiss({ severity: Math.max(0, Math.min(1, 1 - adWd / 3)) });
+          } else if (!this.nearMissArmed && adWd > 6) {
+            this.nearMissArmed = true;
+          }
+        }
+        this.adrenalineHearingGainMul = this.adrenaline.hearingGainMul;
+      } catch (e) {
+        console.warn('[bmb] adrenaline update failed', e);
+      }
+      // F73 hunger: absolute session clock in minutes; captions stand in for
+      // the stomach growl until that synth lands (>= 20 s between captions).
+      if (this.hunger) {
+        try {
+          this.hunger.update(this.playtimeSec / 60);
+          if (this.hunger.drainEvents().length > 0 && this.playtimeSec - this.hungerCaptionLastSec >= 20) {
+            this.hungerCaptionLastSec = this.playtimeSec;
+            this.showAudioCaption('HUNGER');
+          }
+        } catch (e) {
+          console.warn('[bmb] hunger pangs failed', e);
+        }
+      }
+      // F74 blinks: session hours drive the rate ramp; drain events so the
+      // fired buffer cannot grow unbounded (no other consumer yet).
+      if (this.blinks) {
+        try {
+          this.blinks.update(dt, this.playtimeSec / 3600);
+          void this.blinks.drainEvents();
+          this.updateBlinkVeil(this.blinks.eyelidClosure);
+        } catch (e) {
+          console.warn('[bmb] blink scheduler failed', e);
+        }
+      }
+      // F72 tremor: battery-keyed aim wobble added AFTER the pose solve; the
+      // controller rewrites rotation every frame so the delta never stacks.
+      if (this.tremor) {
+        try {
+          const o = this.tremor.update(dt, Math.max(0, Math.min(1, this.flashlight.battery)));
+          this.camera.rotation.y += o.yawRad;
+          this.camera.rotation.x += o.pitchRad;
+        } catch (e) {
+          console.warn('[bmb] hand tremor failed', e);
         }
       }
       // path echoes: the space remembers where you walked last session
@@ -2341,6 +2465,8 @@ export class Game {
       if (isFinite(wd)) shakeAmt = this.director.tension * Math.max(0, 1 - wd / 8) * 0.025;
       if (blackout) shakeAmt *= 1.5;
     }
+    // F75: adrenaline dumps add their own bounded hand shake on top
+    shakeAmt += this.adrenaline.handShakeAmp;
     if (shakeAmt > 0.001 && this.state === 'playing') {
       // F3: camera shake jitter is a seeded draw per frame-tick (replay-stable)
       const shakeRng = new RNG(hash2i(Math.floor(this.playtimeSec * 60), 1868, this.seed));
