@@ -23,7 +23,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
 .seed-input { pointer-events: auto; background: rgba(12,11,4,0.8); border: 1px solid #4d4628; color: #cfc38a; padding: 9px 12px; font-family: inherit; letter-spacing: 2px; text-align: center; outline: none; }
 .seed-input:focus { border-color: #a89a52; }
 
-.settings-panel { position: absolute; right: 36px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 16px; background: rgba(14,13,5,0.92); border: 1px solid #554c2a; padding: 22px 26px; min-width: 300px; }
+.settings-panel { position: absolute; right: 36px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 16px; background: rgba(14,13,5,0.92); border: 1px solid #554c2a; padding: 22px 26px; min-width: 300px; max-height: 86vh; overflow-y: auto; }
 .set-row { display: flex; flex-direction: column; gap: 7px; font-size: 11px; letter-spacing: 2.5px; color: #9a8f58; }
 .set-row input[type=range], .set-row select { accent-color: #cdbf72; background: #14120a; color: #d8cfa8; border: 1px solid #44401f; font-family: inherit; padding: 4px; }
 .set-row input[type=checkbox] { accent-color: #cdbf72; width: 16px; height: 16px; align-self: flex-start; cursor: pointer; }

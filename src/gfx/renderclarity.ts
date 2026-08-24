@@ -235,6 +235,52 @@ function isWebGPUEngine(engine: Engine): boolean {
   }
 }
 
+// ---- WebGPU light budget ---------------------------------------------------
+
+/**
+ * Max simultaneous lights a material may bind under WebGPU. Babylon's
+ * WebGPU backend allocates one uniform-buffer binding per bound light in
+ * BOTH shader stages, plus three fixed bindings (scene/mesh/material).
+ * Chunk materials request 16 simultaneous lights -> 19 vertex-stage UBOs,
+ * past the WebGPU per-stage limit of 12; every render-pipeline creation
+ * then fails GPU validation and the whole world draws black. WebGL has no
+ * per-stage UBO limit and keeps the higher counts untouched.
+ * Budget math: 8 lights + 3 fixed bindings = 11 <= 12.
+ */
+export const WEBGPU_MAX_SIMULTANEOUS_LIGHTS = 8;
+
+/**
+ * Clamp every current and future material's maxSimultaneousLights to the
+ * WebGPU-safe budget. Installs a scene observer so chunk-streamed and
+ * prop materials created later stay clamped too. No-op on non-WebGPU
+ * engines - WebGL rendering keeps its full light counts.
+ *
+ * @param scene the game scene whose materials must respect the budget
+ * @param engine the active engine; the clamp applies only when WebGPU
+ * @returns disposer detaching the material-added observer
+ */
+export function enforceWebGPULightBudget(
+  scene: Scene,
+  engine: Engine,
+): () => void {
+  if (!isWebGPUEngine(engine)) return () => {};
+  const clamp = (mat: unknown): void => {
+    const m = mat as { maxSimultaneousLights?: number };
+    if (
+      m &&
+      typeof m.maxSimultaneousLights === 'number' &&
+      m.maxSimultaneousLights > WEBGPU_MAX_SIMULTANEOUS_LIGHTS
+    ) {
+      m.maxSimultaneousLights = WEBGPU_MAX_SIMULTANEOUS_LIGHTS;
+    }
+  };
+  for (const mat of scene.materials ?? []) clamp(mat);
+  const obs = scene.onNewMaterialAddedObservable.add(clamp);
+  return () => {
+    scene.onNewMaterialAddedObservable.remove(obs);
+  };
+}
+
 /** Locate the LightingRig's DefaultRenderingPipeline, or null when absent. */
 function findDefaultPipeline(scene: Scene): DefaultRenderingPipeline | null {
   try {

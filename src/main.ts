@@ -24,6 +24,9 @@ async function boot(): Promise<void> {
         };
       },
       startNew(seed?: string): void { game.startNew(seed ?? ''); },
+      // F91 v1.1: harness escape hatch — end the waking sequence instantly,
+      // exactly as a player's first press does.
+      dismissWakeCinematic(): void { game.dismissWakeCinematic(); },
       saveNow(): void { void game.saveNow(); },
     };
   } catch (e) {

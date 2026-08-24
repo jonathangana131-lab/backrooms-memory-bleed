@@ -255,8 +255,14 @@ first-class v1.1 work: a deepening release lands on a complete foundation.
 - DirectorLearning is unfed: no scare-response events reach it and no phase
   consumes suggestPhaseBias() — awaits the director feed/consume wiring
   (src/director/director.ts ← src/director/learning.ts).
-- Wake-cinematic shot lists are staged but unplayed — awaits the run-start
-  mount playing the sequence before control hands off (src/core/game.ts run start ← src/story/wakecinematic.ts).
+- Wake-cinematic shot lists are staged but unplayed — RESOLVED ✅
+  (2026-08-24): mounted via `src/story/wakemount.ts` (`WakeMount` headless
+  driver) + `game.ts` `beginWakeSequence()`/`dismissWakeCinematic()`; the
+  seeded shots now play at every fresh-run start before control hands off,
+  any key/click dismisses instantly into the existing rise, motion-safety
+  bypasses to the plain rise, and `__BMB__.dismissWakeCinematic` serves as
+  the harness hook. Evidence: test/wakemount-test.mjs 34/0 ALL PASS,
+  PLAYTHROUGH_PASS with PAGE_ERRORS=0, pnpm build green.
 - Adrenaline hearing gain is stored but unconsumed: `adrenalineHearingGainMul`
   waits for an audio-layer multiplier (src/audio master chain ← src/core/game.ts field).
 - Sanity remains proxied by zone saturation for journal-font degradation —

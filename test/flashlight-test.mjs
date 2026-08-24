@@ -10,6 +10,8 @@ page.on('pageerror', (e) => console.log('[PAGEERROR]', String(e).slice(0, 200)))
 await page.goto('http://127.0.0.1:5178/', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => (window).__BMB__, null, { timeout: 60000 });
 await page.evaluate(() => (window).__BMB__.startNew('fl'));
+// F91 v1.1: skip the staged wake cinematic — the toggle is asserted at ~2s.
+await page.evaluate(() => (window).__BMB__.dismissWakeCinematic?.());
 await page.waitForTimeout(2000);
 
 // grant + verify toggle and drain

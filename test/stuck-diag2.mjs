@@ -19,6 +19,8 @@ page.on('pageerror', (e) => console.log('[PAGEERROR]', String(e).slice(0, 250)))
 await page.goto('http://127.0.0.1:5178/', { waitUntil: 'networkidle' });
 await page.waitForFunction(() => (window).__BMB__, null, { timeout: 60000 });
 await page.evaluate(() => (window).__BMB__.startNew('stuck'));
+// F91 v1.1: skip the staged wake cinematic — movement holds start at ~4s.
+await page.evaluate(() => (window).__BMB__.dismissWakeCinematic?.());
 await page.waitForTimeout(4000);
 
 // clear-cell scan: first point around spawn with >=0.5 m collider clearance

@@ -66,6 +66,15 @@ export class UI {
     this.buildTitle();
     this.buildPause();
     this.buildHud();
+    // Escape dismisses the shared settings panel from any screen it was
+    // opened on; the underlying title/pause screen stays untouched.
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && this.settingsPanelOpen) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.closeSettingsPanel();
+      }
+    });
   }
 
   /**
@@ -197,6 +206,14 @@ export class UI {
     const panel = this.el('div', 'settings-panel', s);
     panel.id = 'settings-panel';
     panel.style.display = 'none';
+    const backRow = this.el('div', 'set-row', panel);
+    backRow.style.justifyContent = 'space-between';
+    const backTitle = this.el('span', '', backRow);
+    backTitle.textContent = 'SETTINGS';
+    backTitle.style.letterSpacing = '3px';
+    const backBtn = this.el('button', 'btn', backRow) as HTMLButtonElement;
+    backBtn.textContent = 'BACK';
+    backBtn.onclick = () => this.closeSettingsPanel();
     const row1 = this.el('label', 'set-row', panel);
     row1.textContent = 'MOUSE SENSITIVITY';
     this.sensSlider = this.el('input', '', row1) as HTMLInputElement;
@@ -232,7 +249,41 @@ export class UI {
 
   private togglePanel(): void {
     const p = document.getElementById('settings-panel')!;
-    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    if (p.style.display === 'none') this.openSettingsPanel();
+    else this.closeSettingsPanel();
+  }
+
+  /** Show the shared settings panel (title screen placement). */
+  private openSettingsPanel(): void {
+    const p = document.getElementById('settings-panel');
+    if (!p) return;
+    // reset pause-context repositioning so the title layout is restored
+    p.style.position = '';
+    p.style.left = '';
+    p.style.top = '';
+    p.style.transform = '';
+    p.style.zIndex = '';
+    p.style.display = 'block';
+  }
+
+  /**
+   * Hide the shared settings panel. Used by the panel's BACK button and
+   * Escape; the underlying screen (title or pause) stays as it was.
+   */
+  private closeSettingsPanel(): void {
+    const p = document.getElementById('settings-panel');
+    if (!p) return;
+    p.style.display = 'none';
+    p.style.position = '';
+    p.style.left = '';
+    p.style.top = '';
+    p.style.transform = '';
+    p.style.zIndex = '';
+  }
+
+  get settingsPanelOpen(): boolean {
+    const p = document.getElementById('settings-panel');
+    return !!p && p.style.display !== 'none' && p.style.display !== '';
   }
 
   private pushSettings(): void {
@@ -274,10 +325,14 @@ export class UI {
     const s = this.el('button', 'btn', col) as HTMLButtonElement;
     s.textContent = 'SETTINGS';
     s.onclick = () => {
+      if (this.settingsPanelOpen) {
+        this.closeSettingsPanel();
+        return;
+      }
       // move the shared settings panel to root level so it overlays pause too
       const panel = document.getElementById('settings-panel');
       if (panel) {
-        panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        panel.style.display = 'block';
         // reposition to center for pause context
         panel.style.position = 'fixed';
         panel.style.left = '50%';

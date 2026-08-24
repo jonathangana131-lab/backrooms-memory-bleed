@@ -73,6 +73,9 @@ async function boot(seed) {
     await page.goto(BASE, { waitUntil: 'networkidle', timeout: 60000 });
     await page.waitForFunction(() => (window).__BMB__, null, { timeout: 60000 });
     await page.evaluate((s) => (window).__BMB__.startNew(s), seed);
+    // F91 v1.1: skip the staged wake cinematic — these scenarios assert
+    // interactions seconds before the sequence would hand off naturally.
+    await page.evaluate(() => (window).__BMB__.dismissWakeCinematic?.());
     await page.waitForTimeout(1600);
   } catch (e) {
     try { await browser.close(); } catch { /* ignore */ }

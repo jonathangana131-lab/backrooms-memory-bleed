@@ -51,6 +51,8 @@ import { pacingRngFor, temperamentForRun } from '../director/persona';
 import { DirectorLearning } from '../director/learning';
 // F91: staged wake cinematic played additively over the wake-intro window
 import { stageWakeCinematic, WakeCinematicPlayer, type WakeStaging } from '../story/wakecinematic';
+// F91 v1.1 debt: the run-start mount that actually plays the staged shots
+import { WakeMount } from '../story/wakemount';
 // F50: the exit that isn't — ultra-rare fire-exit door into a white epilogue room
 import { buildEpilogueRoom, enterEpilogue, ExitVoidTracker } from '../story/exitvoid';
 // F100: the credits walk — rolling credits over an endless corridor of screenshots
@@ -104,7 +106,7 @@ import { FanAudio } from '../audio/fanaudio';
 // F2 central mounts: breath embodiment + district identity beds + clarity policy
 import { mountPlayerBreath, type BreathHandle } from '../audio/breath';
 import { AreaIdentityBeds } from '../audio/areaidentity';
-import { applyRenderClarity, type RenderClarityHandle } from '../gfx/renderclarity';
+import { applyRenderClarity, enforceWebGPULightBudget, type RenderClarityHandle } from '../gfx/renderclarity';
 // Wave-1 dread features (F5/F6): binaural whispers + rationed total-mix duck
 import { WhisperField } from '../audio/whisperfield';
 import { DreadSilence } from '../audio/dreadsilence';
@@ -317,6 +319,8 @@ export class Game {
   // ---- Wave A pure-logic integrations (nullable + guarded, see init()) ----
   private settingsManager: SettingsManager | null = null;
   private settingsPanel: SettingsPanelHandle | null = null;
+  /** Detaches the WebGPU light-budget observer (no-op on WebGL engines). */
+  private webgpuLightBudgetDisposer: (() => void) | null = null;
   private syncingSettings = false;
   private a11yMgr: AccessibilityManager | null = null;
   private a11yCtl: AccessibilityController | null = null;
@@ -619,6 +623,11 @@ export class Game {
   private wakeCine: WakeCinematicPlayer | null = null;
   /** True after a movement-key skip fired for the active cinematic. */
   private wakeCineSkipped = false;
+  /**
+   * F91 v1.1 debt: live run-start wake sequence (startNew only). While set
+   * and playing it owns the camera until it hands control to the rise.
+   */
+  private wakeMount: WakeMount | null = null;
 
   // ---- Wave B chunk-built / per-chunk bookkeeping ----
   /** continuous fog sampler: puddle low areas + contamination murk */
@@ -716,6 +725,10 @@ export class Game {
 
     this.input = new Input(canvas);
     this.mats = createMaterials(this.scene);
+    // WebGPU-only: clamp per-material light counts so vertex-stage uniform
+    // buffers stay under the 12-per-stage limit (16 bound lights overflow it
+    // and every pipeline creation fails -> world renders black).
+    this.webgpuLightBudgetDisposer = enforceWebGPULightBudget(this.scene, this.engine);
     this.lighting = new LightingRig(this.scene);
     this.lighting.attachToCamera(this.camera);
     // Integration: surface detection is context-free, so it can boot here.
@@ -843,7 +856,9 @@ export class Game {
         setCameraRot: (r) => this.camera.rotation.set(r.x, r.y, r.z),
       });
       window.addEventListener('keydown', (ev) => {
-        if (ev.code === 'KeyP' && this.state === 'playing' && !this.photoMode?.isOpen) {
+        // F91 v1.1: no photo mode while the waking sequence drives the camera
+        // — its exit() restores a snapshot that would fight the mount.
+        if (ev.code === 'KeyP' && this.state === 'playing' && !this.photoMode?.isOpen && !this.wakePlaying()) {
           this.photoMode?.enter();
         }
       });
@@ -1065,6 +1080,12 @@ export class Game {
 
     canvas.addEventListener('click', () => {
       this.audio.unlock();
+      // F91 v1.1: a click during the waking sequence dismisses it (pointer
+      // lock is already engaged from beginRun, so no re-request is needed).
+      if (this.wakePlaying()) {
+        this.dismissWakeCinematic();
+        return;
+      }
       if (this.state === 'playing') this.input.requestLock();
     });
     this.input.onLockChange = (locked) => {
@@ -1077,6 +1098,14 @@ export class Game {
     } catch { /* defaults */ }
 
     window.addEventListener('keydown', (e) => {
+      // F91 v1.1: any press during the waking sequence ends it instantly and
+      // hands control to the rise — waking eyes do not run the expedition
+      // kit. F3 stays live so debug overlays work from frame zero.
+      if (this.wakePlaying() && e.code !== 'F3') {
+        e.preventDefault();
+        this.dismissWakeCinematic();
+        return;
+      }
       if (e.code === 'F3') {
         e.preventDefault();
         this.ui.toggleDebug();
@@ -1378,11 +1407,81 @@ export class Game {
     this.fallStagger = new FallStagger();
     this.updateStaggerBlur(0);
     this.beginRun({ x: SPAWN_X, z: SPAWN_Z, yaw: Math.PI * 0.75 });
-    this.player.beginWake();
+    // F91 v1.1 debt: play the staged wake shots before control hands off
+    this.beginWakeSequence();
     this.story.anchors(); // materialize guaranteed beacons
     this.chunks.story = this.story;
     this.ui.toast('EXPEDITION LOG — DAY 0\nYou fell asleep at your desk. The carpet hums under your hands. Somewhere out there a beacon is repeating the last honest words anyone wrote down.');
     void SaveDB.saveGame(this.captureSlot());
+  }
+
+  /**
+   * F91 v1.1: true while the staged waking sequence is mounted, playing, and
+   * in control of the camera (it only ever runs inside the playing state).
+   */
+  private wakePlaying(): boolean {
+    return !!(this.wakeMount && this.wakeMount.playing && this.state === 'playing');
+  }
+
+  /**
+   * F91 v1.1 debt mount: stage and play the seeded wake shots at run start,
+   * before control hands off. The sequence rides the frame loop's last word
+   * on the camera; any press/click (or the harness hook) dismisses it into
+   * the existing rise. Motion-safety keeps the straight rise — every
+   * cinematic camera move is generated motion.
+   */
+  private beginWakeSequence(): void {
+    if (this.motionSafetyOn()) {
+      this.player.beginWake();
+      return;
+    }
+    try {
+      this.player.enabled = false;
+      this.wakeMount = new WakeMount(this.seed, SPAWN_X, SPAWN_Z, {
+        applyPose: (p) => {
+          this.camera.position.set(p.px, p.py, p.pz);
+          this.camera.setTarget(new Vector3(p.tx, p.ty, p.tz));
+          // The controller writes fov from baseFovRad only once gameplay
+          // resumes, so the sequence owns it for now.
+          (this.camera as unknown as { fov: number }).fov = (p.fovDeg * Math.PI) / 180;
+        },
+        onFinish: () => this.finishToRise(),
+      });
+    } catch (e) {
+      console.warn('[bmb] wake cinematic unavailable', e);
+      this.wakeMount = null;
+      this.player.beginWake();
+    }
+  }
+
+  /**
+   * Public dismissal used by input skips and the __BMB__ harness hook: end
+   * the sequence right now and hand control to the wake rise. No-op when
+   * nothing is playing.
+   */
+  dismissWakeCinematic(): void {
+    if (!this.wakePlaying()) return;
+    this.wakeMount?.abort();
+    this.finishToRise();
+  }
+
+  /**
+   * Hand the camera back to the controller's rise after the closing shot:
+   * restore gameplay FOV (neither the sequence nor the rise rewrites it),
+   * aim the rise where the closing shot looked (beginWake adds its own
+   * +0.15π yaw offset, so pre-subtract it around the shot direction), then
+   * drop the mount and start the rise.
+   */
+  private finishToRise(): void {
+    (this.camera as unknown as { fov: number }).fov = this.player.baseFovRad;
+    try {
+      const dir = this.camera.getDirection(new Vector3(0, 0, 1));
+      if (Math.abs(dir.x) + Math.abs(dir.z) > 1e-4) {
+        this.player.yaw = Math.atan2(-dir.x, -dir.z) - Math.PI * 0.15;
+      }
+    } catch { /* cosmetic alignment only */ }
+    this.wakeMount = null;
+    this.player.beginWake();
   }
 
   async continueGame(): Promise<void> {
@@ -1626,6 +1725,10 @@ export class Game {
     this.wakeStaging = null;
     this.wakeCine = null;
     this.wakeCineSkipped = false;
+    // F91 v1.1: the mounted sequence dies with the run — silent abort, never
+    // a handoff into whatever expedition beginRun is about to assemble.
+    this.wakeMount?.abort();
+    this.wakeMount = null;
     // near-miss telemetry + adrenaline arming reset with the fresh run
     this.nearMisses = 0;
     this.nearMissArmed = true;
@@ -3457,6 +3560,19 @@ export class Game {
     if (active && this.playtimeSec - this.lastAutosave > 30) {
       this.lastAutosave = this.playtimeSec;
       void this.saveNow();
+    }
+
+    // F91 v1.1: the staged wake sequence gets the last word on the camera
+    // until it hands control to the rise; the state gate freezes it in pause.
+    if (this.wakePlaying()) {
+      try {
+        this.wakeMount?.tick(dt * 1000);
+      } catch (e) {
+        console.warn('[bmb] wake cinematic failed', e);
+        this.wakeMount?.abort();
+        this.wakeMount = null;
+        if (this.state === 'playing') this.player.beginWake();
+      }
     }
 
     this.scene.render();

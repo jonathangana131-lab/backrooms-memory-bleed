@@ -192,4 +192,8 @@ Each entry lists exported classes/factories (grep pattern `^export class|^export
 6. Audio ambience pack: emzones, doors, crowd, radio, groans — same lazy ctx-gated pattern as `ensureAudioIntegrations()`.
 7. gfx/daycycle.ts + ui/weatherui.ts — hooks already exist via `MemoryWeather`.
 
+## Progress log
+
+- 2026-08-24 (F91 v1.1 debt): wake cinematic mounted for real — `src/story/wakemount.ts` `WakeMount` driver + `game.ts` `beginWakeSequence()` plays the seeded waking shots at every fresh-run start before control hands off (any key/click or `__BMB__.dismissWakeCinematic` dismisses into the existing rise; motion-safety keeps the plain rise; beginRun aborts stale mounts). Evidence: test/wakemount-test.mjs 34/0, PLAYTHROUGH_PASS PAGE_ERRORS=0, interaction-matrix/save-stress/full-persist/console-audit green, pnpm build green. Next step: V1.1 debt bullet "Stomach audio stand-in" — growl synth consuming `drainEvents()` (src/audio hungerpangs-consumer ← src/player/hungerpangs.ts), ranked highest value-per-effort in the 2026-08-24 debt audit.
+
 
