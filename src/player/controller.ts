@@ -31,6 +31,10 @@ export const LAND_TRIGGER_VY = -2.5;
 export const CROUCH_LERP_TIME = 0.3;
 /** Sprint FOV ease duration (s), applied with smoothstep easing. */
 export const FOV_EASE_TIME = 0.22;
+/** Momentum: time-constant (s) for speeding up toward intended pace. */
+export const MOMENTUM_ACCEL_TAU = 0.09;
+/** Momentum: time-constant (s) for bleeding off speed when intent stops. */
+export const MOMENTUM_DECEL_TAU = 0.18;
 
 function smoothstep01(k: number): number {
   const t = Math.max(0, Math.min(1, k));
@@ -125,7 +129,11 @@ export class PlayerController {
     else this.stamina = Math.min(1, this.stamina + dt * 0.075);
 
     const targetSpeed = this.crouching ? 1.15 : this.sprinting ? 4.4 : 2.35;
-    this.speed = moving ? targetSpeed : 0;
+    // momentum: real bodies have mass - speed eases toward intent instead of
+    // snapping, so starts have push and stops bleed off over a few steps
+    const tau = moving ? MOMENTUM_ACCEL_TAU : MOMENTUM_DECEL_TAU;
+    this.speed += ((moving ? targetSpeed : 0) - this.speed) * (1 - Math.exp(-dt / tau));
+    if (!moving && this.speed < 0.02) this.speed = 0;
 
     if (moving) {
       const len = Math.hypot(fx, fz);
@@ -134,8 +142,8 @@ export class PlayerController {
       // Babylon yaw: forward = (-sin, 0, -cos), right = (cos, 0, -sin)
       const wx = -sin * fz + cos * fx;
       const wz = -cos * fz - sin * fx;
-      const dx = wx * targetSpeed * dt;
-      const dz = wz * targetSpeed * dt;
+      const dx = wx * this.speed * dt;
+      const dz = wz * this.speed * dt;
       moveCircle(this.body, dx, dz, colliders);
     }
 
@@ -174,8 +182,10 @@ export class PlayerController {
     }
     this.eye = EYE_STAND + (EYE_CROUCH - EYE_STAND) * smoothstep01(this.crouchBlend);
 
-    // ---- head bob: sine wave while walking, amplitude/frequency tied to speed ----
-    const hspeed = moving ? targetSpeed : 0;
+    // ---- head bob: sine wave while walking, amplitude/frequency tied to
+    // the EASED speed so bob swells through the first steps and fades out
+    // as momentum bleeds off ----
+    const hspeed = this.speed;
     this.bobPhase += dt * hspeed * BOB_FREQUENCY;
     const bobAmp = Math.min(1, hspeed / 4) * BOB_AMPLITUDE * (this.crouching ? 0.7 : 1);
     const bobY = moving ? Math.sin(this.bobPhase * 2) * bobAmp : 0;
