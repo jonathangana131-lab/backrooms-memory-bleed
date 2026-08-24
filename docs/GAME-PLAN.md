@@ -68,7 +68,7 @@ with infinite possibility and no end.
 - F8 Gait-synced dread — high tension drifts footstep micro-timing toward heartbeat interval. AC: phase-coherence metric monotone with tension. SHIPPED ✅ (evidence: test/gaitdread-test.mjs coherence monotone 0.501→0.978 across sweep, ALL PASS; controller bob advance scaled per-frame from dreadOffset/excitedHeartbeatPeriod)
 - F9 Stamina embodiment — low stamina alters breath rate, stride sound, FOV pulse. AC: three outputs scale monotonically. SHIPPED ✅ (evidence: test/stamina-test.mjs monotone sweeps ALL PASS; mounts live — fatigue folds into breath tension, fovPulseAmp drives camera pulse; stride-intensity audio gain rides existing footstep path)
 - F10 Lean/peek Q/E around doorframes — camera roll + parallax. AC: collision-safe lean envelope. SHIPPED ✅ (evidence: test/leanpeek-test.mjs ALL PASS; mounted in controller — Q/E hold lean, head-circle clamp against live colliders, roll+offset applied to camera)
-- F11 Torch view-model — visible flashlight hand, sway, battery-swap beat <1.2s. AC: light follows mesh.
+- F11 Torch view-model — visible flashlight hand, sway, battery-swap beat <1.2s. AC: light follows mesh. SHIPPED ✅ (evidence: test/torchview-test.mjs 8/0 incl anchor-vs-Euler <1e-12; mounted — hand mesh pose advances every playing frame, SpotLight rides getLightAnchor)
 - F12 Surface wading — puddles slow stride, splash, wet-footprint trail. AC: penalty + spawn tests.
 - F13 Vault/mantle crates — choreographed camera dip. AC: no collider clip; dip curve test.
 - F14 Fall stagger — postfx blur + control damp after hard falls. AC: recovery timeline test. SHIPPED ✅ (evidence: test/fallstagger-test.mjs 8/8 incl. exact settle + proportionality, ALL PASS; mounted via controller 'hardfall' event → inputScale damp + backdrop-blur veil)
@@ -82,7 +82,7 @@ with infinite possibility and no end.
 - F19 Impossible windows — lit rooms visible where exterior should be. AC: registry + culling test.
 - F20 Unobserved stairwell loop — loops only while gaze-away >2s. AC: trigger iff condition (reuses stretch logic).
 - F21 Memory residue touch — tagged objects play ghost replays of prior tenants. AC: one-shot per visit. SHIPPED ✅ (evidence: test/residue-test.mjs 4/0; mounted on note-read path with seeded tenant scripts + frame-queue playback, 1/90 s rate limit)
-- F22 Gravity ambivalence — saturation zones tilt balance ±5° with veering walk. AC: bounded, exits cleanly.
+- F22 Gravity ambivalence — saturation zones tilt balance ±5° with veering walk. AC: bounded, exits cleanly. SHIPPED ✅ (evidence: test/gravitytilt-test.mjs 7/0 adversarial bounds; mounted via baseline-trick roll after player.update, sum-clamped)
 - F23 Door/wall swaps — door opens into wall; adjacent wall becomes a door. AC: nav+collision+mesh atomic swap test.
 - F24 Aging corridors — revisits accumulate decay proportional to sessions since first seen. AC: persists via ChunkDeltas.
 
@@ -111,7 +111,7 @@ with infinite possibility and no end.
 - F39 Raymarched wet floors — moisture-zone screen-space reflections. AC: quality-tier gated off on low.
 - F40 Breathing wallpaper — saturation-band vertex displacement (~0.5cm inhale). AC: amplitude test.
 - F41 Anomaly photography — photos reveal entities invisible live; gallery displays them. AC: reveal pipeline test.
-- F42 Night-vision camcorder — IR mode with gain noise + audio artifacts. AC: drain + artifact tests.
+- F42 Night-vision camcorder — IR mode with gain noise + audio artifacts. AC: drain + artifact tests. SHIPPED ✅ (evidence: test/nightvision-test.mjs 9/0; mounted — KeyN toggle, green IR grade overlay, IR STATIC captions, drain seam from bb1be43)
 - F43 Ceiling tile ecosystem — missing tiles accumulate; nesting skitter cues beneath. AC: persistence test.
 
 ### CATEGORY G — meta, endings, accessibility
