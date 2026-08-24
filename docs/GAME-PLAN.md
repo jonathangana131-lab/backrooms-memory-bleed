@@ -84,7 +84,7 @@ with infinite possibility and no end.
 - F21 Memory residue touch — tagged objects play ghost replays of prior tenants. AC: one-shot per visit. SHIPPED ✅ (evidence: test/residue-test.mjs 4/0; mounted on note-read path with seeded tenant scripts + frame-queue playback, 1/90 s rate limit)
 - F22 Gravity ambivalence — saturation zones tilt balance ±5° with veering walk. AC: bounded, exits cleanly. SHIPPED ✅ (evidence: test/gravitytilt-test.mjs 7/0 adversarial bounds; mounted via baseline-trick roll after player.update, sum-clamped)
 - F23 Door/wall swaps — door opens into wall; adjacent wall becomes a door. AC: nav+collision+mesh atomic swap test.
-- F24 Aging corridors — revisits accumulate decay proportional to sessions since first seen. AC: persists via ChunkDeltas.
+- F24 Aging corridors — revisits accumulate decay proportional to sessions since first seen. AC: persists via ChunkDeltas. SHIPPED ✅ (evidence: test/aging-test.mjs 8/0 ALL PASS; mounted ChunkManager build path — every chunk build records a visit and folds decayStage stain params into the mesher's stain set, exposed via agingAt(cx,cz))
 
 ### CATEGORY D — entities & society
 
@@ -92,7 +92,7 @@ with infinite possibility and no end.
 - F26 The Archivist — harmless cataloguer; photographing it changes next-session behavior. AC: reaction table test.
 - F27 Watcher packs — coordinated multi-watcher stalks at stage ≥3, spacing discipline. AC: spacing + shared-aggression tests.
 - F28 Mimic props — furniture that is an entity until observed. AC: observation-freeze consistent with watcher rules.
-- F29 Entity gossip — vocals reference places the PLAYER actually visited. AC: grounding test vs journal feed.
+- F29 Entity gossip — vocals reference places the PLAYER actually visited. AC: grounding test vs journal feed. SHIPPED ✅ (evidence: test/gossip-test.mjs ALL PASS; mounted src/core/game.ts mount batch C — GossipSource fed VisitedSite records)
 - F30 Your Double — doppelgänger learns route habits across saves, walks YOUR paths. AC: path-replay fidelity.
 - F31 Roach ecosystems — colonies migrate moisture→food; cabinets infest over sessions. AC: migration stability.
 - F32 The Custodian — removes graffiti/markings overnight; cart squeak precedes removals. AC: removal ledger test.
@@ -131,7 +131,7 @@ with infinite possibility and no end.
 - F53 District color bleed — border chunks blend palettes over a one-chunk gradient. AC: gradient continuity test.
 - F54 The Long Hall — rare 300m corridor whose exit doors cycle behind you. AC: cycle determinism test.
 - F55 Negative-space rooms — void silhouettes where furniture should be. AC: collision matches absence.
-- F56 Cartographer's error — map fragments disagree; majority vote reveals truth. AC: vote logic test.
+- F56 Cartographer's error — map fragments disagree; majority vote reveals truth. AC: vote logic test. SHIPPED ✅ (evidence: test/mapfragments-test.mjs MAPFRAGMENTS_PASS; mounted ChunkManager chunk build — 22% of chunks scatter seeded NoteInstance map-fragment papers)
 - F57 Seasonal bleed rooms — one room per session stuck in another season. AC: season assignment hash test.
 - F58 Sub-floor crawlspaces — floor gaps reveal crawlspace darkness beneath. AC: nav flag + fall safety.
 - F59 Landmark echoes — landmark rooms repeat identically exactly 7 chunks apart. AC: spacing invariant test.
@@ -147,10 +147,10 @@ with infinite possibility and no end.
 - F69 Polite doors — doors open themselves and hold open for you. AC: courtesy cooldown test.
 - F70 Shadow audience — silhouettes gather at hall ends during peaks. AC: gather/scatter gating test.
 - F71 Contamination cough — saturation zones give the player a cough. AC: rate scales with intensity.
-- F72 Low-battery hand tremor — camcorder aim wobbles below 20% charge. AC: tremor curve test.
-- F73 Hunger pangs — ambient stomach audio tied to expedition length. AC: interval scaling test.
-- F74 Sleep pressure — micro-blinks close vision after long sessions. AC: blink cadence test.
-- F75 Adrenaline dumps — near-misses shake hands and sharpen hearing. AC: dual-effect envelope test.
+- F72 Low-battery hand tremor — camcorder aim wobbles below 20% charge. AC: tremor curve test. SHIPPED ✅ (evidence: test/tremor-test.mjs ALL PASS; mounted src/core/game.ts mount batch B — HandTremor)
+- F73 Hunger pangs — ambient stomach audio tied to expedition length. AC: interval scaling test. SHIPPED ✅ (evidence: test/hunger-test.mjs ALL PASS; mounted src/core/game.ts mount batch B — HungerPangs)
+- F74 Sleep pressure — micro-blinks close vision after long sessions. AC: blink cadence test. SHIPPED ✅ (evidence: test/blinks-test.mjs BLINKS ALL PASS; mounted src/core/game.ts mount batch B — BlinkScheduler)
+- F75 Adrenaline dumps — near-misses shake hands and sharpen hearing. AC: dual-effect envelope test. SHIPPED ✅ (evidence: test/adrenaline-test.mjs ADRENALINE ALL PASS; mounted src/core/game.ts mount batch B — AdrenalineSystem)
 - F76 Cold-storage shiver — teeth chatter + view shiver in cold zones. AC: zone gating test.
 - F77 Injury limp — hard falls alter stride until firstaid used. AC: gait modifier test.
 - F78 Panic breathing control — hold-rhythm minigame steadies breath meter. AC: stabilization math test.
@@ -169,9 +169,9 @@ with infinite possibility and no end.
 - F91 Staged wake cinematic — waking sequence procedurally staged per seed. AC: staging determinism test.
 - F92 Camcorder optics — photo-mode DOF + focal breathing matching the IR lens. AC: optic curve test.
 - F93 Diegetic menus — title/pause projected onto in-world walls. AC: projection raycast mount test.
-- F94 Lying compass — needle bends toward memory wells under contamination. AC: bend-vs-well test.
-- F95 Hardcore flicker battery UI — charge conveyed only by torch flicker (opt-in). AC: mode equivalence test.
-- F96 Evolving journal font — handwriting degrades with stage/sanity. AC: font-stage table test.
+- F94 Lying compass — needle bends toward memory wells under contamination. AC: bend-vs-well test. SHIPPED ✅ (evidence: test/lyingcompass-test.mjs LYINGCOMPASS ALL PASS 35 checks; mounted src/core/game.ts mount batch C — LyingCompass)
+- F95 Hardcore flicker battery UI — charge conveyed only by torch flicker (opt-in). AC: mode equivalence test. SHIPPED ✅ (evidence: test/flickerbattery-test.mjs FLICKERBATTERY ALL PASS 32 checks; mounted src/core/game.ts mount batch B — FlickerBattery)
+- F96 Evolving journal font — handwriting degrades with stage/sanity. AC: font-stage table test. SHIPPED ✅ (evidence: test/journalfont-test.mjs JOURNALFONT ALL PASS 17 checks; mounted src/core/game.ts mount batch C — degradationIndex/entryJournalFont)
 - F97 Bureaucratic achievements — toasts as stamped FORMS (approved/denied). AC: stamp routing test.
 - F98 Local speedrun ghosts — per-seed ghost replays. AC: ghost determinism test.
 - F99 Colorblind anomaly signals — pattern language replaces color-only cues. AC: pattern coverage test.
