@@ -33,6 +33,15 @@ import { DynamicScore } from '../audio/music';
 import { ExteriorBleed } from '../audio/exterior';
 import { UI } from '../ui/ui';
 import { SaveDB, type SaveSlot, type SettingsData } from '../save/db';
+import { computeScars, serializeScars, type RouteSample } from '../save/scarring';
+import {
+  createLedger,
+  loadLedger,
+  saveLedger,
+  mergeExpedition,
+  type LedgerEntry,
+  type LedgerStorageLike,
+} from '../save/ledger';
 import { MemoryField, MemoryKind, MEMORY_NAMES, sectorName } from '../memory/field';
 import { MemoryWeather } from '../memory/weather';
 import { HorrorDirector, type DirectorHost } from '../director/director';
@@ -478,6 +487,8 @@ export class Game {
   private memoStore: VoiceMemoStore | null = null;
   /** F35: per-run memo sequence number for stable capture ids. */
   private memoSeq = 0;
+  /** F46: note ids first-read this run — the expedition ledger's note feed. */
+  private readonly runNoteIds = new Set<string>();
   private attract = { x: 8, z: 8, t: 0 };
   private loopArmedUntil = 0;
   /** Spatial-anomaly runtime; rebuilt with the director on every run. */
@@ -1206,6 +1217,8 @@ export class Game {
     // identity and the degraded render to this run's seed.
     this.memoStore = new VoiceMemoStore((this.seed >>> 0).toString(16));
     this.memoSeq = 0;
+    // F46: the ledger feed restarts with every expedition
+    this.runNoteIds.clear();
     // F100: never carry a credits walk into a fresh expedition
     this.cancelCreditsWalk();
     // near-miss telemetry + adrenaline arming reset with the fresh run
@@ -3101,6 +3114,7 @@ export class Game {
         const noteId = 'note:' + Math.round(note.x * 10) + ':' + Math.round(note.z * 10);
         const firstRead = !this.reread.isRead(noteId);
         this.reread.markRead(noteId);
+        if (firstRead) this.runNoteIds.add(noteId); // F46 ledger feed
         if (!firstRead) {
           const res = this.reread.distort(note.text, noteId);
           if (res.altered) this.ui.showNote(res.text);
@@ -3288,6 +3302,73 @@ export class Game {
     } catch (e) {
       console.warn('[bmb] roach ecosystem unavailable', e);
       this.roachEco = null;
+    }
+  }
+
+  // ---------- F44 + F46: expedition meta archive ----------
+
+  /**
+   * Run-end hook: persist this expedition's cross-run meta. Called once
+   * from each ending path (threshold and fire exit) before the final save.
+   *
+   * F44 scarring: computeScars over this session's route history (path
+   * samples are seconds — RouteSample.t wants ms), aged {sessions: 1,
+   * playtimeSec}; the serialized archive lands under a per-save localStorage
+   * key so a future mesher/render pass can regenerate the phantom cracks
+   * without re-running the model.
+   * F46 ledger: first-read note ids merge in as 'note' entries and entered
+   * landmarks as 'cluster' entries under a fresh expedition id (seed hex +
+   * end-time playtime keeps expeditions distinct even across same-seed
+   * replays); idempotent per entryId, so crash-double-calls are no-ops.
+   *
+   * Gap notes: SaveDB exposes no generic kv surface (its kv store backs
+   * only settings accessors), so both archives ride localStorage — the
+   * ledger module's documented injected-storage contract; migrate into
+   * SaveDB kv when a public get/set API lands there.
+   */
+  private recordExpeditionMeta(): void {
+    if (typeof localStorage === 'undefined') return; // non-DOM harness runs
+    // F44: per-save archive key (localStorage until SaveDB grows a kv API)
+    const SCAR_ARCHIVE_KEY_PREFIX = 'bmb.scar-archive.';
+    try {
+      const route: RouteSample[] = this.pathHistory.map((p) => ({ x: p.x, z: p.z, t: p.t * 1000 }));
+      const scars = computeScars(String(this.seed), route, {
+        sessions: 1,
+        playtimeSec: this.playtimeSec,
+      });
+      localStorage.setItem(
+        SCAR_ARCHIVE_KEY_PREFIX + (this.seed >>> 0).toString(16),
+        serializeScars(scars),
+      );
+    } catch (e) {
+      console.warn('[bmb] scar archive failed', e);
+    }
+    try {
+      const storage: LedgerStorageLike = {
+        get: (k) => localStorage.getItem(k),
+        set: (k, v) => {
+          localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+        },
+      };
+      const loaded = loadLedger(storage);
+      const entries: LedgerEntry[] = [];
+      for (const id of this.runNoteIds) {
+        entries.push({ entryId: id, kind: 'note', refId: id, rarity: 0, discoveredAt: Date.now() });
+      }
+      for (const name of this.seenLandmarks) {
+        entries.push({
+          entryId: 'cluster:' + name,
+          kind: 'cluster',
+          refId: name,
+          rarity: 0,
+          discoveredAt: Date.now(),
+        });
+      }
+      const expeditionId =
+        'exp-' + (this.seed >>> 0).toString(16) + '-' + Math.round(this.playtimeSec);
+      saveLedger(storage, mergeExpedition(loaded.ok ? loaded.ledger : createLedger(), expeditionId, entries));
+    } catch (e) {
+      console.warn('[bmb] expedition ledger merge failed', e);
     }
   }
 
