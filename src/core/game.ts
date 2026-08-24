@@ -80,6 +80,9 @@ import { FanAudio } from '../audio/fanaudio';
 import { mountPlayerBreath, type BreathHandle } from '../audio/breath';
 import { AreaIdentityBeds } from '../audio/areaidentity';
 import { applyRenderClarity, type RenderClarityHandle } from '../gfx/renderclarity';
+// Wave-1 dread features (F5/F6): binaural whispers + rationed total-mix duck
+import { WhisperField } from '../audio/whisperfield';
+import { DreadSilence } from '../audio/dreadsilence';
 // Wave B: scene pack
 import { PostFX } from '../gfx/postfx';
 import { FaunaWiring } from '../entities/faunawiring';
@@ -186,6 +189,11 @@ export class Game {
   /** dream-state clarity policy handle; rebuilt when the quality preset changes */
   private clarityHandle: RenderClarityHandle | null = null;
   private clarityQuality: string | null = null;
+  // ---- wave-1 dread features ----
+  /** F5: world-fixed HRTF whisper voices around the listener */
+  private whispers: WhisperField | null = null;
+  /** F6: director-rationed total-mix silence before major anomalies */
+  private dread: DreadSilence | null = null;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -1286,6 +1294,19 @@ export class Game {
       this.areaBeds = new AreaIdentityBeds(ctx, dest);
       this.areaBeds.seed(this.seed);
     } catch (e) { console.warn('[bmb] area beds unavailable', e); this.areaBeds = null; }
+    // ---- F5: binaural whisper field pinned around the listener ----
+    try {
+      this.whispers = new WhisperField(
+        ctx,
+        () => ({ x: this.player.body.x, z: this.player.body.z, yaw: this.player.yaw }),
+        { seed: (this.seed ^ 0x57686973) >>> 0 },
+      );
+    } catch (e) { console.warn('[bmb] WhisperField unavailable', e); this.whispers = null; }
+    // ---- F6: dread-silence duck over the total mix ----
+    try {
+      const bus = this.audio.masterBus;
+      this.dread = bus ? new DreadSilence(bus, { seed: (this.seed ^ 0x64726561) >>> 0 }) : null;
+    } catch (e) { console.warn('[bmb] DreadSilence unavailable', e); this.dread = null; }
     this.audioModulesReady = true;
   }
 
@@ -1531,6 +1552,11 @@ export class Game {
       if (verdict && verdict.relocate) {
         try { this.echoSites?.markSite(this.player.body.x, this.player.body.z); }
         catch (e) { console.warn('[bmb] echo site mark failed', e); }
+        // F6: relocation is the loudest wrongness — hold the mix before it lands
+        if (this.dread?.canDuck(this.playtimeSec)) {
+          try { this.dread.requestDuck(this.playtimeSec); }
+          catch (e) { console.warn('[bmb] dread duck failed', e); }
+        }
         // F3: relocation replays identical per seed (same timeline up to the verdict)
         const rng = new RNG(hash2i(Math.floor(this.playtimeSec), 1529, this.seed));
         const ang = rng.range(0, Math.PI * 2);
@@ -1789,6 +1815,16 @@ export class Game {
       try { this.breathHandle.update(dt); }
       catch (e) { console.warn('[bmb] breath update failed', e); }
     }
+    // ---- F5: whisper voices re-solve around the live pose ----
+    if (this.whispers) {
+      try { this.whispers.update(dt); }
+      catch (e) { console.warn('[bmb] whisperfield update failed', e); }
+    }
+    // ---- F6: dread-silence scheduler runs on the session clock ----
+    if (this.dread) {
+      try { this.dread.tick(this.playtimeSec); }
+      catch (e) { console.warn('[bmb] dread silence tick failed', e); }
+    }
     // ---- F2: re-assert the clarity fog cap (LightingRig eases density back up) ----
     if (this.clarityHandle) {
       try { this.clarityHandle.update(bDistrict); }
@@ -1984,6 +2020,11 @@ export class Game {
       if (this.director.phase !== this.lastPhaseKey) {
         this.lastPhaseKey = this.director.phase;
         this.phaseSessions++;
+        // F6: a peak is a major-anomaly window — duck the mix first (rationed)
+        if (this.director.phase === 'peak' && this.dread?.canDuck(this.playtimeSec)) {
+          try { this.dread.requestDuck(this.playtimeSec); }
+          catch (e) { console.warn('[bmb] dread duck failed', e); }
+        }
       }
       const dkey = String(this.chunks.districtAtPos(this.player.body.x, this.player.body.z) ?? 0);
       if (dkey !== this.prevDistrictKey) {
