@@ -1,3 +1,68 @@
+/**
+ * Functional verification of the ambient difficulty hints (src/ui/hints.ts):
+ * seeded interval jitter bounds, pool selection/disarm semantics, fragment
+ * round-robin, and the stylesheet/DOM presentation arc.
+ *
+ * Standalone in Node; the TS module is bundled with esbuild (found in the
+ * pnpm store, as in tracker-test.mjs) so its '../core/rng' import resolves.
+ *
+ *   node test/hints-test.mjs
+ */
+import { createRequire } from 'node:module';
+import { readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
+import assert from 'node:assert/strict';
+
+const require_ = createRequire(import.meta.url);
+// esbuild is a transitive dep of vite; hoisted installs expose it directly,
+// pnpm-store layouts hide it under node_modules/.pnpm.
+function loadEsbuild() {
+  try {
+    return require_('esbuild');
+  } catch {
+    const pnpmDir = process.cwd() + '/node_modules/.pnpm';
+    const entry = readdirSync(pnpmDir).find((d) => d.startsWith('esbuild@'));
+    if (!entry) throw new Error('esbuild not found in node_modules');
+    return require_(pnpmDir + '/' + entry + '/node_modules/esbuild');
+  }
+}
+
+let passed = 0;
+let failures = 0;
+function check(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log('PASS ' + name);
+  } catch (e) {
+    failures++;
+    console.log('FAIL ' + name + ' :: ' + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
+const esbuild = loadEsbuild();
+const SRC = process.cwd() + '/src/ui/hints.ts';
+readFileSync(SRC, 'utf8'); // fail fast if the source moved
+const BUILT = process.cwd() + '/test/.hints-build.mjs';
+const bundle = await esbuild.build({
+  entryPoints: [SRC],
+  bundle: true,
+  format: 'esm',
+  target: 'es2022',
+  write: false,
+});
+writeFileSync(BUILT, bundle.outputFiles[0].text);
+
+const {
+  HINT_MIN_INTERVAL_S,
+  HINT_MAX_INTERVAL_S,
+  HINT_FADE_MS,
+  BRAVE_HINTS,
+  TIMID_HINTS,
+  DifficultyHints,
+  rollInterval,
+  pickFrom,
+} = await import('./.hints-build.mjs');
+
 check('rollInterval stays inside the 3-5 minute window', () => {
   let lo = Infinity;
   let hi = -Infinity;
@@ -170,5 +235,7 @@ check('constructor demands a usable document', () => {
 });
 
 console.log('passed:', passed);
+rmSync(BUILT, { force: true });
+process.exit(failures === 0 ? 0 : 1);
 
 
