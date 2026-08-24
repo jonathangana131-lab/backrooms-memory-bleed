@@ -74,6 +74,10 @@ export class ChunkManager {
   discoveredLandmarks: Set<string> | null = null;
   /** downsampled movement trail from the previous session; scuffs render in debris */
   pathEchoPoints: Array<{ x: number; z: number }> | null = null;
+  /** F32 custodian: graffiti erased by the Custodian, keyed
+   * 'cx,cz:x100:z100'; filtered out of every subsequent build so a removal
+   * survives chunk rebuilds and session loads. */
+  removedGraffiti: Set<string> | null = null;
   /**
    * Reversible per-chunk mutation ledger (see chunkDeltas.ts). When set,
    * drifted chunks fold their drift step into decor generation so anomaly
@@ -279,6 +283,14 @@ export class ChunkManager {
         p.kind !== 'battery' ||
         !this.consumedBatteries!.has(
           cx + ':' + cz + ':' + Math.round(p.x * 100) + ':' + Math.round(p.z * 100),
+        ));
+    }
+    // F32 custodian: erased markings stay gone on every rebuild (position-
+    // stable keys survive index shifts between builds)
+    if (this.removedGraffiti && this.removedGraffiti.size && layout.graffiti.length) {
+      layout.graffiti = layout.graffiti.filter((g) =>
+        !this.removedGraffiti!.has(
+          cx + ',' + cz + ':' + Math.round(g.x * 100) + ':' + Math.round(g.z * 100),
         ));
     }
     // path echo: faint dark scuffs where the player walked last session
