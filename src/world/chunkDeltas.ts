@@ -8,11 +8,14 @@
  * the SAME drifted decor while revertAll() restores the canonical world on
  * the next rebuild. The counter is the only extra input to generation.
  */
-import { RNG, hash2i } from '../core/rng';
+import { RNG, hash2i, hash3i } from '../core/rng';
 import type { PropInstance } from './architect';
 
 /** Salt so drift draws never correlate with any other per-chunk feature. */
 const DRIFT_SALT = 0x61d7;
+
+/** Salt so blackout draws never correlate with drift or any other feature. */
+const BLACKOUT_SALT = 0x6c61;
 
 /** Furniture the drift is allowed to shuffle (matches landmark rearranging). */
 const MOVABLE = new Set<string>([
@@ -24,6 +27,8 @@ const MOVABLE = new Set<string>([
 export const DRIFT_SLIDE_MAX = 0.45;
 export class ChunkDeltas {
   private steps = new Map<string, number>();
+  /** Ordinals of blackout shifts already folded into each chunk. */
+  private blackoutOrdinals = new Map<string, Set<number>>();
 
   static key(cx: number, cz: number): string {
     return cx + ',' + cz;
@@ -48,7 +53,32 @@ export class ChunkDeltas {
   revertAll(): number {
     const n = this.steps.size;
     this.steps.clear();
+    this.blackoutOrdinals.clear();
     return n;
+  }
+
+  /** Whether a blackout shift with this ordinal already hit the chunk. */
+  hasBlackout(cx: number, cz: number, ordinal: number): boolean {
+    return this.blackoutOrdinals.get(ChunkDeltas.key(cx, cz))?.has(ordinal) ?? false;
+  }
+
+  /** Record that a blackout ordinal was applied to a chunk. */
+  markBlackout(cx: number, cz: number, ordinal: number): void {
+    const key = ChunkDeltas.key(cx, cz);
+    let set = this.blackoutOrdinals.get(key);
+    if (!set) { set = new Set<number>(); this.blackoutOrdinals.set(key, set); }
+    set.add(ordinal);
+  }
+
+  /** Drop a blackout-ordinal mark (used by revert so re-apply replays identically). */
+  unmarkBlackout(cx: number, cz: number, ordinal: number): void {
+    this.blackoutOrdinals.get(ChunkDeltas.key(cx, cz))?.delete(ordinal);
+  }
+
+  /** Set a chunk's drift step directly (blackout revert restores its prior step). */
+  restore(cx: number, cz: number, step: number): void {
+    if (step <= 0) this.steps.delete(ChunkDeltas.key(cx, cz));
+    else this.steps.set(ChunkDeltas.key(cx, cz), step);
   }
 
   get size(): number {
@@ -80,4 +110,102 @@ export function applyDecorDrift(
     moved++;
   }
   return moved;
+}
+
+/** Per-chunk inputs a blackout shift needs. */
+export interface BlackoutShiftInput {
+  /** Chunk the blackout hit. */
+  cx: number;
+  cz: number;
+  /** Props in the chunk; movable ones are mutated in place, one slot each. */
+  props: PropInstance[];
+  /** Doors currently open in the chunk, as stable ids. */
+  openDoors: readonly string[];
+}
+
+/**
+ * Everything needed to undo one applied blackout shift. The record indexes
+ * into the same props array passed to applyBlackoutShift - pass that array
+ * back to revertBlackoutShift.
+ */
+export interface BlackoutShiftRecord {
+  /** Chunk the blackout hit. */
+  cx: number;
+  cz: number;
+  /** Blackout ordinal this shift belongs to. */
+  ordinal: number;
+  /** Seed the shift was derived from. */
+  seed: number;
+  /** The single door the blackout bricked (was open before). */
+  brickedDoor: string;
+  /** Prior rotation of every shifted prop, by index into the input array. */
+  priorRots: { index: number; rot: PropInstance['rot'] }[];
+  /** Drift step of the chunk before the blackout bumped it. */
+  priorStep: number;
+}
+
+/**
+ * Blackout rearrangement (F16): a blackout rotates every movable prop in the
+ * chunk exactly ONE quarter-turn slot and bricks exactly ONE previously-open
+ * door. Pure function of (input, seed, ordinal) via rng.ts hashes, so the
+ * same (seed, ordinal) replays identically. Applying twice with the same
+ * ordinal is rejected (returns null), guarding against double-drift.
+ * @param delta Chunk mutation ledger; the chunk's drift step is bumped so
+ *   rebuilds fold the blackout in, and the ordinal mark guards re-application.
+ * @param input Chunk coordinates, props, and currently-open doors.
+ * @param seed Master run seed.
+ * @param ordinal Index of this blackout event within the run.
+ * @returns The revert record, or null when this (chunk, ordinal) already applied.
+ * @throws When the chunk has no open doors to brick - blackouts fail loud.
+ */
+export function applyBlackoutShift(
+  delta: ChunkDeltas,
+  input: BlackoutShiftInput,
+  seed: number,
+  ordinal: number,
+): BlackoutShiftRecord | null {
+  if (delta.hasBlackout(input.cx, input.cz, ordinal)) return null;
+  if (input.openDoors.length === 0) {
+    throw new Error(
+      `blackout at chunk ${input.cx},${input.cz}: no open doors to brick`,
+    );
+  }
+  delta.markBlackout(input.cx, input.cz, ordinal);
+  const rr = new RNG(hash3i(input.cx, input.cz, ordinal, seed ^ BLACKOUT_SALT));
+  const priorRots: { index: number; rot: PropInstance['rot'] }[] = [];
+  for (let i = 0; i < input.props.length; i++) {
+    const p = input.props[i];
+    if (!MOVABLE.has(p.kind)) continue;
+    priorRots.push({ index: i, rot: p.rot });
+    p.rot = ((p.rot + 1) % 4) as PropInstance['rot'];
+  }
+  const brickedDoor = input.openDoors[rr.int(0, input.openDoors.length)];
+  const priorStep = delta.step(input.cx, input.cz);
+  delta.bump(input.cx, input.cz);
+  return {
+    cx: input.cx, cz: input.cz,
+    ordinal, seed, brickedDoor, priorRots, priorStep,
+  };
+}
+
+/**
+ * Undo one blackout shift: restores every shifted prop to its prior slot,
+ * drops the ordinal mark so the same ordinal can replay identically, and
+ * returns the door to open state by restoring the prior drift step.
+ * @param delta Ledger the shift was applied to.
+ * @param record Record returned by applyBlackoutShift.
+ * @param props The same props array the shift mutated (record indexes into it).
+ * @returns The door the blackout had bricked - caller removes its brick.
+ */
+export function revertBlackoutShift(
+  delta: ChunkDeltas,
+  record: BlackoutShiftRecord,
+  props: PropInstance[],
+): string {
+  for (const prior of record.priorRots) {
+    props[prior.index].rot = prior.rot;
+  }
+  delta.unmarkBlackout(record.cx, record.cz, record.ordinal);
+  delta.restore(record.cx, record.cz, record.priorStep);
+  return record.brickedDoor;
 }
