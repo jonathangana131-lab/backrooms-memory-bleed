@@ -127,6 +127,7 @@ export const DEFAULT_SPEAKER_TAGS: Readonly<Record<string, string>> =
     believer: '[BELIEVER]',
     double: '[DOUBLE]',
     watcher: '[WATCHER]',
+    vent: '[VENT]',
     system: '[SYSTEM]',
   });
 
