@@ -47,21 +47,49 @@ try {
     // make sure the context has fully resumed before trusting silence
     if (ctx.state !== 'running') { try { await ctx.resume(); } catch {} }
     await new Promise((r3) => setTimeout(r3, 500));
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 512;
-    a.master.connect(analyser);
-    const buf = new Float32Array(analyser.fftSize);
-    const peak = async (ms) => {
-      let p = 0;
-      const t0 = performance.now();
-      while (performance.now() - t0 < ms) {
-        analyser.getFloatTimeDomainData(buf);
-        for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > p) p = v; }
-        await new Promise((r2) => setTimeout(r2, 30));
+    // Headless Chromium renders audio in large catch-up bursts and DROPS
+    // main-thread ScriptProcessor callbacks under WebGL software-rendering
+    // load, and analyser polling misses short one-shots between bursts. An
+    // AudioWorklet runs on the audio thread and sees every rendered quantum,
+    // so record per-stage peaks there instead.
+    const WORKLET_SRC = `
+      class PeakRecorder extends AudioWorkletProcessor {
+        constructor() {
+          super();
+          this.max = 0;
+          this.port.onmessage = (e) => {
+            if (e.data === 'reset') { this.max = 0; return; }
+            if (e.data === 'query') { this.port.postMessage({ max: this.max }); return; }
+          };
+        }
+        process(inputs) {
+          const ch = inputs[0] && inputs[0][0];
+          if (ch) for (let i = 0; i < ch.length; i++) { const v = Math.abs(ch[i]); if (v > this.max) this.max = v; }
+          return true;
+        }
       }
-      return Math.round(p * 10000) / 10000;
+      registerProcessor('peak-recorder', PeakRecorder);
+    `;
+    const workletUrl = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(workletUrl);
+    const recorder = new AudioWorkletNode(ctx, 'peak-recorder');
+    a.master.connect(recorder);
+    recorder.connect(ctx.destination); // pull the sink; its output stays silent
+    const queryPeak = () => new Promise((resolve) => {
+      recorder.port.onmessage = (e) => resolve(e.data.max);
+      recorder.port.postMessage('query');
+    });
+    const round4 = (v) => Math.round(v * 10000) / 10000;
+    const peak = async (ms) => {
+      await new Promise((r2) => setTimeout(r2, ms));
+      // let the rendered tail drain past the recorder before querying
+      await new Promise((r2) => setTimeout(r2, 150));
+      const v = await queryPeak();
+      recorder.port.postMessage('reset');
+      return round4(v);
     };
     // 1. zone transition stinger (cross two zones through the public path)
+    await peak(50); // settle baseline, resets the recorder
     a.setZoneAmbient(1);
     a.setZoneAmbient(3); // change -> internal setZoneTransition()
     res.stingerPeak = await peak(400);
@@ -70,17 +98,20 @@ try {
     res.hbFromStateLowStab = a.heartbeatFromState(0.1, 999).toFixed(2);
     res.hbFromStateCloseWatch = a.heartbeatFromState(1, 2).toFixed(2);
     res.hbFromStateCalm = a.heartbeatFromState(1, 999).toFixed(2);
-    res.hbPeak = await peak(1300);
+    const hbPeak = await peak(1300);
     a.setHeartbeat(0);
     // 3. radio static near ARCHIVE
     a.setRadioStatic(1);
-    res.radioPeak = await peak(700);
+    const radioPeak = await peak(700);
     a.setRadioStatic(0);
     // 4. positional footstep echo inside a landmark room
     a.setLandmarkAmbient('ARCHIVE');
     a.footstep(false, 1);
-    res.echoPeak = await peak(600);
+    const echoPeak = await peak(600);
     a.setLandmarkAmbient(null);
+    res.hbPeak = round4(hbPeak);
+    res.radioPeak = round4(radioPeak);
+    res.echoPeak = round4(echoPeak);
     return res;
   });
 
