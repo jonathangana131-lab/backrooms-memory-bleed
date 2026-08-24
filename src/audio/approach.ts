@@ -24,7 +24,24 @@
  * runs logic-only (step clock, trailing count, distance envelope) and
  * records what it would have played in 'fired' - which is how the
  * headless test exercises it.
+ *
+ * Determinism: every scheduling roll (buffer offset, pitch/volume jitter)
+ * draws from a per-instance deterministic stream seeded by the optional
+ * constructor seed XOR a site salt (same construction as crowd.ts); the
+ * stream is local so the file stays directly runnable under node's
+ * TypeScript stripping. Math.random appears ONLY inside the noise-buffer fill.
  */
+
+/** Deterministic mulberry32 stream (same construction as crowd.ts). */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export type SurfaceKind = 'carpet' | 'tile' | 'metal' | 'splash';
 
@@ -46,6 +63,11 @@ export const CUT_DIST = 3;       // at/inside this: dead silence
 const PLATEAU_NEAR = 4;          // fade-to-silence zone ends here
 const PLATEAU_FAR = 10;          // full volume plateau starts here
 const FAR_DIST = 26;             // at/beyond this: imperceptible
+
+/** Default seed for the voice-jitter stream when none is injected. */
+const DEFAULT_SEED = 0xa30ac6e5;
+/** Site salt separating this file's stream from other consumers of a seed. */
+const SEED_SALT = 0x51c7;
 
 /**
  * Loudness of the watcher's steps at a given distance, 0..1.
@@ -90,6 +112,8 @@ export class WatcherSteps {
   /** Distance darkening ahead of the voices. */
   private readonly muffle: BiquadFilterNode | null;
   private readonly noise: AudioBuffer | null;
+  /** Persistent voice stream: buffer offsets and per-step jitter. */
+  private readonly rng: () => number;
 
   /** Step clock: seconds until the next watcher step fires. */
   private timer = STEP_INTERVAL;
@@ -105,9 +129,10 @@ export class WatcherSteps {
    */
   readonly fired: FiredStep[] = [];
 
-  constructor(ctx: AudioContext | null, destination: AudioNode | null) {
+  constructor(ctx: AudioContext | null, destination: AudioNode | null, seed = DEFAULT_SEED) {
     this.ctx = ctx;
     this.out = destination;
+    this.rng = mulberry32((seed ^ SEED_SALT) >>> 0);
     if (!ctx || !destination) {
       this.master = null;
       this.muffle = null;
@@ -125,6 +150,7 @@ export class WatcherSteps {
     const len = Math.max(1, Math.floor(ctx.sampleRate));
     this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = this.noise.getChannelData(0);
+    // audio DSP buffer fill — sim PRNG law carve-out
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
   }
 
@@ -237,13 +263,13 @@ export class WatcherSteps {
   /** Route one filtered burst through the shared envelope into the bus. */
   private emit(src: AudioBufferSourceNode, chain: AudioNode, dur: number): void {
     chain.connect(this.master!);
-    src.start(this.ctx!.currentTime, Math.random() * 0.5, dur + 0.05);
+    src.start(this.ctx!.currentTime, this.rng() * 0.5, dur + 0.05);
   }
 
   private voice(surface: SurfaceKind, loud: number): void {
     const ctx = this.ctx!;
     const t = ctx.currentTime;
-    const jit = () => 1 + (Math.random() * 2 - 1) * 0.10;
+    const jit = () => 1 + (this.rng() * 2 - 1) * 0.10;
     const pitch = 0.85 * jit(); // heavier than a player stride
     const vol = loud * jit();
 
