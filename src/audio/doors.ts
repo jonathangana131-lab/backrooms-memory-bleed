@@ -15,7 +15,28 @@
  *   TORCH     shine the torch toward the door's bearing within 3 s and
  *             something answers: a second, softer creak from the same
  *             spot a beat later.
+ *
+ * Determinism: every scheduling, placement and envelope roll draws from a
+ * persistent mulberry32 stream seeded by the optional constructor seed XOR
+ * a site salt (local so the file stays directly runnable under node's
+ * TypeScript stripping). The file has no Math.random at all.
  */
+
+/** Deterministic mulberry32 stream (same construction as crowd.ts). */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Default seed for the scheduler stream when none is injected. */
+const DEFAULT_SEED = 0xd00a1;
+/** Site salt separating this file's stream from other consumers of a seed. */
+const SEED_SALT = 0x25ea4;
 
 const TWO_PI = Math.PI * 2;
 
@@ -37,9 +58,11 @@ export class DoorCreaks {
   private readonly out: AudioNode;
 
   /** Seconds until the next scheduled self-moving door. */
-  private nextIn = 10 + Math.random() * 10;
+  private nextIn: number;
   /** Quadrant of the most recent creak; never repeated consecutively. */
   private lastQuadrant = -1;
+  /** Persistent scheduler/placement/envelope stream. */
+  private readonly rng: () => number;
 
   /** Beam-response window: bearing of the last creak and when it closes. */
   private beamBearing = 0;
@@ -53,9 +76,11 @@ export class DoorCreaks {
   private lastBearing = 0;
   private lastDist = 20;
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = DEFAULT_SEED) {
     this.ctx = ctx;
     this.out = destination;
+    this.rng = mulberry32(((seed >>> 0 || DEFAULT_SEED) ^ SEED_SALT) >>> 0);
+    this.nextIn = 10 + this.rng() * 10;
   }
 
   /**
@@ -75,7 +100,7 @@ export class DoorCreaks {
 
     this.nextIn -= dt;
     if (this.nextIn > 0 || tension > 0.4) return;
-    this.nextIn = 45 + Math.random() * 45;
+    this.nextIn = 45 + this.rng() * 45;
     this.distantDoor();
   }
 
@@ -88,7 +113,7 @@ export class DoorCreaks {
     if (Math.abs(pan - this.beamBearing) > 0.45) return; // wrong direction
     this.beamUsed = true;
     // Something moved again — quieter, a beat later, roughly the same spot.
-    this.answerAt = this.ctx.currentTime + 0.5 + Math.random() * 0.9;
+    this.answerAt = this.ctx.currentTime + 0.5 + this.rng() * 0.9;
     this.answerBearing = this.lastBearing; // raw bearing, not the panned value
     this.answerDist = this.lastDist;
   }
@@ -97,10 +122,10 @@ export class DoorCreaks {
   private distantDoor(): void {
     // Four quadrants; skip whichever the last door came from.
     const choices = [0, 1, 2, 3].filter((q) => q !== this.lastQuadrant);
-    const q = choices[Math.floor(Math.random() * choices.length)];
+    const q = choices[Math.floor(this.rng() * choices.length)];
     this.lastQuadrant = q;
-    const bearing = (q + Math.random()) * (Math.PI / 2);
-    const dist = 15 + Math.random() * 25;
+    const bearing = (q + this.rng()) * (Math.PI / 2);
+    const dist = 15 + this.rng() * 25;
     this.lastDist = dist;
     this.creak(bearing, dist, 1);
 
@@ -120,14 +145,14 @@ export class DoorCreaks {
   private creak(bearing: number, dist: number, volMul: number): void {
     const ctx = this.ctx;
     const t0 = ctx.currentTime;
-    const dur = 1.7 + Math.random() * 1.1;
+    const dur = 1.7 + this.rng() * 1.1;
 
     // Slow sawtooth sweep 80 -> 140 Hz with per-door jitter; a touch of
     // downward drift at the tail reads as the door settling shut.
     const o = ctx.createOscillator();
     o.type = 'sawtooth';
-    const fLo = 78 + Math.random() * 14;
-    const fHi = 128 + Math.random() * 24;
+    const fLo = 78 + this.rng() * 14;
+    const fHi = 128 + this.rng() * 24;
     o.frequency.setValueAtTime(fLo, t0);
     o.frequency.linearRampToValueAtTime(fHi, t0 + dur * 0.72);
     o.frequency.linearRampToValueAtTime(fLo + (fHi - fLo) * 0.35, t0 + dur);
@@ -146,11 +171,11 @@ export class DoorCreaks {
     g.gain.setValueAtTime(0.0001, t0);
     let t = t0 + 0.12;
     while (t < t0 + dur - 0.25) {
-      const rise = 0.05 + Math.random() * 0.14;
-      const lvl = peak * (0.3 + Math.random() * 0.7);
+      const rise = 0.05 + this.rng() * 0.14;
+      const lvl = peak * (0.3 + this.rng() * 0.7);
       g.gain.linearRampToValueAtTime(lvl, t + rise);
       t += rise;
-      const hold = 0.03 + Math.random() * 0.08;
+      const hold = 0.03 + this.rng() * 0.08;
       g.gain.linearRampToValueAtTime(lvl * 0.12, t + hold);
       t += hold;
     }
