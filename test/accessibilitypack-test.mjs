@@ -113,8 +113,8 @@ console.log('AC2b speakerTags on-state effects');
   const tag = createSubtitleTagger(ON);
   const speakers = Object.keys(DEFAULT_SPEAKER_TAGS);
   const tagged = speakers.map((s) => tag(s, 'line'));
-  check('all five default tags are distinct prefixes',
-    new Set(tagged).size === 5 &&
+  check('all default tags are distinct prefixes',
+    new Set(tagged).size === speakers.length &&
     speakers.every((s, i) => tagged[i].startsWith(DEFAULT_SPEAKER_TAGS[s] + ' ') &&
       tagged[i].endsWith('line')));
   check('unknown speaker falls back to [???]',

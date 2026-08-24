@@ -11,5 +11,3 @@ export class PointLight {
   constructor(name, pos, scene) { this.name = name; this.position = pos;
     this.intensity = 0; this.range = 0; this.diffuse = null; }
 }
-
-
