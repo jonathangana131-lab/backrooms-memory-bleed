@@ -267,6 +267,12 @@ export class Game {
   private nvHintShown = false;
   /** cutoff announcements already surfaced for the current run */
   private nvCutoffsSeen = 0;
+  /** playtime of the last loud-artifact caption (10 s min gap per run) */
+  private nvArtifactLastSec = -1e9;
+  /** above this artifactLevel the IR static earns a caption (the module's
+   * gain caps the level at NV_ARTIFACT_GAIN = 0.8, so the threshold must
+   * sit inside the reachable range) */
+  private readonly NV_ARTIFACT_CAPTION_LEVEL = 0.72;
 
   // ---- Wave B (B-2) scene pack ----
   private postfx: PostFX | null = null;
@@ -939,6 +945,8 @@ export class Game {
     // F42: fresh camcorder per run — starts off and re-owns the drain seam;
     // battery provider drives the one-shot auto-cutoff.
     this.nvCutoffsSeen = 0;
+    this.nvArtifactLastSec = -1e9;
+    this.updateNVTint(0);
     this.flashlight.drainMultiplier = 1;
     try {
       this.nightvision = new NightVision(
@@ -1502,6 +1510,26 @@ export class Game {
     this.staggerBlurEl.style.opacity = String(Math.max(0, Math.min(0.85, amp)));
   }
 
+  /**
+   * F42: full-screen green IR grade whose opacity tracks the night-vision
+   * envelope (same lazy fixed-div pattern as the stagger-blur veil). The
+   * color matches the module's NV_TINT_BASE; the 0.08 opacity ceiling keeps
+   * the grade readable-through, never a green wall.
+   */
+  private updateNVTint(envelope: number): void {
+    if (typeof document === 'undefined') return;
+    if (!this.nvTintEl) {
+      const el = document.createElement('div');
+      el.id = 'bmb-nv-tint';
+      el.style.cssText =
+        'position:fixed;inset:0;pointer-events:none;z-index:6;' +
+        'background:rgba(56,255,97,1);opacity:0';
+      document.body.appendChild(el);
+      this.nvTintEl = el;
+    }
+    this.nvTintEl.style.opacity = String(Math.max(0, Math.min(0.08, envelope * 0.08)));
+  }
+
   // ---------- frame ----------
 
   private frame(): void {
@@ -1777,6 +1805,28 @@ export class Game {
           }
         } catch (e) {
           console.warn('[bmb] torch view update failed', e);
+        }
+      }
+      // F42: advance the camcorder mode model, paint the IR grade from the
+      // ramp envelope, and surface loud gain noise + auto-cutoffs (each
+      // caption path throttled by its own per-run bookkeeping).
+      if (this.nightvision) {
+        try {
+          this.nightvision.update(dt);
+          this.updateNVTint(this.nightvision.envelope);
+          if (
+            this.playtimeSec - this.nvArtifactLastSec >= 10 &&
+            this.nightvision.artifactLevel > this.NV_ARTIFACT_CAPTION_LEVEL
+          ) {
+            this.nvArtifactLastSec = this.playtimeSec;
+            this.showAudioCaption('IR STATIC');
+          }
+          if (this.nightvision.cutoffCount > this.nvCutoffsSeen) {
+            this.nvCutoffsSeen = this.nightvision.cutoffCount;
+            this.ui.say('...the cell gave out. The green dies first...', 3.5);
+          }
+        } catch (e) {
+          console.warn('[bmb] night vision update failed', e);
         }
       }
       // path echoes: the space remembers where you walked last session
