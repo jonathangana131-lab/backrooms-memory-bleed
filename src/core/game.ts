@@ -87,6 +87,9 @@ import { DreadSilence } from '../audio/dreadsilence';
 import { FootstepDNA, CLASSIFY_WINDOW, gaitSignature, type StepObservation } from '../audio/footstepdna';
 // F14 fall stagger: post-hard-fall control damp + screen blur envelope
 import { FallStagger } from '../player/fallstagger';
+// F8 gait-synced dread: stride onsets pulled toward the heartbeat
+import { dreadOffset, excitedHeartbeatPeriod } from '../audio/gaitdread';
+import { BOB_FREQUENCY } from '../player/controller';
 // Wave B: scene pack
 import { PostFX } from '../gfx/postfx';
 import { FaunaWiring } from '../entities/faunawiring';
@@ -113,8 +116,6 @@ export type GameState = 'menu' | 'playing' | 'paused';
 
 const SPAWN_X = 1.25;
 const SPAWN_Z = 1.25;
-/** Resting vertical field-of-view (radians); F9 pulses around this base. */
-const BASE_FOV = 1.25;
 
 /** Wave A (A-1a): quality preset <-> legacy numeric quality mapping. */
 function presetToQualityNum(q: string): number {
@@ -327,7 +328,7 @@ export class Game {
     this.scene.ambientColor = new Color3(0.12, 0.11, 0.08);
 
     this.camera = new TargetCamera('cam', new Vector3(SPAWN_X, 1.62, SPAWN_Z), this.scene);
-    this.camera.fov = BASE_FOV;
+    this.camera.fov = 1.25;
     this.camera.minZ = 0.08;
     this.camera.maxZ = 140;
 
@@ -1383,6 +1384,16 @@ export class Game {
       this.state === 'menu' ? this.attract.z : this.player.body.z,
     );
     this.player.update(active ? dt : 0, colliders);
+    // F8: stride onsets drift toward the heartbeat under tension — the
+    // controller advances its bob cycle by this externally computed scale.
+    if (active) {
+      const hb = excitedHeartbeatPeriod(this.director.tension);
+      const nominalStride = Math.PI / Math.max(0.5, this.player.speed * BOB_FREQUENCY);
+      const off = dreadOffset(this.director.tension, nominalStride, hb);
+      this.player.strideRateScale = Math.max(0.65, Math.min(1.35, 1 - off / Math.max(0.05, nominalStride)));
+    } else {
+      this.player.strideRateScale = 1;
+    }
     // F14: fall-stagger control damp + screen blur envelope
     this.player.inputScale = active ? this.fallStagger.inputScale : 1;
     if (this.fallStagger.active) this.fallStagger.update(dt);
@@ -2011,14 +2022,6 @@ export class Game {
       this.camera.position.x += (shakeRng.next() - 0.5) * shakeAmt;
       this.camera.position.y += (shakeRng.next() - 0.5) * shakeAmt;
       this.camera.rotation.z += (shakeRng.next() - 0.5) * shakeAmt * 0.5;
-    }
-    // F9: exertion FOV pulse — amplitude rises as stamina drains
-    {
-      const amp = active ? this.player.staminaEngine.fovPulseAmp : 0;
-      const targetFov = amp > 0.001
-        ? BASE_FOV * (1 + 0.022 * amp * Math.sin(this.playtimeSec * 5.4))
-        : BASE_FOV;
-      if (Math.abs(this.camera.fov - targetFov) > 1e-4) this.camera.fov = targetFov;
     }
     this.ui.setStamina(this.player.stamina);
     this.ui.setBattery(this.flashlight.has ? this.flashlight.battery : null);
