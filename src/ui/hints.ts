@@ -22,6 +22,8 @@
  * whispercue.ts / compass.ts. Pure logic + DOM, no Babylon dependency.
  ***********************************************************************/
 
+import { RNG } from '../core/rng';
+
 /** Cautiousness above which the timid pool becomes active. */
 export const TIMID_THRESHOLD = 0.6;
 
@@ -73,14 +75,23 @@ export function poolFor(cautiousness: number): HintPool | null {
   return null;
 }
 
-/** Default random source for interval jitter: uniform in [min, max). */
-function defaultRng(min: number, max: number): number {
-  return min + Math.random() * (max - min);
+/**
+ * Seed backing the default interval-jitter stream when the caller injects
+ * neither an rng nor a seed. A fixed constant keeps hint cadence and order
+ * deterministic for every construction path; production callers should
+ * forward the run seed via `seed` so hints are stable per seed.
+ */
+export const DEFAULT_HINT_SEED = 0x681a7 >>> 0;
+
+/** Build a deterministic jitter source: uniform in [min, max) per draw. */
+function seededIntervalRng(seed: number): (min: number, max: number) => number {
+  const rng = new RNG(seed);
+  return (min, max) => rng.range(min, max);
 }
 
 /** Jittered inter-hint interval in [HINT_MIN_INTERVAL_S, HINT_MAX_INTERVAL_S). */
 export function rollInterval(
-  rng: (min: number, max: number) => number = defaultRng,
+  rng: (min: number, max: number) => number = seededIntervalRng(DEFAULT_HINT_SEED),
 ): number {
   return rng(HINT_MIN_INTERVAL_S, HINT_MAX_INTERVAL_S);
 }
@@ -142,6 +153,11 @@ interface Options {
   document?: HintDocumentLike | null;
   /** Random source for interval jitter; injectable for deterministic tests. */
   rng?: (min: number, max: number) => number;
+  /**
+   * Run seed used to derive the default jitter stream when `rng` is not
+   * injected; same seed ⇒ same interval and pick sequence.
+   */
+  seed?: number;
 }
 
 /**
@@ -175,7 +191,7 @@ export class DifficultyHints {
 
   constructor(opts: Options = {}) {
     this.doc = resolveDocument(opts.document);
-    this.rng = opts.rng ?? defaultRng;
+    this.rng = opts.rng ?? seededIntervalRng(opts.seed ?? DEFAULT_HINT_SEED);
     this.nextIn = rollInterval(this.rng);
     // ---- stylesheet ----
     const style = this.doc.createElement('style');
@@ -267,7 +283,7 @@ export class DifficultyHints {
   /** Fragment currently presented, if any. */
   get text(): string | null {
     return this.currentText === '' ? null : this.currentText;
-}
+  }
 
   /** Seconds remaining before a hint MAY fire (only meaningful after a shift). */
   get secondsUntilEligible(): number {
