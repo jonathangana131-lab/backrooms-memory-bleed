@@ -1,6 +1,10 @@
 /**
  * Lighting rig: dim ambient, pooled point lights bound to nearby fixtures,
  * flicker simulation, glow and post-processing.
+ *
+ * Determinism: rain-drop geometry and pool phases are pure hash draws
+ * (rand2 per index); migrant duration and blackout flash scheduling run
+ * on one persistent seeded RNG stream — no Math.random anywhere.
  */
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -10,10 +14,17 @@ import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { DefaultRenderingPipeline } from '@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline';
 import { Scene } from '@babylonjs/core/scene';
 import type { Camera } from '@babylonjs/core/Cameras/camera';
-import { rand2 } from '../core/rng';
+import { rand2, RNG } from '../core/rng';
 import { fixtureDeadRef } from './materials';
 
 const POOL = 14;
+
+/** Stream salt so lighting rolls never correlate with other seeded systems. */
+const LIGHTING_SALT = 0x11da7c9d;
+/** Default stream seed used when no run seed reaches the constructor. */
+const DEFAULT_LIGHTING_SEED = 0x7f13a501;
+/** rand2 salt domain for ScreenRain drop geometry (one draw per attribute). */
+const RAIN_SALT = 0x21a1b05;
 
 /**
  * Per-district fog base colours (blended, not uniform):
@@ -61,13 +72,14 @@ class ScreenRain {
       'opacity:0.03;overflow:hidden;display:none;';
     for (let i = 0; i < 44; i++) {
       const drop = document.createElement('div');
-      const len = 70 + Math.random() * 80; // thin streaks
+      // per-index hash draws: same 44 drops every session
+      const len = 70 + rand2(i, 1, RAIN_SALT) * 80; // thin streaks
       drop.style.cssText =
         'position:absolute;top:-26vh;width:1px;height:' + len.toFixed(0) + 'px;' +
         'background:linear-gradient(to bottom,rgba(190,212,255,0),rgba(190,212,255,0.95));' +
-        'left:' + (Math.random() * 100).toFixed(1) + 'vw;' +
-        'animation:bmbRainFall ' + (0.55 + Math.random() * 0.75).toFixed(2) + 's linear infinite;' +
-        'animation-delay:-' + (Math.random() * 2).toFixed(2) + 's;';
+        'left:' + (rand2(i, 2, RAIN_SALT) * 100).toFixed(1) + 'vw;' +
+        'animation:bmbRainFall ' + (0.55 + rand2(i, 3, RAIN_SALT) * 0.75).toFixed(2) + 's linear infinite;' +
+        'animation-delay:-' + (rand2(i, 4, RAIN_SALT) * 2).toFixed(2) + 's;';
       root.appendChild(drop);
     }
     document.body.appendChild(root);
@@ -100,10 +112,13 @@ export class LightingRig {
   private hemi: HemisphericLight;
   private pool: PoolLight[] = [];
   private pipeline: DefaultRenderingPipeline;
+  /** Seeded stream for migrant duration and blackout flash scheduling. */
+  private readonly rng: RNG;
   /** global flicker stress 0..1 raises anomaly behaviour */
   public stressLevel = 0;
 
   constructor(private scene: Scene) {
+    this.rng = new RNG((DEFAULT_LIGHTING_SEED ^ LIGHTING_SALT) >>> 0);
     this.hemi = new HemisphericLight('hemi', new Vector3(0.2, 1, 0.1), scene);
     this.hemi.intensity = 0.85;
     this.hemi.diffuse = new Color3(1.0, 0.95, 0.78);
@@ -114,7 +129,7 @@ export class LightingRig {
       l.range = 13.5;
       l.diffuse = new Color3(1.0, 0.94, 0.72);
       l.intensity = 0;
-      this.pool.push({ light: l, fixtureKey: '', baseIntensity: 0, flicker: 0, seedX: 0, seedZ: 0, phase: Math.random() * 100 });
+      this.pool.push({ light: l, fixtureKey: '', baseIntensity: 0, flicker: 0, seedX: 0, seedZ: 0, phase: rand2(i, 0, LIGHTING_SALT) * 100 });
     }
 
     const glow = new GlowLayer('glow', scene, { mainTextureFixedSize: 512, blurKernelSize: 48 });
@@ -273,7 +288,7 @@ export class LightingRig {
       if (d < bestD && d > 9) { bestD = d; bestIdx = i; }
     }
     if (bestIdx >= 0) {
-      this.migrant = { poolIdx: bestIdx, tx: px, tz: pz, t: 0, dur: 9 + Math.random() * 6 };
+      this.migrant = { poolIdx: bestIdx, tx: px, tz: pz, t: 0, dur: 9 + this.rng.next() * 6 };
     }
   }
 
@@ -347,7 +362,7 @@ export class LightingRig {
     // material's emissiveColor is pulsed high, then dropped back down on the
     // next update. flashHoldSec lets visual tests hold the frame longer.
     const deadOut = fixtures.length > 0 && !fixtures.some((f) => f.alive);
-    if (deadOut && !this.wasDeadOut) this.nextFlashAt = time + 3 + Math.random() * 4;
+    if (deadOut && !this.wasDeadOut) this.nextFlashAt = time + 3 + this.rng.next() * 4;
     this.wasDeadOut = deadOut;
     const deadMat = fixtureDeadRef.mat;
     if (this.flashArmed && (this.flashHoldUntil < 0 || time >= this.flashHoldUntil)) {
@@ -361,7 +376,7 @@ export class LightingRig {
       this.flashArmed = true;
       this.flashHoldUntil = this.flashHoldSec > 0 ? time + this.flashHoldSec : -1; // -1: exactly one frame
       // occasionally a dying tube double-strobes before settling back to dark
-      this.nextFlashAt = time + (Math.random() < 0.25 ? 0.09 : 3 + Math.random() * 4);
+      this.nextFlashAt = time + (this.rng.chance(0.25) ? 0.09 : 3 + this.rng.next() * 4);
     }
 
     // Flicker simulation
