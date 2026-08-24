@@ -79,6 +79,14 @@ export class PlayerController {
    * top of it, so assigning it never disturbs that math.
    */
   baseFovRad = 1.25;
+  /**
+   * F49 injected settings read, assigned once by the game's settings
+   * mount. When the returned snapshot carries motionSafety, every
+   * controller-generated camera motion (head bob + idle sway) zeroes for
+   * that frame while gameplay math (stride phase, footsteps) continues.
+   * Null means no settings source: motion runs unsuppressed.
+   */
+  getSettings: (() => { motionSafety?: boolean } | null) | null = null;
   /** F10: Q/E lean envelope with collision-safe lateral offset. */
   private readonly lean = new LeanPeek(LeanPeekMode.Hold);
   /** F9: FOV pulse oscillator phase (radians). */
@@ -215,9 +223,12 @@ export class PlayerController {
     // heartbeat under tension (set externally each frame). ----
     const hspeed = this.speed;
     this.bobPhase += dt * hspeed * BOB_FREQUENCY * this.strideRateScale;
+    // F49 motion-safety gate: the visual amplitudes zero while the stride
+    // clock above keeps advancing, so footsteps and audio stay intact.
+    const motionSafe = this.getSettings?.()?.motionSafety === true;
     const bobAmp = Math.min(1, hspeed / 4) * BOB_AMPLITUDE * (this.crouching ? 0.7 : 1);
-    const bobY = moving ? Math.sin(this.bobPhase * 2) * bobAmp : 0;
-    const bobX = moving ? Math.cos(this.bobPhase) * bobAmp * 0.7 : 0;
+    const bobY = moving && !motionSafe ? Math.sin(this.bobPhase * 2) * bobAmp : 0;
+    const bobX = moving && !motionSafe ? Math.cos(this.bobPhase) * bobAmp * 0.7 : 0;
 
     // footstep hook: fired at each vertical-bob cycle peak (bobPhase*2 == PI/2 + n*2PI)
     const peakIdx = Math.floor((this.bobPhase * 2 - Math.PI / 2) / (2 * Math.PI));
@@ -262,7 +273,7 @@ export class PlayerController {
     const cz = this.body.z - bobX * Math.sin(this.yaw) + leanState.offsetZ;
     // idle sway: barely-there breathing so stillness never looks frozen
     let swayY = 0, swayP = 0;
-    if (!moving) {
+    if (!moving && !motionSafe) {
       this.idleTime += dt;
       swayY = Math.sin(this.idleTime * 0.55) * 0.0016 + Math.sin(this.idleTime * 1.31) * 0.0007;
       swayP = Math.cos(this.idleTime * 0.42) * 0.0022;
