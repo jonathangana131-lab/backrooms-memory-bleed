@@ -9,7 +9,21 @@
  *
  * Fully procedural, no assets. Instances are cheap: a conversation is two
  * glottal sawtooth voices through two bandpass formants each, panned wide.
+ *
+ * Determinism: speaker voice streams are seeded per exchange (mulberry32,
+ * as in crowd.ts); turn durations draw from a per-exchange stream seeded
+ * by the instance stream seed XOR a site salt; exchanges spawned without
+ * an explicit seed derive one from the spawn sequence via hash2i
+ * (src/core/rng.ts). No buffer fills exist in this file.
  */
+import { hash2i } from '../core/rng';
+
+/** Stream salt so pair-vocal seeds never correlate with other seeded systems. */
+const PAIR_SALT = 0x70a12c05;
+/** Default instance stream seed used when no run seed reaches the constructor. */
+const DEFAULT_PAIR_SEED = 0x2b7e91d4;
+/** Salt separating the per-exchange turn-duration stream from voice streams. */
+const TURN_SALT = 0x51d3;
 
 /** Phases of one paired exchange. */
 export type ConvoPhase = 'approach' | 'exchange' | 'parting';
@@ -48,6 +62,8 @@ interface Convo {
   bz: number;
   a: Speaker;
   b: Speaker;
+  /** Turn-duration stream for this exchange (determinism law). */
+  rng: () => number;
   phase: ConvoPhase;
   speaker: number;
   timeLeft: number;
@@ -77,10 +93,15 @@ export class PairVocals {
 
   private readonly convos: Convo[] = [];
   private stopped = false;
+  /** Instance stream seed for deriving per-exchange seeds. */
+  private readonly streamSeed: number;
+  /** Count of exchanges spawned, mixing determinism into default seeds. */
+  private spawnSeq = 0;
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = DEFAULT_PAIR_SEED) {
     this.ctx = ctx;
     this.out = destination;
+    this.streamSeed = (seed ^ PAIR_SALT) >>> 0;
   }
 
   /**
@@ -89,14 +110,17 @@ export class PairVocals {
    * @param az anchor A z
    * @param bx anchor B x
    * @param bz anchor B z
-   * @param seed optional deterministic seed for the voice characters
+   * @param seed optional deterministic seed; defaults to a hash of the
+   *             instance stream seed and the spawn sequence number
    */
-  spawn(ax: number, az: number, bx: number, bz: number, seed = Math.floor(Math.random() * 0xffffffff)): void {
+  spawn(ax: number, az: number, bx: number, bz: number, seed?: number): void {
     if (this.stopped) return;
+    const s = (seed ?? hash2i(this.spawnSeq++, this.streamSeed)) >>> 0;
     const convo: Convo = {
       ax, az, bx, bz,
-      a: this.buildSpeaker(seed),
-      b: this.buildSpeaker(seed ^ 0x9e3779b9),
+      a: this.buildSpeaker(s),
+      b: this.buildSpeaker(s ^ 0x9e3779b9),
+      rng: mulberry32((s ^ TURN_SALT) >>> 0),
       phase: 'exchange',
       speaker: 0,
       timeLeft: 0,
@@ -127,7 +151,7 @@ export class PairVocals {
         // hand the floor over
         c.speaker = c.speaker === 0 ? 1 : 0;
         c.turns++;
-        c.timeLeft = UTTERANCE_MIN + Math.random() * (UTTERANCE_MAX - UTTERANCE_MIN);
+        c.timeLeft = UTTERANCE_MIN + c.rng() * (UTTERANCE_MAX - UTTERANCE_MIN);
         c.coolLeft = c.turns % 4 === 0 ? PHRASE_COOL : TURN_GAP;
         if (c.turns > 12) { c.phase = 'parting'; c.coolLeft = PHRASE_COOL; }
       }
