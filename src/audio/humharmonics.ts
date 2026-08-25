@@ -107,6 +107,12 @@ const AGE_HARMONIC_BOOST = 0.4;
 /** Smoothing time constant for level moves (seconds). */
 const LEVEL_TAU = 0.25;
 
+/**
+ * Salt separating this layer's draw stream from every other seeded consumer
+ * of a run seed (mirrors the XOR-salt pattern used by EntityVocals et al).
+ */
+export const HUM_SEED_SALT = 0x68756d68; // 'humh'
+
 // --- F36 melody leaks --------------------------------------------------------
 
 /** Hash salt separating motif derivation from every other RNG use. */
@@ -212,11 +218,20 @@ export class HumHarmonics {
   private fixtureCount = 0;
   private district = -1;
 
+  /**
+   * Deterministic draw stream for beat/warble randomness. The legacy module
+   * drew these from Math.random, which broke the repo's determinism law
+   * (identical seeds must replay identically); every former Math.random site
+   * now draws here instead. seed=0 (the default) keeps direct-constructed
+   * instances on a fixed, documented stream.
+   */
+  private readonly rng: RngStream;
+
   /** Current beat offset between the voices (Hz difference of fundamentals). */
-  private beatDelta = BEAT_MIN + Math.random() * (BEAT_MAX - BEAT_MIN);
+  private beatDelta: number;
 
   /** Seconds until the beat drifts to a new offset (fixtures never agree). */
-  private driftIn = 10 + Math.random() * 10;
+  private driftIn: number;
 
   private stopped = false;
 
@@ -229,10 +244,14 @@ export class HumHarmonics {
   private quoteHoldLeft = 0;
   private lastQuote: QuotedMotif | null = null;
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(ctx: AudioContext, destination: AudioNode, seed = 0) {
     this.ctx = ctx;
+    this.rng = new RngStream(((seed | 0) ^ HUM_SEED_SALT) >>> 0);
     this.out = ctx.createGain();
     this.out.gain.value = 1;
+
+    this.beatDelta = BEAT_MIN + this.rng.next() * (BEAT_MAX - BEAT_MIN);
+    this.driftIn = 10 + this.rng.next() * 10;
 
     this.voiceA = this.buildVoice(HUM_FUNDAMENTAL);
     this.voiceB = this.buildVoice(HUM_FUNDAMENTAL + this.beatDelta);
@@ -242,7 +261,7 @@ export class HumHarmonics {
     // a depth gain whose gain parameter IS the warble depth in Hz.
     this.warble = ctx.createOscillator();
     this.warble.type = 'sine';
-    this.warble.frequency.value = 0.07 + Math.random() * 0.06; // 0.07-0.13 Hz
+    this.warble.frequency.value = this.rng.range(0.07, 0.13); // 0.07-0.13 Hz
     this.warbleDepth = ctx.createGain();
     this.warbleDepth.gain.value = 0;
     this.warble.connect(this.warbleDepth);
@@ -349,8 +368,8 @@ export class HumHarmonics {
 
     this.driftIn -= dt;
     if (this.driftIn <= 0) {
-      this.driftIn = 10 + Math.random() * 10;
-      this.beatDelta = BEAT_MIN + Math.random() * (BEAT_MAX - BEAT_MIN);
+      this.driftIn = 10 + this.rng.next() * 10;
+      this.beatDelta = BEAT_MIN + this.rng.next() * (BEAT_MAX - BEAT_MIN);
       this.voiceB.oscs[0].frequency.setValueAtTime(HUM_FUNDAMENTAL + this.beatDelta, this.ctx.currentTime);
     }
     this.updateMotifLeaks(dt);

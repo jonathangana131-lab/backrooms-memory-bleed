@@ -27,6 +27,7 @@ import { AudioEngine } from '../audio/audio';
 import { SelfRadio, type FeedEntry } from '../audio/selfradio';
 import { VoiceMemoStore, ZONE_GEN_MAX } from '../audio/voicememo';
 import { PositionalHum } from '../audio/positional';
+import { HumHarmonics } from '../audio/humharmonics';
 import { WatcherSteps } from '../audio/approach';
 import { SurfaceDetector } from '../player/surfacedetect';
 import { SurfaceFootsteps } from '../audio/surfaces';
@@ -316,6 +317,7 @@ export class Game {
 
   // ---- integrated audio/gameplay systems (constructed lazily, ctx-gated) ----
   humAudio: PositionalHum | null = null;
+  humHarmonics: HumHarmonics | null = null;
   watcherSteps: WatcherSteps | null = null;
   surfaceDetector: SurfaceDetector | null = null;
   surfaceFootsteps: SurfaceFootsteps | null = null;
@@ -2442,6 +2444,10 @@ export class Game {
     const spatialBus = this.audio.ambienceBus ?? dest;
     try { this.humAudio = new PositionalHum(ctx, spatialBus); }
     catch (e) { console.warn('[bmb] PositionalHum unavailable', e); this.humAudio = null; }
+    // ---- Hum harmonics: ballast colouration + beat twin ride the same ----
+    // ---- spatial authority as the hum they colour (run-seeded)          ----
+    try { this.humHarmonics = new HumHarmonics(ctx, spatialBus, (this.seed ^ 0x68756d68) >>> 0); }
+    catch (e) { console.warn('[bmb] HumHarmonics unavailable', e); this.humHarmonics = null; }
     // ---- Entity vocals: figure voices ride the same spatial authority ----
     try { this.entityVocals = new EntityVocals(ctx, spatialBus, (this.seed ^ 0x65766f63) >>> 0); }
     catch (e) { console.warn('[bmb] EntityVocals unavailable', e); this.entityVocals = null; }
@@ -3427,6 +3433,21 @@ export class Game {
         this.humAudio.update(focus.x, focus.z, focus.yaw);
       } catch (e) {
         console.warn('[bmb] positional hum update failed', e);
+      }
+    }
+
+    // HumHarmonics: ballast colouration for the same fixture picture —
+    // audible fixture count drives loudness + the beat twin, the district
+    // profile ages the warble/harmonic dirt, and the layer's own seeded
+    // stream drifts the beat. Failure island, like every audio consumer.
+    if (this.humHarmonics) {
+      try {
+        const nearLit = fixtures.filter((f) => f.alive).length;
+        this.humHarmonics.setFixtureCount(Math.min(nearLit, 12));
+        this.humHarmonics.setDistrict(this.chunks.districtAtPos(focus.x, focus.z) ?? 0);
+        this.humHarmonics.update(dt);
+      } catch (e) {
+        console.warn('[bmb] hum harmonics update failed', e);
       }
     }
 
