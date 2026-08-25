@@ -5,7 +5,7 @@
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { TargetCamera } from '@babylonjs/core/Cameras/targetCamera';
 import type { Scene } from '@babylonjs/core/scene';
-import { Input } from '../core/input';
+import { Input, GAMEPAD_TURN_RATE } from '../core/input';
 import { moveCircle, type CircleBody } from '../world/collision';
 import type { Box2 } from '../world/architect';
 import { Emitter } from '../core/events';
@@ -118,6 +118,14 @@ export class PlayerController {
     const m = this.input.consumeMouse();
     this.yaw += m.dx * this.sensitivity;
     this.pitch += m.dy * this.sensitivity;
+    // gamepad look: rate-based turn scaled by dt (framerate-independent),
+    // riding the same pitch clamp as the mouse below; disabled while the
+    // waking intro drives the camera, mirroring the keyboard's dead period.
+    const pl = this.input.padLook;
+    if (this.enabled && (pl.x !== 0 || pl.y !== 0)) {
+      this.yaw += pl.x * GAMEPAD_TURN_RATE * dt;
+      this.pitch += pl.y * GAMEPAD_TURN_RATE * dt;
+    }
     const lim = Math.PI / 2 - 0.02;
     if (this.pitch > lim) this.pitch = lim;
     if (this.pitch < -lim) this.pitch = -lim;

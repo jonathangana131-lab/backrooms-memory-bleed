@@ -59,7 +59,8 @@ function makeRig(keys = new Set()) {
   const camera = { fov: 1.25 };
   camera.position = { set(x, y, z) { camera.px = x; camera.py = y; camera.pz = z; } };
   camera.rotation = { set(x, y, z) { camera.rx = x; camera.ry = y; camera.rz = z; } };
-  const input = { consumeMouse: () => ({ dx: 0, dy: 0 }), down: (c) => keys.has(c) };
+  // padLook: gamepad-mount merge surface (zero here = keyboard-only rig)
+  const input = { consumeMouse: () => ({ dx: 0, dy: 0 }), down: (c) => keys.has(c), padLook: { x: 0, y: 0 } };
   const player = new PlayerController(camera, input, {});
   player.enabled = true;
   player.teleport(0, 6, Math.PI);

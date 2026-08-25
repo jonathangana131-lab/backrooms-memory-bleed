@@ -12,6 +12,7 @@ import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { TargetCamera } from '@babylonjs/core/Cameras/targetCamera';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { Input } from './input';
+import { GamepadManager } from '../player/gamepad';
 import { seedFromString, hash2i, RNG } from './rng';
 import { moveCircle, hasLineOfSight } from '../world/collision';
 import { CELL as CELL_SIZE, worldToChunk } from '../world/constants';
@@ -299,6 +300,8 @@ export class Game {
   scene!: Scene;
   camera!: TargetCamera;
   input!: Input;
+  /** Gamepad adapter (standard mapping); constructed in init(), failure-island. */
+  gamepad: GamepadManager | null = null;
   mats!: MaterialSet;
   lighting!: LightingRig;
   chunks!: ChunkManager;
@@ -739,6 +742,25 @@ export class Game {
     this.camera.maxZ = 140;
 
     this.input = new Input(canvas);
+    // ---- gamepad adapter: whole-input-path accessibility mount ----
+    // The pad merges into Input (movement/sprint/crouch-latch keys + analog
+    // look); discrete buttons route through the same action methods as the
+    // keyboard from frame(). Toasts are lazy so a connect during boot can't
+    // touch a half-built ui.
+    try {
+      this.gamepad = new GamepadManager();
+      this.input.attachGamepad(this.gamepad);
+      this.gamepad.onConnect = (ev) => {
+        try { this.ui.toast(ev.toast, 2500); } catch { /* ui not up yet */ }
+      };
+      this.gamepad.onDisconnect = () => {
+        this.input.resetGamepadTransient();
+        try { this.ui.toast('GAMEPAD DISCONNECTED', 2500); } catch { /* ui not up yet */ }
+      };
+    } catch (e) {
+      console.warn('[bmb] GamepadManager unavailable', e);
+      this.gamepad = null;
+    }
     this.mats = createMaterials(this.scene);
     // WebGPU-only: clamp per-material light counts so vertex-stage uniform
     // buffers stay under the 12-per-stage limit (16 bound lights overflow it
@@ -1146,49 +1168,8 @@ export class Game {
         e.preventDefault();
         this.ui.toggleDebug();
       }
-      if (e.code === 'KeyE' && this.state === 'playing') {
-        console.log('[key] KeyE firing, setting queue; sameInstance=', this === (window as unknown as Record<string, Record<string, unknown>>).__BMB__?.game);
-        this.interactQueued = true;
-      }
-      if (e.code === 'KeyF' && this.state === 'playing') {
-        const wasOn = this.flashlight.on;
-        const turned = this.flashlight.toggle();
-        // F11: the hand jolts whenever the torch state actually flips
-        if (turned !== wasOn) this.torchView?.kick();
-        if (turned && !this.flashHintShown) {
-          this.flashHintShown = true;
-          this.ui.say('The camp kit’s torch. It drinks from the working lights.', 4);
-        }
-      }
-      // batteries consume synchronously here so nothing can eat the press
-      if (e.code === 'KeyE' && this.state === 'playing') {
-        const b0 = this.chunks.nearestBattery(this.player.body.x, this.player.body.z);
-        console.log('[batE] reached, b=', !!b0);
-        const b = b0;
-        const beaconNear = [...this.story.beacons.values()].some(
-          (bb) => !bb.found && Math.hypot(bb.x - this.player.body.x, bb.z - this.player.body.z) < 2.6,
-        );
-        console.log('[batE] beaconNear=', beaconNear, 'b=', !!b);
-        if (b && !beaconNear) {
-          const cx2 = worldToChunk(b.x);
-          const cz2 = worldToChunk(b.z);
-          // coordinate-stable key matches the build-time filter
-          const key = cx2 + ':' + cz2 + ':' + Math.round(b.x * 100) + ':' + Math.round(b.z * 100);
-          if (!this.consumedBatteries.has(key)) {
-            this.consumedBatteries.add(key);
-            this.chunks.rebuildChunk(cx2, cz2);
-            this.flashlight.battery = Math.min(1, this.flashlight.battery + 0.35);
-            this.ui.toast('TORCH CELL +35%', 2500);
-            // F11: fresh cell goes in — the hand dips for the swap beat
-            this.torchView?.beginSwap();
-            this.ui.setPrompt(null);
-            // Wave B (B-1): battery pickup cue
-            try { this.batteryCues?.pickupSound(); }
-            catch (err) { console.warn('[bmb] battery pickup cue failed', err); }
-            e.preventDefault();
-          }
-        }
-      }
+      if (e.code === 'KeyE' && this.state === 'playing') this.pressInteractKey();
+      if (e.code === 'KeyF' && this.state === 'playing') this.pressTorchKey();
       if (e.code === 'KeyN' && this.state === 'playing') {
         // F42: camcorder IR toggle — shares the torch cell, so it needs the kit
         if (!this.flashlight.has) {
@@ -1200,7 +1181,7 @@ export class Game {
       }
       if (e.code === 'Tab') {
         e.preventDefault();
-        this.logOpen = !this.logOpen;
+        this.toggleLogKey();
       }
     });
     window.addEventListener('beforeunload', () => {
@@ -1210,6 +1191,54 @@ export class Game {
     this.engine.runRenderLoop(() => this.frame());
     const slot0 = await SaveDB.loadGame();
     this.ui.showTitle(!!slot0, slot0 ? Math.floor((slot0.playtimeSec ?? 0) / 60) + ' min · ' + (slot0.seed >>> 0).toString(16).toUpperCase().slice(0, 8) : undefined);
+  }
+
+  /**
+   * KeyE / pad A: queue the interaction AND consume a nearby torch cell
+   * synchronously so nothing can eat the press. Shared by keyboard and pad.
+   */
+  private pressInteractKey(): void {
+    console.log('[key] KeyE firing, setting queue; sameInstance=', this === (window as unknown as Record<string, Record<string, unknown>>).__BMB__?.game);
+    this.interactQueued = true;
+    const b = this.chunks.nearestBattery(this.player.body.x, this.player.body.z);
+    const beaconNear = [...this.story.beacons.values()].some(
+      (bb) => !bb.found && Math.hypot(bb.x - this.player.body.x, bb.z - this.player.body.z) < 2.6,
+    );
+    if (b && !beaconNear) {
+      const cx2 = worldToChunk(b.x);
+      const cz2 = worldToChunk(b.z);
+      // coordinate-stable key matches the build-time filter
+      const key = cx2 + ':' + cz2 + ':' + Math.round(b.x * 100) + ':' + Math.round(b.z * 100);
+      if (!this.consumedBatteries.has(key)) {
+        this.consumedBatteries.add(key);
+        this.chunks.rebuildChunk(cx2, cz2);
+        this.flashlight.battery = Math.min(1, this.flashlight.battery + 0.35);
+        this.ui.toast('TORCH CELL +35%', 2500);
+        // F11: fresh cell goes in — the hand dips for the swap beat
+        this.torchView?.beginSwap();
+        this.ui.setPrompt(null);
+        // Wave B (B-1): battery pickup cue
+        try { this.batteryCues?.pickupSound(); }
+        catch (err) { console.warn('[bmb] battery pickup cue failed', err); }
+      }
+    }
+  }
+
+  /** KeyF / pad X: torch toggle with the F11 hand jolt + first-light hint. */
+  private pressTorchKey(): void {
+    const wasOn = this.flashlight.on;
+    const turned = this.flashlight.toggle();
+    // F11: the hand jolts whenever the torch state actually flips
+    if (turned !== wasOn) this.torchView?.kick();
+    if (turned && !this.flashHintShown) {
+      this.flashHintShown = true;
+      this.ui.say('The camp kit’s torch. It drinks from the working lights.', 4);
+    }
+  }
+
+  /** Tab / pad Y: expedition log toggle. */
+  private toggleLogKey(): void {
+    this.logOpen = !this.logOpen;
   }
 
   applySettings(s: SettingsData): void {
@@ -1618,6 +1647,8 @@ export class Game {
   }
 
   private beginRun(pos: { x: number; z: number; yaw: number }): void {
+    // fresh expedition starts un-crouched from the pad's perspective too
+    this.input.resetGamepadTransient();
     this.chunks.seed = this.seed;
     this.chunks.reset();
     this.humans.reset();
@@ -2593,6 +2624,19 @@ export class Game {
 
     // F100: drive the credits walk while the transient credits state is held
     if (this.state === 'credits') this.tickCreditsWalk(dt);
+
+    // ---- gamepad poll: refresh merged pad state, route rising edges ----
+    try {
+      const pf = this.input.updateGamepad();
+      if (pf) {
+        if (pf.interactPressed && this.state === 'playing') this.pressInteractKey();
+        if (pf.torchPressed && this.state === 'playing') this.pressTorchKey();
+        if (pf.logPressed) this.toggleLogKey();
+        if (pf.pausePressed && this.state === 'playing') this.pause();
+      }
+    } catch (e) {
+      console.warn('[bmb] gamepad poll failed', e);
+    }
 
     // title-screen attract camera drifts through the world behind the menu
     if (this.state === 'menu') {
