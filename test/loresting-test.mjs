@@ -23,8 +23,12 @@ const ok = (cond, msg) => {
 console.log('[static]');
 ok(src.includes('export class LoreStings'), 'exports LoreStings');
 ok(src.includes("constructor(ctx: AudioContext, destination: AudioNode)"), 'constructor(ctx, destination) signature');
-for (const m of ['noteRead(stage: number)', 'clusterComplete(stage: number)', 'radioLock(stage: number)']) {
-  ok(src.includes(m) || src.includes(m.replace(': number', ' = 0')), `method ${m}`);
+// Real signatures in src/audio/loresting.ts use default-param style:
+//   noteRead(stage = this.stage)
+// Accept either explicit annotation (`stage: number`) or default-param form.
+for (const m of ['noteRead', 'clusterComplete', 'radioLock']) {
+  const sig = new RegExp(`${m}\\(\\s*stage\\s*(?::\\s*number)?\\s*=\\s*(?:this\\.stage|0)`);
+  ok(sig.test(src), `method ${m}(stage ...)`);
 }
 ok(/stop\(\)\s*:\s*void/.test(src), 'method stop(): void');
 ok(/'sine'/.test(src), 'sine oscillators for note stings');
@@ -38,5 +42,9 @@ ok(/659\.25/.test(src) && /880/.test(src), 'E5 and A5 present');
 
 // ---- part 2: behavioural (needs Node >= 22.6 type stripping) ----
 console.log('[behavioural]');
+
+// Propagate failures to the exit code, matching the convention of the other
+// suites in test/ (e.g. tremor-test.mjs, ledger-test.mjs).
+process.exitCode = failures === 0 ? 0 : 1;
 
 
