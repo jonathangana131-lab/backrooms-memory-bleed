@@ -10,8 +10,10 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e).slice(0, 150)));
-await page.goto('http://127.0.0.1:5178/', { waitUntil: 'networkidle' });
-await page.waitForFunction(() => (window).__BMB__, null, { timeout: 60000 });
+// domcontentloaded + generous boot wait: networkidle never settles on a
+// loaded dev host (hundreds of unbundled modules keep connections churning)
+await page.goto('http://127.0.0.1:5178/', { waitUntil: 'domcontentloaded', timeout: 120000 });
+await page.waitForFunction(() => (window).__BMB__, null, { timeout: 120000 });
 
 // 1. New Expedition — dispatch click via evaluate to bypass SPA navigation wait
 const RUN_SEED = process.env.SEED || '';
