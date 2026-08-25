@@ -292,7 +292,16 @@ first-class v1.1 work: a deepening release lands on a complete foundation.
   the harness hook. Evidence: test/wakemount-test.mjs 34/0 ALL PASS,
   PLAYTHROUGH_PASS with PAGE_ERRORS=0, pnpm build green.
 - Adrenaline hearing gain is stored but unconsumed: `adrenalineHearingGainMul`
-  waits for an audio-layer multiplier (src/audio master chain ← src/core/game.ts field).
+  waits for an audio-layer multiplier (src/audio master chain ← src/core/game.ts field) —
+  RESOLVED ✅ (2026-08-24): AudioEngine grew a dedicated ambience gain bus
+  between the wall-occlusion lowpass and master (`occlusion -> ambience ->
+  master`; `setHearingMul()` clamps [1, HEARING_GAIN_MUL_MAX], τ=0.25,
+  NaN/Infinity fall back to identity; master.gain stays DreadSilence's),
+  and game.ts feeds `adrenalineHearingGainMul` every frame plus resets the
+  bus to unity in beginRun. Evidence: test/hearinggain-test.mjs 31/31 ALL
+  PASS; live probe (test/_hg-live-probe.mjs): injected near-miss drove the
+  frame loop to level 2 with ambienceBus converging 1.68→1.88 while
+  masterBus stayed pinned at 0.8, PAGE_ERRORS=0; pnpm typecheck+build green.
 - Sanity remains proxied by zone saturation for journal-font degradation —
   awaits either a dedicated sanity stat or a documented permanent adoption of
   the proxy (src/ui/journalfont.ts consumers ← decision owner).

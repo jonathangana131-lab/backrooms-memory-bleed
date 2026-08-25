@@ -3,6 +3,11 @@
  * with WebAudio primitives (fluorescent hum, room tone, distant
  * building groans, footsteps).
  */
+import { HEARING_GAIN_MUL_MAX } from '../player/adrenaline';
+
+/** Smoothing time-constant (s) for adrenaline hearing-gain automation. */
+export const HEARING_MUL_TAU_S = 0.25;
+
 export class AudioEngine {
   ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -26,6 +31,17 @@ export class AudioEngine {
   // ---- expansion: wall occlusion (lowpass on the ambient bed) ----
   private occlusion?: BiquadFilterNode;
   private occlusionLevel = 0;
+
+  // ---- expansion: adrenaline hearing-gain bus (F75 consumer) ----
+  /**
+   * Dedicated ambience bus sitting between the wall-occlusion lowpass and
+   * master; every muffled-bed voice flows through it. Its gain is the
+   * ONLY place adrenaline's hearing boost is applied — master.gain is
+   * owned by DreadSilence's whole-mix duck and must never carry this.
+   */
+  private ambience?: GainNode;
+  /** Last level requested via setHearingMul (kept pre-unlock too). */
+  private hearingMul = 1;
 
   // ---- expansion: district-dependent reverb response ----
   private district = -1;
@@ -65,6 +81,32 @@ export class AudioEngine {
   /** Everything muffled by walls routes through this node (falls back to master pre-unlock). */
   private ambientOut(): AudioNode {
     return this.occlusion ?? this.master!;
+  }
+
+  /**
+   * Adrenaline hearing boost (F75 consumer): multiplier in
+   * [1, HEARING_GAIN_MUL_MAX] applied on the dedicated ambience bus that
+   * sits between the occlusion lowpass and master. Clamped and NaN-safe;
+   * smoothed with setTargetAtTime (tau HEARING_MUL_TAU_S) so dumps attack
+   * fast but never zipper. Calls before unlock() only store the level —
+   * unlock() seeds the bus gain from it. Never touches master.gain:
+   * DreadSilence owns that param for whole-mix ducks.
+   */
+  setHearingMul(mul: number): void {
+    const m = Number.isFinite(mul) ? Math.max(1, Math.min(HEARING_GAIN_MUL_MAX, mul)) : 1;
+    this.hearingMul = m;
+    if (!this.started || !this.ctx || !this.ambience) return;
+    this.ambience.gain.setTargetAtTime(m, this.ctx.currentTime, HEARING_MUL_TAU_S);
+  }
+
+  /** Last level handed to setHearingMul (post-clamp; identity until then). */
+  get hearingMulLevel(): number {
+    return this.hearingMul;
+  }
+
+  /** The dedicated ambience (hearing-gain) bus; null before unlock(). */
+  get ambienceBus(): GainNode | null {
+    return this.ambience ?? null;
   }
 
   /** Inverse-square distance attenuation: unity within 5m, 1/d² beyond (0 past any finite range). */
@@ -187,12 +229,15 @@ export class AudioEngine {
       comp.threshold.value = -18; comp.ratio.value = 6;
       this.master.connect(comp).connect(ctx.destination);
 
-      // wall-occlusion lowpass sitting on the ambient bed (see setOcclusion)
+      // wall-occlusion lowpass sitting on the ambient bed (see setOcclusion),
+      // followed by the adrenaline hearing-gain ambience bus (see setHearingMul)
       this.occlusion = ctx.createBiquadFilter();
       this.occlusion.type = 'lowpass';
       this.occlusion.frequency.value = this.freqForOcclusion(this.occlusionLevel);
       this.occlusion.Q.value = 0.4;
-      this.occlusion.connect(this.master);
+      this.ambience = ctx.createGain();
+      this.ambience.gain.value = this.hearingMul;
+      this.occlusion.connect(this.ambience).connect(this.master);
 
       // procedural reverb bus: exponentially decaying stereo impulse
       this.reverb = ctx.createConvolver();

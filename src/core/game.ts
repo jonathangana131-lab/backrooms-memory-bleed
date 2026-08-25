@@ -1711,6 +1711,9 @@ export class Game {
     this.updateBlinkVeil(0);
     this.adrenaline = new AdrenalineSystem();
     this.adrenalineHearingGainMul = 1;
+    // F75 consumer reset: a fresh run drops the ambience bus back to unity
+    // so no stale dump envelope leaks across runs.
+    this.audio.setHearingMul(1);
     // F73: fresh pang schedule per run; continueGame()/restoreCheckpoint()
     // overwrite it with the slot's serialized schedule when one exists.
     this.hunger = new HungerPangs((this.seed ^ 0x4e71) >>> 0);
@@ -3003,6 +3006,10 @@ export class Game {
           }
         }
         this.adrenalineHearingGainMul = this.adrenaline.hearingGainMul;
+        // F75 consumer: the dump envelope rides the dedicated ambience bus
+        // (occlusion lowpass -> ambience gain -> master); master.gain stays
+        // DreadSilence's. setHearingMul clamps + smooths internally.
+        this.audio.setHearingMul(this.adrenalineHearingGainMul);
       } catch (e) {
         console.warn('[bmb] adrenaline update failed', e);
       }
