@@ -1192,6 +1192,10 @@ export class Game {
     // clobbered. Clamp keeps the radian value in a sane [0.9, 2.2] band on
     // top of the degree normalization above.
     this.player.baseFovRad = Math.max(0.9, Math.min(2.2, fovDeg * Math.PI / 180));
+    // Subtitle visibility rides the canonical settings object; turning it
+    // off also clears any live line (ui.setSubtitlesOn). Absent -> default on.
+    this.ui.setSubtitlesOn(s.subtitles !== false);
+    this.ui.syncSubtitlesCheckbox(s.subtitles !== false);
     this.player.sensitivity = 0.0022 * this.settings.sensitivity;
     this.audio.setMasterVolume(this.settings.volume);
     this.engine.setHardwareScalingLevel(1 / Math.max(0.4, Math.min(1, this.settings.quality)));
@@ -1219,6 +1223,10 @@ export class Game {
           sensitivity: s.sensitivity,
           quality: qualityNumToPreset(s.quality),
           fov: fovDeg,
+          // Mirror the subtitle flag too: the store round-trips every
+          // applySettings through onSettingsChanged, so an unmirrored key
+          // would let the store's stale value clobber the caller's choice.
+          subtitles: s.subtitles !== false,
         });
         this.settingsPanel?.refresh();
       } catch (e) {
@@ -1356,6 +1364,7 @@ export class Game {
       volume: gs.masterVolume,
       quality: presetToQualityNum(gs.quality),
       fov: gs.fov,
+      subtitles: gs.subtitles,
     };
   }
 

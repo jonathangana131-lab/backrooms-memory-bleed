@@ -242,7 +242,7 @@ export class UI {
     row5.textContent = 'SUBTITLES';
     this.subsCheck = this.el('input', '', row5) as HTMLInputElement;
     this.subsCheck.type = 'checkbox'; this.subsCheck.checked = true;
-    this.subsCheck.onchange = () => { this.subtitlesOn = this.subsCheck.checked; };
+    this.subsCheck.onchange = () => { this.pushSettings(); };
 
     this.el('p', 'hint', s).textContent = 'WASD move · SHIFT sprint · C crouch · ESC pause · F3 debug';
   }
@@ -287,11 +287,15 @@ export class UI {
   }
 
   private pushSettings(): void {
+    // The subtitle checkbox rides along with every slider push: omitting it
+    // would make the canonical applySettings default-on and silently
+    // re-enable (and persist) subtitles after any unrelated slider move.
     this.cbs.onSettingsChanged({
       sensitivity: parseFloat(this.sensSlider.value),
       volume: parseFloat(this.volSlider.value),
       quality: parseFloat(this.qualSelect.value),
       fov: parseFloat(this.fovSlider.value),
+      subtitles: this.subsCheck.checked,
     });
   }
 
@@ -300,6 +304,7 @@ export class UI {
     this.volSlider.value = String(s.volume);
     this.qualSelect.value = String(s.quality);
     this.fovSlider.value = String(s.fov ?? 75);
+    this.subsCheck.checked = s.subtitles !== false;
     this.cbs.onSettingsChanged(s);
   }
 
@@ -309,6 +314,7 @@ export class UI {
       volume: parseFloat(this.volSlider.value),
       quality: parseFloat(this.qualSelect.value),
       fov: parseFloat(this.fovSlider.value),
+      subtitles: this.subsCheck.checked,
     };
   }
 
@@ -463,6 +469,34 @@ export class UI {
 
   setObjective(t: string): void {
     if (this.objectiveEl.textContent !== t) this.objectiveEl.textContent = t;
+  }
+
+  /**
+   * Canonical subtitle on/off switch. Turning subtitles off also clears the
+   * live line — both its text and (transition-permitting) its opacity: a
+   * stale subtitle must not outlive the setting that suppresses new ones,
+   * and under heavy load the CSS opacity transition may lag the inline
+   * style, so the text is cleared unconditionally.
+   */
+  setSubtitlesOn(on: boolean): void {
+    if (!on) {
+      this.subtitleTimer = 0;
+      if (this.subtitleEl) {
+        this.subtitleEl.textContent = '';
+        this.subtitleEl.style.opacity = '0';
+      }
+    }
+    this.subtitlesOn = on;
+  }
+
+  /**
+   * Reflect the canonical subtitle flag onto the legacy pause-menu checkbox.
+   * The schema settings panel (settingspanel.ts) exposes its own SUBTITLES
+   * toggle; both controls live in the same host element, so a change through
+   * either must leave them showing the same state.
+   */
+  syncSubtitlesCheckbox(on: boolean): void {
+    this.subsCheck.checked = on;
   }
 
   say(text: string, sec = 4, speaker = 'system'): void {

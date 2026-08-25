@@ -53,6 +53,12 @@ export interface SettingsData {
   quality: number;
   /** Vertical field of view in degrees (60–110). */
   fov?: number;
+  /**
+   * Whether spoken lines render as subtitle text. Optional for backward
+   * compatibility with pre-existing persisted settings; absent keeps
+   * subtitles visible (default true).
+   */
+  subtitles?: boolean;
 }
 
 const AUTO_KEY = 'auto';
