@@ -60,6 +60,12 @@ export interface VocalFigure {
   type: string;
   /** straight-line distance to the player in metres */
   dist: number;
+  /**
+   * Optional stereo placement of the figure relative to the listener's
+   * facing, -1 = hard left .. +1 = hard right. Absent/NaN keeps the
+   * slot's seeded static pan (legacy behaviour).
+   */
+  pan?: number;
 }
 
 /** Shared distance-gated output strip for one voice slot. */
@@ -86,6 +92,14 @@ function distanceScale(dist: number, range: number): number {
 // Believer muttering - formant babble, as if praying to nobody.
 // ---------------------------------------------------------------------
 
+const PAN_TAU_S = 0.12; // stereo re-aim smoothing (bearing updates)
+
+/** Clamp a bearing pan into the StereoPanner range; junk falls back to null (no retarget). */
+function sanePan(pan: number | undefined): number | null {
+  if (typeof pan !== 'number' || !Number.isFinite(pan)) return null;
+  return Math.max(-1, Math.min(1, pan));
+}
+
 export class MutterVoice {
   // ---- graph (public for tests) ----
   osc: OscillatorNode | null = null;
@@ -93,6 +107,8 @@ export class MutterVoice {
   voiceEnv: GainNode | null = null;
   formants: BiquadFilterNode[] = [];
   distGain: GainNode | null = null;
+  /** Public for tests: the stereo placement node (re-aimed per frame). */
+  pan: StereoPannerNode | null = null;
 
   // ---- identity ----
   private readonly ctx: AudioContext;
@@ -123,6 +139,7 @@ export class MutterVoice {
 
 
     this.distGain = out.distGain;
+    this.pan = out.pan;
 
     // glottal source
     const osc = ctx.createOscillator();
@@ -176,12 +193,16 @@ export class MutterVoice {
    * the 20-40s cadence while the player is inside 10m.
    * @returns true if a new burst was scheduled this frame
    */
-  update(dt: number, dist: number): boolean {
+  update(dt: number, dist: number, pan?: number): boolean {
     if (this.stopped) return false;
     this.lastDist = dist;
     const t = this.ctx.currentTime;
     const level = distanceScale(dist, BELIEVER_RANGE) * 0.16;
     this.distGain?.gain.setTargetAtTime(level, t, 0.25);
+    // re-aim the voice toward where the figure actually stands (was a
+    // fixed seeded pan for the slot's whole life before this existed)
+    const p = sanePan(pan);
+    if (p !== null) this.pan?.pan.setTargetAtTime(p, t, PAN_TAU_S);
 
     if (this.busyRemaining > 0) this.busyRemaining -= dt;
 
@@ -253,6 +274,8 @@ export class HumVoice {
   vibrato: OscillatorNode | null = null;
   noteEnv: GainNode | null = null;
   distGain: GainNode | null = null;
+  /** Public for tests: the stereo placement node (re-aimed per frame). */
+  pan: StereoPannerNode | null = null;
 
   private readonly ctx: AudioContext;
   private rnd: () => number;
@@ -275,6 +298,7 @@ export class HumVoice {
 
     const out = makeVoiceOut(ctx, destination, this.rnd);
     this.distGain = out.distGain;
+    this.pan = out.pan;
 
     const osc = ctx.createOscillator();
     osc.type = 'sine';
@@ -304,12 +328,15 @@ export class HumVoice {
    * the 30-60s cadence while the player is inside 12m.
    * @returns true if a new phrase was scheduled this frame
    */
-  update(dt: number, dist: number): boolean {
+  update(dt: number, dist: number, pan?: number): boolean {
     if (this.stopped) return false;
     this.lastDist = dist;
     const t = this.ctx.currentTime;
     const level = distanceScale(dist, WANDERER_RANGE) * 0.06; // very quiet
     this.distGain?.gain.setTargetAtTime(level, t, 0.25);
+    // bearing re-aim, same contract as the mutter voice
+    const p = sanePan(pan);
+    if (p !== null) this.pan?.pan.setTargetAtTime(p, t, PAN_TAU_S);
 
     if (this.busyRemaining > 0) this.busyRemaining -= dt;
 
@@ -391,7 +418,14 @@ export class EntityVocals {
   private master: GainNode | null;
   stopped = false;
 
-  constructor(ctx: AudioContext, destination: AudioNode) {
+  constructor(
+    ctx: AudioContext,
+    destination: AudioNode,
+    /** Run seed: XORed into each slot's voice identity so replays of the
+     * same run sound identical while runs differ (F3 determinism law).
+     * The default keeps the historical hardcoded-slot behaviour. */
+    seed = 0,
+  ) {
     this.ctx = ctx;
     this.destination = destination;
     const master = ctx.createGain();
@@ -399,8 +433,8 @@ export class EntityVocals {
     master.connect(destination);
     this.master = master;
     for (let i = 0; i < VOICES_PER_TYPE; i++) {
-      this.mutters.push(new MutterVoice(ctx, master, 0xbe110e + i * 7919));
-      this.hums.push(new HumVoice(ctx, master, 0x3e7a11 + i * 104729));
+      this.mutters.push(new MutterVoice(ctx, master, (seed ^ (0xbe110e + i * 7919)) >>> 0));
+      this.hums.push(new HumVoice(ctx, master, (seed ^ (0x3e7a11 + i * 104729)) >>> 0));
     }
   }
 
@@ -420,7 +454,7 @@ export class EntityVocals {
     let fired = false;
     for (let i = 0; i < this.mutters.length; i++) {
       const fig = believers[i];
-      if (this.mutters[i].update(step, fig ? fig.dist : Infinity)) fired = true;
+      if (this.mutters[i].update(step, fig ? fig.dist : Infinity, fig?.pan)) fired = true;
     }
 
     const wanderers = figures
@@ -428,7 +462,7 @@ export class EntityVocals {
       .sort((a, b) => a.dist - b.dist);
     for (let i = 0; i < this.hums.length; i++) {
       const fig = wanderers[i];
-      if (this.hums[i].update(step, fig ? fig.dist : Infinity)) fired = true;
+      if (this.hums[i].update(step, fig ? fig.dist : Infinity, fig?.pan)) fired = true;
     }
 
     // 'watcher', 'helper', 'incomplete', 'double': silence, by design.

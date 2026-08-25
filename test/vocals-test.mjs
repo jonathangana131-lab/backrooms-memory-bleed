@@ -19,7 +19,8 @@ const ok = (cond, msg) => {
 
 console.log('[static]');
 ok(src.includes('export class EntityVocals'), 'exports EntityVocals');
-ok(src.includes('constructor(ctx: AudioContext, destination: AudioNode)'), 'constructor(ctx, destination) signature');
+ok(src.includes('constructor(\n    ctx: AudioContext,\n    destination: AudioNode,'), 'constructor(ctx, destination[, seed]) signature');
+ok(/seed\s*=\s*0,/.test(src), 'optional run-seed param defaults to legacy identity');
 ok(/update\(\s*dt:\s*number\s*,\s*figures:\s*readonly VocalFigure\[\]\)/.test(src), 'update(dt, figures) signature');
 ok(src.includes('stop(): void'), 'stop() method');
 ok(src.includes("'believer'") && src.includes('BELIEVER_RANGE = 10'), 'believer muttering gated at 10m');

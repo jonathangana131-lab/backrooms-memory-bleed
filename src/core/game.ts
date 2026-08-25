@@ -124,6 +124,9 @@ import { PostFX } from '../gfx/postfx';
 import { FaunaWiring } from '../entities/faunawiring';
 import { GazeWiring } from '../entities/gaze-wiring';
 import { GazeController } from '../entities/gaze';
+// Entity vocals: believers mutter, wanderers hum (watchers stay silent).
+import { EntityVocals } from '../entities/vocals';
+import type { VocalFigure } from '../entities/vocals';
 // Wave B: DOM overlays
 import { Minimap } from '../ui/minimap';
 import { Compass } from '../ui/compass';
@@ -359,6 +362,8 @@ export class Game {
   private cabinetCreaks: CabinetCreaks | null = null;
   private echoSites: EchoSites | null = null;
   private fanAudio: FanAudio | null = null;
+  /** Ambient figure voices (believer mutter / wanderer hum), ctx-gated. */
+  private entityVocals: EntityVocals | null = null;
   // ---- F2 central integration mounts ----
   private breathHandle: BreathHandle | null = null;
   private areaBeds: AreaIdentityBeds | null = null;
@@ -2414,6 +2419,9 @@ export class Game {
     const spatialBus = this.audio.ambienceBus ?? dest;
     try { this.humAudio = new PositionalHum(ctx, spatialBus); }
     catch (e) { console.warn('[bmb] PositionalHum unavailable', e); this.humAudio = null; }
+    // ---- Entity vocals: figure voices ride the same spatial authority ----
+    try { this.entityVocals = new EntityVocals(ctx, spatialBus, (this.seed ^ 0x65766f63) >>> 0); }
+    catch (e) { console.warn('[bmb] EntityVocals unavailable', e); this.entityVocals = null; }
     try { this.watcherSteps = new WatcherSteps(ctx, dest); }
     catch (e) { console.warn('[bmb] WatcherSteps unavailable', e); this.watcherSteps = null; }
     try { this.surfaceFootsteps = new SurfaceFootsteps(ctx, dest); }
@@ -2834,6 +2842,28 @@ export class Game {
         }
       }
       this.humans.update(dt, this.player.body.x, this.player.body.z, this.player.yaw, colliders, { on: this.flashlight.on });
+      // Ambient figure vocals — feed the same snapshot shape the module's
+      // header documents, with a bearing-derived pan so a voice sits on the
+      // stereo side its figure actually stands on (watchers stay silent
+      // inside the module by design).
+      if (this.entityVocals) {
+        try {
+          const vpx = this.player.body.x;
+          const vpz = this.player.body.z;
+          const fwdX = -Math.sin(this.player.yaw);
+          const fwdZ = -Math.cos(this.player.yaw);
+          const snap: VocalFigure[] = this.humans.figures.map((f) => {
+            const dx = f.body.x - vpx;
+            const dz = f.body.z - vpz;
+            const d = Math.hypot(dx, dz);
+            const lateral = d > 1e-6 ? (dx * -fwdZ + dz * fwdX) / d : 0;
+            return { type: f.type as string, dist: d, pan: Math.max(-1, Math.min(1, lateral)) };
+          });
+          this.entityVocals.update(dt, snap);
+        } catch (e) {
+          console.warn('[bmb] entity vocals failed', e);
+        }
+      }
       // Social entities (F26/F32/F61): archivist circuit, custodian night
       // pass + cart squeaks, chapel hymn. Guarded: flavor never breaks frames.
       try { this.updateSocialEntities(dt, colliders); }
