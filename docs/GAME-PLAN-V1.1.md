@@ -237,8 +237,17 @@ first-class v1.1 work: a deepening release lands on a complete foundation.
   test/hungerpangs-consumer-test.mjs 43/0 ALL PASS, interaction-matrix 6/6
   with the wiring live, console-audit errors=0, pnpm build green.
 - Season-bleed particle descriptor rides layouts with no consumer:
-  `layout.seasonBleed.particle` is unread — awaits the game-side ambient
-  particle pass that mounts it (src/core/game.ts particle passes ← src/world/chunkManager.ts, src/world/architect.ts).
+  `layout.seasonBleed.particle` is unread — RESOLVED ✅ (2026-08-24):
+  mounted via `src/gfx/seasonbleed.ts` (`spawnPlan()` pure helper +
+  `SeasonBleedParticles` DustMotes-style point cloud, cap
+  SEASON_PARTICLE_CAP=300, positive fallSpeedMps rises); chunkManager grew
+  `seasonBleedAtPos()` and game.ts polls it on the same frame-loop camera
+  feed as the dust, mounting the elected bleed room's season (heat motes /
+  snowfall / rain strokes / petal drift) while the player stands inside it
+  and parking the cloud everywhere else; beginRun resets it. Evidence:
+  test/seasonbleed-test.mjs ALL PASS (purity/plan/catalog/cloud under
+  NullEngine/accessor/wiring), pnpm typecheck + build green.
+  (src/core/game.ts particle passes ← src/world/chunkManager.ts, src/world/architect.ts).
 - Crack-density decal seam: aging's `crackDensityMul` has no build-path count
   site; wall cracks remain runtime decals driven by game.ts while the
   FloorCracks pass is unwired into chunk builds — awaits mesher integration

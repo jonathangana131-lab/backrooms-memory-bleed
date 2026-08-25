@@ -369,8 +369,9 @@ export class ChunkManager {
         }
       }
       layout.seasonBleed = winner === k ? bleeds.get(k) : undefined;
-      // Particle seam: layout.seasonBleed.particle has no consumer in the
-      // build path yet - ambient particle passes live game-side. The
+      // Particle consumer: game.ts polls seasonBleedAtPos() each frame and
+      // drives the src/gfx/seasonbleed.ts ambient cloud with the winning
+      // room's descriptor while the player stands inside it. The
       // descriptor rides on the layout for whoever renders it first.
       // F59 landmark echo mount: register this landmark's +/-7-chunk echo
       // slots on the layout. Occupancy checks against the existing chunk
@@ -752,6 +753,17 @@ export class ChunkManager {
   districtAtPos(x: number, z: number): number | null {
     const c = this.chunks.get(this.key(worldToChunk(x), worldToChunk(z)));
     return c ? (c.layout.district as number) : null;
+  }
+
+  /**
+   * Seasonal-bleed descriptor of the chunk containing a world position
+   * (v1.1 debt payoff: the consumer hook for layout.seasonBleed.particle).
+   * Null when the chunk is not loaded or carries no bleed — callers park
+   * their ambient pass on null.
+   */
+  seasonBleedAtPos(x: number, z: number): import('./seasonrooms').SeasonDescriptor | null {
+    const c = this.chunks.get(this.key(worldToChunk(x), worldToChunk(z)));
+    return c ? (c.layout.seasonBleed ?? null) : null;
   }
 
   /** deterministic sparse selection used by story beacon placement */

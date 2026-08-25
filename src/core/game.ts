@@ -21,6 +21,7 @@ import { ChunkManager } from '../world/chunkManager';
 import { PlayerController } from '../player/controller';
 import { Flashlight } from '../player/flashlight';
 import { DustMotes } from '../gfx/dust';
+import { SeasonBleedParticles, spawnPlan } from '../gfx/seasonbleed';
 import { attachClipboardProp, HumanFigure, type HumanType } from '../entities/humans';
 import { AudioEngine } from '../audio/audio';
 import { SelfRadio, type FeedEntry } from '../audio/selfradio';
@@ -193,6 +194,8 @@ export type GameState = 'menu' | 'playing' | 'paused' | 'credits';
 
 const SPAWN_X = 1.25;
 const SPAWN_Z = 1.25;
+/** Volume (m^3) of one chunk-sized bleed room: footprint x wall height. */
+const SEASON_BLEED_VOLUME_M3 = CHUNK_SIZE * CHUNK_SIZE * WALL_H;
 /** F22: hard roll cap of the gravity tilt, in radians (GravityTilt.TILT_MAX_DEG). */
 const TILT_MAX_RAD = (5 * Math.PI) / 180;
 
@@ -298,6 +301,7 @@ export class Game {
   player!: PlayerController;
   flashlight!: Flashlight;
   dust!: DustMotes;
+  seasonBleed!: SeasonBleedParticles;
   audio = new AudioEngine();
   ui!: UI;
   mem!: MemoryField;
@@ -804,6 +808,9 @@ export class Game {
     this.ghostLight.intensity = 0;
     this.ghostLight.range = 11;
     this.dust = new DustMotes(this.scene);
+    // v1.1 debt payoff: the F57 seasonal-bleed particle descriptor's
+    // consumer — parked until the player stands in the elected bleed room
+    this.seasonBleed = new SeasonBleedParticles(this.scene);
     this.humans = new HumanManager(this.scene);
     this.humans.onWatcherVanish = () => {
       this.audio.lightCrack();
@@ -1614,6 +1621,9 @@ export class Game {
     // Wave C: forget accumulated emergency-light chunks for the fresh run
     try { this.emergencyWiring?.reset(); }
     catch (e) { console.warn('[bmb] emergency wiring reset failed', e); }
+    // seasonal-bleed particles park until the new run's room is stood in
+    try { this.seasonBleed.configure(null); }
+    catch (e) { console.warn('[bmb] season bleed reset failed', e); }
     this.blackoutUntil = 0;
     this.mem.seed = this.seed;
     this.weather = new MemoryWeather(this.seed ^ 0x5179);
@@ -3535,6 +3545,15 @@ export class Game {
     const fx2 = this.state === 'menu' ? this.attract.x : this.player.body.x;
     const fz2 = this.state === 'menu' ? this.attract.z : this.player.body.z;
     this.dust.update(dt, fx2, fz2);
+    // v1.1 debt payoff: the F57 seasonal-bleed particle descriptor finally
+    // has its consumer — while the player stands inside the session's
+    // elected bleed room, the ambient cloud renders that season's
+    // particles; anywhere else it stays parked.
+    try {
+      const bleed = this.chunks.seasonBleedAtPos(fx2, fz2);
+      this.seasonBleed.configure(bleed ? spawnPlan(bleed.particle, SEASON_BLEED_VOLUME_M3) : null);
+      this.seasonBleed.update(dt, fx2, fz2);
+    } catch (e) { console.warn('[bmb] season bleed particles failed', e); }
     // camera shake: proximity + tension + peak = fear you can feel
     let shakeAmt = 0;
     if (active && this.director.tension > 0.3) {
