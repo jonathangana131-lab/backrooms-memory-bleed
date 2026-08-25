@@ -249,6 +249,13 @@ export interface ChunkLayout {
    * debris bucket at LOD < 1, same tint-pass contract as shadowQuads.
    */
   floorCracks?: Array<{ positions: number[]; normal: number[]; tints: number[] }>;
+  /**
+   * CornerAO mount: baked wall-corner contact-shadow quads generated at
+   * build time by CornerAO.generateForChunk() (src/gfx/cornerao.ts), a pure
+   * function of this chunk's edge grid. The mesher folds these into the
+   * debris bucket at LOD < 1, same tint-pass contract as shadowQuads.
+   */
+  cornerAO?: Array<{ positions: number[]; normal: number[]; tints: number[] }>;
   /** set when this chunk contains a named landmark room */
   landmark?: string;
   /**

@@ -1225,6 +1225,24 @@ export function buildChunkGeometry(
       g.debris.indices.push(bi, bi+1, bi+2, bi, bi+2, bi+3);
     }
   }
+  // CornerAO consumer: baked wall-corner contact shadows generated at build
+  // time (chunkManager -> new CornerAO().generateForChunk(layout)). Small
+  // dressing quads riding the debris bucket's LOD < 1 skip alongside
+  // addDebris — same tint-pass contract as shadowQuads/floorCracks, so
+  // distant chunks never pay for feathered corner shading.
+  if (lod < 1 && layout.cornerAO) {
+    for (const q of layout.cornerAO) {
+      const p = q.positions;
+      g.debris.positions.push(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11]);
+      g.debris.normals.push(q.normal[0], q.normal[1], q.normal[2], q.normal[0], q.normal[1], q.normal[2], q.normal[0], q.normal[1], q.normal[2], q.normal[0], q.normal[1], q.normal[2]);
+      g.debris.uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+      const t = q.tints;
+      if (!g.debris.colors) g.debris.colors = [];
+      for (let v = 0; v < 4; v++) g.debris.colors.push(t[v*3], t[v*3+1], t[v*3+2], 1);
+      const bi = g.debris.indices.length;
+      g.debris.indices.push(bi, bi+1, bi+2, bi, bi+2, bi+3);
+    }
+  }
   // LOD 1+: notes and landmark dressing quads are skipped too
   if (lod < 1) {
     addNotes(g, layout);

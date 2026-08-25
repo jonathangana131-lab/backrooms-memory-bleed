@@ -18,6 +18,7 @@ import { getLayoutPool } from '../workers/layoutPool';
 import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
 import { generateFloorCrackQuads } from '../gfx/floorcracks';
+import { CornerAO } from '../gfx/cornerao';
 import type { GraffitiInstance, PropInstance } from './architect';
 import { hash2i, RNG, seedFromString } from '../core/rng';
 import { graffitiTilt, signGrimeRects } from './textureDressing';
@@ -264,6 +265,11 @@ export class ChunkManager {
     layout.floorCracks = generateFloorCrackQuads(
       cx, cz, layout.district, aging.crackDensityMul,
     );
+    // CornerAO consumer: baked wall-corner contact shadows generated from
+    // the same edge grid the walls were built from — a pure function of the
+    // layout (no RNG), so a rebuilt chunk darkens its corners identically.
+    // Folded into the debris bucket by buildChunkGeometry (LOD < 1).
+    layout.cornerAO = new CornerAO().generateForChunk(layout);
     // F56 cartographer's error: seeded chance scatters 0-2 map-fragment
     // papers as NoteInstances - this world's existing paper prop kind,
     // rendered flat on the carpet by the mesher's note pass. Payload ids

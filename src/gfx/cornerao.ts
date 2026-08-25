@@ -87,9 +87,14 @@ export class CornerAO {
   readonly height: number;
 
   constructor(opts: CornerAOOptions = {}) {
-    this.strength = Math.min(1, Math.max(0, opts.strength ?? AO_STRENGTH));
-    this.width = Math.max(0.01, opts.width ?? AO_WIDTH);
-    this.height = Math.max(0.01, opts.height ?? AO_HEIGHT);
+    // Junk falls back safe (repo determinism convention): non-finite option
+    // values take the documented default instead of poisoning every tint.
+    const s = opts.strength;
+    const w = opts.width;
+    const h = opts.height;
+    this.strength = Number.isFinite(s) ? Math.min(1, Math.max(0, s as number)) : AO_STRENGTH;
+    this.width = Math.max(0.01, Number.isFinite(w) ? (w as number) : AO_WIDTH);
+    this.height = Math.max(0.01, Number.isFinite(h) ? (h as number) : AO_HEIGHT);
   }
 
   /**
