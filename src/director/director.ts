@@ -6,6 +6,12 @@
  * rolls) comes from one persistent stream derived from the run seed, so two
  * directors built with the same seed take identical phase paths under an
  * identical update(dt) timeline.
+ *
+ * F90 consume: the host can push DirectorLearning.suggestPhaseBias() weights
+ * through setFearBias(); learned fear then leans exactly two pacing sites —
+ * the calm→build duration and the build→peak coin — by scaling/shifting
+ * already-drawn values (no new RNG draws). Unfed directors keep the exact
+ * legacy curves.
  */
 import { RNG } from '../core/rng';
 import { Emitter } from '../core/events';
@@ -17,6 +23,73 @@ import { adjustIntensity, adjustPhase, windowEventChance, type Temperament } fro
  * the raw seed against elapsed time.
  */
 const PHASE_STREAM_SALT = 0x0dd1f33d >>> 0;
+
+// ---------------------------------------------------------------------------
+// F90 consume: learned-fear pacing bias
+// ---------------------------------------------------------------------------
+
+/** Learned-fear level meaning "no evidence either way" (uniform baseline). */
+export const FEAR_LEVEL_NEUTRAL = 0.5;
+
+/**
+ * F90 consume: aggregate DirectorLearning.suggestPhaseBias() tag weights
+ * into one scalar level in [0, 1]. The mean of the finite weights (each
+ * clamped into [0, 1] first); null/empty/all-junk input falls back to the
+ * uniform neutral baseline. Pure arithmetic — no RNG, no wall clock.
+ */
+export function fearLevelFromWeights(weights: Record<string, number> | null | undefined): number {
+  if (!weights) return FEAR_LEVEL_NEUTRAL;
+  let sum = 0;
+  let n = 0;
+  for (const v of Object.values(weights)) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    sum += Math.min(1, Math.max(0, v));
+    n++;
+  }
+  return n === 0 ? FEAR_LEVEL_NEUTRAL : sum / n;
+}
+
+/**
+ * Signed fear in [-1, 1]: positive = these contexts scare this player,
+ * negative = they bore this player. Junk levels fall back to neutral.
+ */
+function signedFear(level: number): number {
+  const l = Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : FEAR_LEVEL_NEUTRAL;
+  return (l - FEAR_LEVEL_NEUTRAL) * 2;
+}
+
+/**
+ * How far learned fear swings the calm→build duration either way: fully
+ * feared runs build at 0.7× the drawn duration, fully bored at 1.3×.
+ */
+export const FEAR_BUILD_DUR_SPAN = 0.3;
+
+/**
+ * Calm→build duration multiplier for a learned-fear level: exactly 1 at
+ * the neutral baseline, shorter when the player confesses fear (lean in),
+ * longer when they confess boredom (back off).
+ */
+export function fearBuildDurationMul(level: number): number {
+  return 1 - signedFear(level) * FEAR_BUILD_DUR_SPAN;
+}
+
+/** Legacy build→peak coin before learning leaned on it. */
+export const FEAR_PEAK_COIN_BASE = 0.55;
+
+/**
+ * How far learned fear swings the build→peak coin either way: fully feared
+ * runs peak at 0.75, fully bored at 0.35. Neutral stays exactly legacy.
+ */
+export const FEAR_PEAK_COIN_SHIFT = 0.2;
+
+/**
+ * Build→peak coin chance for a learned-fear level: the legacy 0.55 at the
+ * neutral baseline, biased up by confessed fear and down by boredom.
+ */
+export function fearPeakCoinChance(level: number): number {
+  const c = FEAR_PEAK_COIN_BASE + signedFear(level) * FEAR_PEAK_COIN_SHIFT;
+  return Math.min(1, Math.max(0, c));
+}
 
 export type Phase = 'calm' | 'build' | 'peak' | 'release';
 
@@ -125,6 +198,14 @@ export class HorrorDirector {
   private peakIntensityMul = 1;
 
   /**
+   * F90 consume: latest learned-fear level aggregated from
+   * DirectorLearning.suggestPhaseBias() weights (see fearLevelFromWeights).
+   * Neutral until setFearBias is called, so learning-less hosts keep the
+   * exact legacy pacing curves.
+   */
+  private fearBiasLevel = FEAR_LEVEL_NEUTRAL;
+
+  /**
    * @param host Pacing hooks the director drives.
    * @param seed Run seed; all pacing derives from it deterministically.
    * @param rng Optional injected stream (tests); defaults to one derived
@@ -163,13 +244,36 @@ export class HorrorDirector {
     this.tension = Math.min(1, this.tension + 0.15);
   }
 
+  /**
+   * F90 consume: feed the director's learned-fear level from
+   * DirectorLearning.suggestPhaseBias() weights. Consumed at exactly two
+   * sites — the calm→build duration multiplier and the build→peak coin —
+   * by scaling already-drawn values and shifting an existing threshold,
+   * never by adding RNG draws. Null/undefined resets to the neutral
+   * baseline (exact legacy behavior).
+   */
+  setFearBias(weights: Record<string, number> | null | undefined): void {
+    this.fearBiasLevel = fearLevelFromWeights(weights);
+  }
+
+  /** Latest learned-fear level in [0, 1]; 0.5 = neutral/unfed. */
+  get fearBias(): number {
+    return this.fearBiasLevel;
+  }
+
   update(dt: number): void {
     this.phaseT += dt;
     switch (this.phase) {
       case 'calm': {
         this.tension = Math.max(0, this.tension - dt * 0.05);
         if (this.phaseT > this.phaseDur) {
-          this.enter('build', this.personaDuration('build', this.pacingRng.range(35, 90)));
+          // F90 consume: learned fear shortens the road into build (lean
+          // into what scares THIS player); boredom lengthens it. The
+          // multiplier scales the already-drawn base — no new draws.
+          this.enter('build', this.personaDuration(
+            'build',
+            this.pacingRng.range(35, 90) * fearBuildDurationMul(this.fearBiasLevel),
+          ));
         }
         break;
       }
@@ -179,8 +283,12 @@ export class HorrorDirector {
         if (this.pacingRng.chance(this.personaChance(dt * 0.04))) this.host.distantThreat();
         if (this.phaseT > this.phaseDur) {
           const rng = new RNG((this.seed ^ Math.floor(this.host.elapsed() * 1000)) >>> 0);
-          if (rng.chance(0.55)) this.enter('peak', this.personaDuration('peak', 12 + rng.next() * 14));
-          else this.enter('release', this.personaDuration('release', 40 + rng.next() * 50));
+          // F90 consume: the build→peak coin leans on the same single draw —
+          // confessed fear raises the threshold toward peak, boredom lowers
+          // it. Neutral bias keeps the exact legacy 0.55.
+          if (rng.chance(fearPeakCoinChance(this.fearBiasLevel))) {
+            this.enter('peak', this.personaDuration('peak', 12 + rng.next() * 14));
+          } else this.enter('release', this.personaDuration('release', 40 + rng.next() * 50));
         }
         break;
       }

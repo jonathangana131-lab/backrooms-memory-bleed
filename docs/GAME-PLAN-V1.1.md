@@ -291,7 +291,23 @@ first-class v1.1 work: a deepening release lands on a complete foundation.
   described in its agent report (src/world/chunkManager.ts, src/world/mesher.ts ← src/world/mezzanine.ts).
 - DirectorLearning is unfed: no scare-response events reach it and no phase
   consumes suggestPhaseBias() — awaits the director feed/consume wiring
-  (src/director/director.ts ← src/director/learning.ts).
+  (src/director/director.ts ← src/director/learning.ts) — RESOLVED ✅
+  (2026-08-25): the feed side had been live since F90 (near-miss pauses,
+  beam-freeze hesitations, landmark/note lingers, note skips all reach
+  `record()`); the consume side now landed — director.ts grew pure
+  `fearLevelFromWeights()` / `fearBuildDurationMul()` / `fearPeakCoinChance()`
+  plus `setFearBias()` (weights aggregate by clamped mean into one level;
+  null/empty/junk falls back to the neutral 0.5 baseline), consumed at
+  exactly two sites: the calm→build duration scales the already-drawn base
+  (×0.7 feared … ×1.3 bored) and the build→peak coin shifts its threshold on
+  the SAME single draw (0.55 legacy → 0.35…0.75) — zero new RNG draws, and
+  unfed/neutral directors keep byte-identical legacy timelines. game.ts
+  feeds `suggestPhaseBias()` into the director every learning tick and
+  beginRun resets the bias to neutral. Evidence:
+  test/fearbias-consume-test.mjs ALL PASS (helpers/clamps/parity/scaling/
+  coin dominance + draw-profile determinism/wiring greps);
+  directorlearning-test 29 checks and persona-test still PASS; pnpm
+  typecheck + build green.
 - Wake-cinematic shot lists are staged but unplayed — RESOLVED ✅
   (2026-08-24): mounted via `src/story/wakemount.ts` (`WakeMount` headless
   driver) + `game.ts` `beginWakeSequence()`/`dismissWakeCinematic()`; the

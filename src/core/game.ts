@@ -1782,6 +1782,10 @@ export class Game {
     this.learningBiasLastSec = -1e9;
     this.notePromptKey = null;
     this.learningReadNotes.clear();
+    // F90 consume: the fresh run's director paces from the neutral baseline
+    // until this run's own evidence lands (defensive parity with the
+    // construction-site neutrality — a reused director forgets old fears).
+    this.director.setFearBias(null);
     // F91: a fresh expedition never inherits the last run's wake cinematic.
     this.wakeStaging = null;
     this.wakeCine = null;
@@ -3023,15 +3027,19 @@ export class Game {
       } catch (e) {
         console.warn('[bmb] adrenaline update failed', e);
       }
-      // ---- F90 director learning: session clock + scare-response feed. The
-      // near-miss dump above contributes pause/watcher and onBeamFreeze the
-      // hesitation; the linger detector and the note-skip tracker below
-      // complete the feed. Every ~2 min the top of suggestPhaseBias()
-      // surfaces as a caption — that read is the documented pacing-bias seam
-      // where deeper director surgery will consume these weights later.
+      // ---- F90 director learning: session clock + scare-response feed +
+      // consume. The near-miss dump above contributes pause/watcher and
+      // onBeamFreeze the hesitation; the linger detector and the note-skip
+      // tracker below complete the feed. The live suggestPhaseBias() weights
+      // ride into the director every frame via setFearBias(), which leans
+      // the calm→build duration and the build→peak coin toward what scares
+      // THIS player (pure arithmetic feed — no new RNG draws). Every ~2 min
+      // the top tag also surfaces as a caption for players paying attention.
       if (this.learning) {
         try {
           this.learning.advanceClock(dt);
+          // F90 consume: push the live phase-bias weights onto the director.
+          this.director.setFearBias(this.learning.suggestPhaseBias());
           this.updateLearningLinger(dt);
           if (this.playtimeSec - this.learningBiasLastSec >= LEARNING_BIAS_CAPTION_SEC) {
             this.learningBiasLastSec = this.playtimeSec;
