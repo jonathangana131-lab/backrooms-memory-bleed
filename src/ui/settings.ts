@@ -33,6 +33,11 @@ export interface GameSettings {
   motionSafety: boolean;
   /** F49 accessibility pack: prefix subtitles with bracketed speaker tags. */
   speakerTags: boolean;
+  /**
+   * F95 hardcore battery: convey torch charge ONLY through the beam's
+   * flicker character; the HUD readout is suppressed while on.
+   */
+  hardcoreBattery: boolean;
 }
 
 /** Minimal storage contract - satisfied by DOM localStorage and test stubs. */
@@ -64,6 +69,7 @@ export const DEFAULT_SETTINGS: Readonly<GameSettings> = Object.freeze({
   showMinimap: true,
   motionSafety: false,
   speakerTags: false,
+  hardcoreBattery: false,
 });
 
 const clamp = (v: number, min: number, max: number): number =>
@@ -105,6 +111,10 @@ export function validateSettings(raw: unknown): GameSettings {
       typeof src.speakerTags === 'boolean'
         ? src.speakerTags
         : DEFAULT_SETTINGS.speakerTags,
+    hardcoreBattery:
+      typeof src.hardcoreBattery === 'boolean'
+        ? src.hardcoreBattery
+        : DEFAULT_SETTINGS.hardcoreBattery,
   };
 }
 

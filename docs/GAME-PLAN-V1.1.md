@@ -216,9 +216,17 @@ procedural-only assets. Every v1.1 feature inherits them before its own AC.
 Known v1 seams and gaps, each owed to the module that awaits it. These are
 first-class v1.1 work: a deepening release lands on a complete foundation.
 
-- F95 hardcore flicker battery has no settings/a11y schema toggle, so
-  `setHardcore(false)` ships default with its frames unused — awaits a
-  settingspanel entry wired to FlickerBattery (src/ui/settingspanel.ts ← src/player/flickerbattery.ts).
+- F95 hardcore flicker battery had no settings/a11y schema toggle, so
+  `setHardcore(false)` shipped default with its frames unused — RESOLVED ✅
+  (2026-08-24): canonical `hardcoreBattery` boolean in GameSettings
+  (persisted + validated in src/ui/settings.ts) surfaced as a HARDCORE
+  BATTERY toggle row in the panel's VISUALS section; game.ts routes the
+  store change through `applyHardcoreBattery()` onto FlickerBattery,
+  re-applies the persisted mode in beginRun, samples the seeded per-tick
+  drive every playing frame into Flashlight's external `flickerCut` /
+  `flickerDim` fields, and suppresses the HUD battery readout while on.
+  Evidence: test/f95-hardcore-toggle-test.mjs 33/33 ALL PASS,
+  pnpm typecheck + build green.
 - Stomach audio stand-in: hunger pangs surface as throttled HUNGER captions
   because the growl synth never landed — RESOLVED ✅ (2026-08-24): mounted
   via `src/audio/hungerpangs-consumer.ts` (`StomachAudio` + pure

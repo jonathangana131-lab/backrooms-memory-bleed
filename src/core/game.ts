@@ -895,6 +895,10 @@ export class Game {
           if (!this.syncingSettings) {
             this.applySettings(this.panelToGameSettings(gs));
           }
+          // F95: the hardcore battery toggle rides the canonical store; it
+          // has no SettingsData counterpart, so it routes directly to the
+          // per-run FlickerBattery (identity drive while off).
+          this.applyHardcoreBattery(gs);
         } catch (err) {
           console.warn('[bmb] settings store sync failed', err);
         }
@@ -1224,6 +1228,17 @@ export class Game {
     }
     try { this.applyAccessibilityPack(); } catch { /* pack stays stale */ }
     void SaveDB.saveSettings(this.settings).catch(() => {});
+  }
+
+  /**
+   * F95: re-apply the hardcore battery mode from the canonical settings
+   * store onto the per-run FlickerBattery. Called from beginRun (fresh
+   * battery per expedition) and from the settings-change callback; with
+   * the store unavailable or the toggle off, the drive stays identity.
+   */
+  private applyHardcoreBattery(gs?: GameSettings): void {
+    const on = (gs ?? this.settingsManager?.settings)?.hardcoreBattery === true;
+    this.flickerBattery?.setHardcore(on);
   }
 
   /**
@@ -1671,11 +1686,13 @@ export class Game {
     // continued expedition restarts the grace period from its resume point.
     this.hunger = new HungerPangs((this.seed ^ 0x4e71) >>> 0);
     this.hungerCaptionLastSec = -1e9;
-    // F95 gap: no hardcore toggle exists in the settings/a11y schema yet, so
-    // the mode boots off (identity frames); expose via this flag when a
-    // settings section lands.
+    // F95: fresh hardcore battery model per run; the opt-in toggle lives in
+    // the panel's VISUALS section and re-applies here so a continued
+    // expedition restores the persisted mode (off = identity drive).
     this.flickerBattery = new FlickerBattery((this.seed ^ 0xf11c9) >>> 0);
-    this.flickerBattery.setHardcore(false);
+    this.applyHardcoreBattery();
+    this.flashlight.flickerCut = false;
+    this.flashlight.flickerDim = 1;
     // F29: fresh visit ledger + gossip source per run (grounding is per-run)
     this.gossipSites.clear();
     this.gossipLedgerRev = 0;
@@ -2870,6 +2887,20 @@ export class Game {
       // flashlight simulation (drains on, trickles under working lights)
       const nearLit = this.playtimeSec >= this.blackoutUntil && this.chunks.nearestFixtureDist(this.player.body.x, this.player.body.z) < 8;
       this.flashlight.update(dt, now / 1000, this.camera.position.x, this.camera.position.z, this.player.yaw, this.player.pitch, nearLit);
+      // F95: hardcore battery encodes charge purely in flicker character —
+      // each playing frame samples the seeded per-tick drive and feeds it to
+      // the torch; off keeps identity so nothing changes visually.
+      if (this.flickerBattery !== null && this.flickerBattery.hardcore) {
+        const f = this.flickerBattery.frame(
+          this.flashlight.battery,
+          Math.floor(this.playtimeSec * 60),
+        );
+        this.flashlight.flickerCut = !f.on;
+        this.flashlight.flickerDim = f.dim;
+      } else {
+        this.flashlight.flickerCut = false;
+        this.flashlight.flickerDim = 1;
+      }
       // F11: advance the view-model every playing frame (the battery-swap
       // beat must animate even while the torch is off), then remount the
       // SpotLight on its lens anchor so the beam originates at the visible
@@ -3487,7 +3518,10 @@ export class Game {
       this.camera.rotation.z += (shakeRng.next() - 0.5) * shakeAmt * 0.5;
     }
     this.ui.setStamina(this.player.stamina);
-    this.ui.setBattery(this.flashlight.has ? this.flashlight.battery : null);
+    // F95: hardcore mode suppresses the numeric readout — charge reads only
+    // through the beam's flicker character until the player opts out.
+    const hardcoreHud = this.flickerBattery?.hudSuppressed === true;
+    this.ui.setBattery(!hardcoreHud && this.flashlight.has ? this.flashlight.battery : null);
     this.ui.torchOn = this.flashlight.on;
     this.ui.tickSubtitles(dt);
     // F96: keep the open note's hand current as stage/saturation drift

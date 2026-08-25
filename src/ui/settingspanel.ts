@@ -43,6 +43,7 @@ const GAME_SETTING_DEFAULTS: Readonly<Record<string, unknown>> =
     showMinimap: true,
     motionSafety: false,
     speakerTags: false,
+    hardcoreBattery: false,
   });
 
 /**
@@ -366,6 +367,11 @@ export function defaultSections(): SectionSpec[] {
         },
         { kind: 'toggle', key: 'subtitles', label: 'SUBTITLES' },
         { kind: 'toggle', key: 'showMinimap', label: 'MINIMAP' },
+        {
+          kind: 'toggle',
+          key: 'hardcoreBattery',
+          label: 'HARDCORE BATTERY',
+        },
       ],
     },
     {

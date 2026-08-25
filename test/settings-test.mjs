@@ -7,8 +7,10 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 page.on('pageerror', (e) => console.log('[PAGEERROR]', String(e).slice(0, 200)));
-await page.goto(process.env.GAME_URL || 'http://127.0.0.1:4178/', { waitUntil: 'networkidle' });
-await page.waitForFunction(() => (window).__BMB__, null, { timeout: 60000 });
+// Patient boot: networkidle never settles on a loaded box (procedural asset
+// gen keeps the page busy), so anchor on domcontentloaded + the __BMB__ flag.
+await page.goto(process.env.GAME_URL || 'http://127.0.0.1:4178/', { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.waitForFunction(() => (window).__BMB__, null, { timeout: 300000 });
 await page.evaluate(() => (window).__BMB__.startNew('set'));
 await page.waitForTimeout(1500);
 

@@ -27,6 +27,14 @@ export class Flashlight {
    * by game.ts's DrainSink adapter; 1 is the torch-on baseline.
    */
   drainMultiplier = 1;
+  /**
+   * EXCEPTION (F95 hardcore battery mount): per-tick torch drive written by
+   * game.ts from FlickerBattery.frame() while hardcore mode is on. Cut
+   * parks the light for that tick (same path as torch-off); dim scales the
+   * surviving brightness. Identity values (false / 1) change nothing.
+   */
+  flickerCut = false;
+  flickerDim = 1;
   private lastT = 0;
 
   /** additive beam-cone mesh (apex at the lens, base 8 m out) */
@@ -92,7 +100,7 @@ export class Flashlight {
       this.battery = Math.min(0.3, this.battery + ldt / 180);
     }
 
-    if (!this.has || !this.on) {
+    if (!this.has || !this.on || this.flickerCut) {
       this.light.intensity = 0;
       this.light.position.set(0, -50, 0);
       this.beam.setEnabled(false);
@@ -105,6 +113,10 @@ export class Flashlight {
       mul = 0.4 + 0.6 * (this.battery / 0.25);
       if (Math.sin(time * 31) > 0.86) mul *= 0.3;
     }
+    // F95: hardcore mode encodes charge in flicker character — the seeded
+    // per-tick frame scales the surviving brightness. Junk (non-finite)
+    // dims fall back to identity, mirroring bandForCharge's junk law.
+    mul *= isFinite(this.flickerDim) ? Math.max(0, Math.min(1, this.flickerDim)) : 1;
     this.light.intensity = 15.0 * mul;
 
     // position slightly right-below the eye, aimed along view
