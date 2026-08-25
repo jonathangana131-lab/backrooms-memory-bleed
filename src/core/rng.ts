@@ -49,6 +49,13 @@ export class RNG {
   constructor(seed: number) {
     this.s = seed >>> 0 || 0x9e3779b9;
   }
+  /** Raw stream position — snapshot it to persist a deterministic draw sequence. */
+  get state(): number {
+    return this.s >>> 0;
+  }
+  set state(v: number) {
+    this.s = v >>> 0 || 0x9e3779b9;
+  }
   next(): number {
     this.s = (this.s + 0x6d2b79f5) | 0;
     let t = this.s;

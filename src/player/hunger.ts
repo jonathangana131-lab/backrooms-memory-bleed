@@ -74,6 +74,18 @@ export interface HungerPangsOptions {
   gracePeriodMin?: number;
 }
 
+/** Serialized pang-schedule snapshot (persisted inside a SaveSlot). */
+export interface HungerPangsState {
+  /** Schema version for the snapshot payload itself. */
+  v: 1;
+  /** Injected session clock in minutes at capture time. */
+  clockMin: number;
+  /** Absolute session minute the next pang is scheduled to fire at. */
+  nextPangAtMin: number;
+  /** Raw RNG stream position so jitter/duration draws replay identically. */
+  rngState: number;
+}
+
 /**
  * Drives the pang schedule for one run. Feed update() with the injected
  * session clock; read or drain `events` afterwards. The clock only moves
@@ -147,6 +159,44 @@ export class HungerPangs {
     this.clockMin = 0;
     this.nextPangAtMin = this.firstPangAt();
     this.events_ = [];
+  }
+
+  /**
+   * Snapshot the schedule for persistence across sessions (F73): a saved
+   * expedition resumes its elapsed-hunger pacing instead of restarting
+   * the grace period. Pure data — no Babylon / DOM types involved.
+   */
+  serialize(): HungerPangsState {
+    return {
+      v: 1,
+      clockMin: this.clockMin,
+      nextPangAtMin: this.nextPangAtMin,
+      rngState: this.rng.state,
+    };
+  }
+
+  /**
+   * Apply a snapshot from serialize(). Returns false and leaves this
+   * scheduler untouched when the payload is malformed or from an
+   * incompatible schema, so callers fall back to a fresh schedule.
+   */
+  restore(state: HungerPangsState | unknown): boolean {
+    const s = state as HungerPangsState | null;
+    if (!s || typeof s !== 'object' || s.v !== 1) return false;
+    if (!Number.isFinite(s.clockMin) || !Number.isFinite(s.nextPangAtMin) ||
+        !Number.isFinite(s.rngState)) return false;
+    this.rng = new RNG(this.seed ^ 0xfeed);
+    this.rng.state = s.rngState;
+    this.clockMin = Math.max(0, s.clockMin);
+    // A next-pang time behind the restored clock (corrupt payload) would
+    // fire instantly on resume; push it one full interval past the resume
+    // point instead so continued runs stay quiet. Valid snapshots always
+    // have nextPangAtMin >= clockMin and take the first branch untouched.
+    this.nextPangAtMin = s.nextPangAtMin >= this.clockMin
+      ? s.nextPangAtMin
+      : this.clockMin + jitteredIntervalMin(this.clockMin, this.rng);
+    this.events_ = [];
+    return true;
   }
 
   /** Earliest possible first-pang time: one jittered interval past grace. */

@@ -1,4 +1,6 @@
 /** IndexedDB persistence: save slots, settings — with migration, corruption recovery, quota handling, and auto-backup. */
+import type { HungerPangsState } from '../player/hunger';
+
 const DB_NAME = 'bmb';
 const DB_VER = 2;
 
@@ -45,6 +47,10 @@ export interface SaveSlot {
   };
   /** F66: prior-session decision sites the Double cites and revisits. */
   choices?: { id: string; kind: string; x: number; z: number }[];
+  /** F73: serialized stomach-pang schedule so a continued expedition keeps
+   * its elapsed-hunger pacing instead of restarting the grace period
+   * (see player/hunger.ts HungerPangsState; absent = fresh schedule). */
+  hunger?: HungerPangsState;
 }
 
 export interface SettingsData {

@@ -1550,6 +1550,12 @@ export class Game {
     this.chunks.discoveredLandmarks = this.seenLandmarks;
     this.chunks.story = this.story;
     this.beginRun({ x: slot.px, z: slot.pz, yaw: slot.yaw });
+    // F73: restore the saved pang schedule over beginRun's fresh one so a
+    // continued expedition keeps its elapsed-hunger pacing. Malformed
+    // payloads keep the fresh schedule (pacing flavor, not progression).
+    if (slot.hunger && this.hunger && !this.hunger.restore(slot.hunger)) {
+      console.warn('[bmb] hunger save unusable; keeping fresh pang schedule');
+    }
     // F90: restore learned fear affinities over the fresh per-run model.
     // Malformed payloads keep the fresh model (deserialize throws loud, we
     // fall back soft — the learning feed is pacing flavor, not progression).
@@ -1691,8 +1697,8 @@ export class Game {
     this.updateBlinkVeil(0);
     this.adrenaline = new AdrenalineSystem();
     this.adrenalineHearingGainMul = 1;
-    // F73 gap: the pang schedule is not part of the save slot, so a
-    // continued expedition restarts the grace period from its resume point.
+    // F73: fresh pang schedule per run; continueGame()/restoreCheckpoint()
+    // overwrite it with the slot's serialized schedule when one exists.
     this.hunger = new HungerPangs((this.seed ^ 0x4e71) >>> 0);
     this.hungerCaptionLastSec = -1e9;
     // F95: fresh hardcore battery model per run; the opt-in toggle lives in
@@ -1860,6 +1866,9 @@ export class Game {
     if (this.custodianWiring && this.custodianWiring.removalLedger.length > 0) {
       slot.custodian = this.custodianWiring.serialize();
     }
+    // F73: the pang schedule rides the slot so a continued expedition
+    // resumes its elapsed-hunger pacing instead of a fresh grace period.
+    if (this.hunger) slot.hunger = this.hunger.serialize();
     return slot;
   }
 
@@ -4554,6 +4563,10 @@ export class Game {
       this.chunks.discoveredLandmarks = this.seenLandmarks;
       this.chunks.story = this.story;
       this.beginRun({ x: slot.px, z: slot.pz, yaw: slot.yaw });
+      // F73: checkpoint restores keep the saved pang schedule too.
+      if (slot.hunger && this.hunger && !this.hunger.restore(slot.hunger)) {
+        console.warn('[bmb] hunger save unusable; keeping fresh pang schedule');
+      }
       this.ui.toast('CHECKPOINT RESTORED', 4000);
       this.saveScreen?.hide();
     } catch (e) {
