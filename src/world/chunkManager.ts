@@ -17,6 +17,7 @@ import {
 import { getLayoutPool } from '../workers/layoutPool';
 import { buildColliders } from './collision';
 import { buildChunkGeometry, applyTint } from './mesher';
+import { generateFloorCrackQuads } from '../gfx/floorcracks';
 import type { GraffitiInstance, PropInstance } from './architect';
 import { hash2i, RNG, seedFromString } from '../core/rng';
 import { graffitiTilt, signGrimeRects } from './textureDressing';
@@ -255,11 +256,14 @@ export class ChunkManager {
         });
       }
     }
-    // crackDensityMul seam: the build path has no crack-count site to
-    // multiply - wall cracks are runtime decals driven by core/game.ts and
-    // the FloorCracks pass is not wired into buildChunkGeometry. The folded
-    // value stays exposed via agingAt() for whichever decal pass consumes
-    // it first; nothing here forces that wiring.
+    // F24 crack-density consumer: aging's crackDensityMul finally has its
+    // build-path count site — floor-crack decals generated here, already
+    // scaled by the folded multiplier, and folded into the debris bucket
+    // by buildChunkGeometry (LOD < 1). Deterministic per (chunkKey,
+    // visits, seed), so a rebuilt chunk shows the same cracks.
+    layout.floorCracks = generateFloorCrackQuads(
+      cx, cz, layout.district, aging.crackDensityMul,
+    );
     // F56 cartographer's error: seeded chance scatters 0-2 map-fragment
     // papers as NoteInstances - this world's existing paper prop kind,
     // rendered flat on the carpet by the mesher's note pass. Payload ids

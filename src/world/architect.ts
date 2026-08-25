@@ -242,6 +242,13 @@ export interface ChunkLayout {
   /** previous-session trail points falling inside this chunk (volatile dressing) */
   pathEcho?: Array<{ x: number; z: number }>;
   shadowQuads?: Array<{ positions: number[]; normal: number[]; tints: number[] }>;
+  /**
+   * F24 crack-density consumer: floor-crack decals generated at build time
+   * by generateFloorCrackQuads() (src/gfx/floorcracks.ts), already scaled
+   * by the chunk's aging crackDensityMul. The mesher folds these into the
+   * debris bucket at LOD < 1, same tint-pass contract as shadowQuads.
+   */
+  floorCracks?: Array<{ positions: number[]; normal: number[]; tints: number[] }>;
   /** set when this chunk contains a named landmark room */
   landmark?: string;
   /**

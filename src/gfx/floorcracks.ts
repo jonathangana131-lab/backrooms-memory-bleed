@@ -48,6 +48,13 @@ export const BRANCH_CHANCE = 0.18;
 export const MAX_QUADS_PER_CHUNK = 400;
 
 /**
+ * Upper clamp for the aging fold's crackDensityMul so a malformed ledger
+ * can never flood a chunk past the cap's intent. decayStage() produces
+ * values in ~[1, 2.2]; anything above this is junk.
+ */
+export const CRACK_DENSITY_MUL_MAX = 4;
+
+/**
  * One dark quad of a crack polyline: four world-space corners on the
  * floor plane, normal [0,1,0], per-corner RGB multipliers (dark < 1).
  * Same shape as CornerAO's QuadInstance; consumers auto-orient winding.
@@ -101,6 +108,34 @@ function clamp(v: number, lo: number, hi: number): number {
  * cornerA..cornerD, [0,1,0], ...standard uv quartet), then multiply the
  * four fresh vertices' color channels pairwise by q.tints.
  */
+/**
+ * Sanitize an aging-ledger crackDensityMul: NaN/Infinity/negative fall
+ * back to 1 (pristine), values above CRACK_DENSITY_MUL_MAX clamp to it.
+ */
+function sanitizeDensityMul(mul: number): number {
+  if (!Number.isFinite(mul) || mul < 1) return 1;
+  return Math.min(mul, CRACK_DENSITY_MUL_MAX);
+}
+
+/**
+ * Standalone pure fold for the chunk build path (F24 consumer): all crack
+ * quads for one chunk at a given aging crackDensityMul. Deterministic
+ * function of its inputs — same (cx, cz, district, mul) always returns
+ * deep-equal quads — so rebuilt revisited chunks show identical cracks.
+ *
+ * Integrate-ready for the mesher: for each returned q, call quad(floor,
+ * cornerA..cornerD, [0,1,0], ...standard uv quartet), then multiply the
+ * four fresh vertices' color channels pairwise by q.tints.
+ */
+export function generateFloorCrackQuads(
+  cx: number,
+  cz: number,
+  district: District,
+  crackDensityMul: number,
+): CrackQuad[] {
+  return new FloorCracks().generateForChunk(cx, cz, district, crackDensityMul);
+}
+
 export class FloorCracks {
   readonly seed: number;
 
@@ -111,14 +146,21 @@ export class FloorCracks {
   /**
    * All crack quads for chunk (cx, cz) in the given district.
    * Deterministic: identical inputs produce identical quad lists.
+   *
+   * @param densityMul Multiplier on every slot's activation chance —
+   * consumed straight from the F24 aging ledger's crackDensityMul
+   * (>= 1 as revisits accumulate). Junk (NaN/Infinity/<1) falls back to
+   * 1; values above CRACK_DENSITY_MUL_MAX clamp. The default keeps
+   * legacy call sites byte-identical.
    */
-  generateForChunk(cx: number, cz: number, district: District): CrackQuad[] {
+  generateForChunk(cx: number, cz: number, district: District, densityMul: number = 1): CrackQuad[] {
     const out: CrackQuad[] = [];
     const chance = DISTRICT_CRACK_CHANCE[district] ?? 0.1;
+    const mul = sanitizeDensityMul(densityMul);
     for (let slot = 0; slot < MAX_CRACK_SLOTS; slot++) {
       if (out.length >= MAX_QUADS_PER_CHUNK) break;
       const roll = u01(cx, cz, slot * 31 + 7, SALT ^ this.seed);
-      if (roll >= chance) continue;
+      if (roll >= chance * mul) continue;
       this.walkCrack(cx, cz, district, slot, out);
     }
     return out;

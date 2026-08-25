@@ -251,7 +251,16 @@ first-class v1.1 work: a deepening release lands on a complete foundation.
 - Crack-density decal seam: aging's `crackDensityMul` has no build-path count
   site; wall cracks remain runtime decals driven by game.ts while the
   FloorCracks pass is unwired into chunk builds — awaits mesher integration
-  (src/world/mesher.ts buildChunkGeometry ← src/world/aging.ts).
+  (src/world/mesher.ts buildChunkGeometry ← src/world/aging.ts) —
+  RESOLVED ✅ (2026-08-25): the FloorCracks pass is now the fold's count
+  site — `generateFloorCrackQuads(cx, cz, district, crackDensityMul)`
+  (src/gfx/floorcracks.ts; junk mul < 1 falls back to legacy 1, values above
+  CRACK_DENSITY_MUL_MAX=4 clamp) is fed aging's `crackDensityMul` in
+  chunkManager's buildFromLayoutInner and folded into the mesher's debris
+  bucket behind the LOD < 1 gate (same tint-pass contract as shadowQuads),
+  so revisited chunks visibly worsen with more floor cracks. Evidence:
+  test/floorcrack-fold-test.mjs ALL PASS (31 checks), floorcracks/aging/
+  ledger/crackmesher regressions green, pnpm typecheck + build green.
 - Whisper/spatial authority split: WhisperField carries its own PannerNode +
   merger chain beside the positional voice scaler — awaits one spatial
   authority owning listener-relative gain and panning
