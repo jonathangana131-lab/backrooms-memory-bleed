@@ -31,10 +31,20 @@ console.log('1 LAUNCHED state=' + s1.state);
 // 2. Real movement via keyboard (verify position delta)
 const p0 = await page.evaluate(() => { const g = (window).__BMB__.game; return { ...g.player.body }; });
 await page.keyboard.down('KeyW');
-await page.waitForTimeout(2500);
+// Patient movement window: the first press also dismisses the F91 wake
+// cinematic, and on a loaded box (documented degradation, see integration
+// status F73/F100 entries) sim fps can sit at ~1, so a fixed 2.5 s hold
+// lands before the controller owns the camera. Poll until the player has
+// actually moved or a generous deadline expires — same criterion, load-
+// tolerant timing.
+let moved = 0;
+for (let a = 0; a < 60; a++) {
+  await page.waitForTimeout(500);
+  const pi = await page.evaluate(() => { const g = (window).__BMB__.game; return { ...g.player.body }; });
+  moved = Math.hypot(pi.x - p0.x, pi.z - p0.z);
+  if (moved > 0.05) break;
+}
 await page.keyboard.up('KeyW');
-const p1 = await page.evaluate(() => { const g = (window).__BMB__.game; return { ...g.player.body }; });
-const moved = Math.hypot(p1.x - p0.x, p1.z - p0.z);
 console.log('2 MOVED ' + moved.toFixed(2) + 'm');
 
 // 3. Streaming check while walking

@@ -252,7 +252,21 @@ first-class v1.1 work: a deepening release lands on a complete foundation.
   adaptation of roach locomotion (src/entities/roachtame.ts, src/entities/faunawiring.ts ← colony migration model).
 - Credits scene wiring: the credits-walk corridor renderer has never been
   mounted into the ending flow — awaits the ending overlay hand-off that
-  launches the walk with captured screenshots (src/story/creditswalk.ts ← src/core/game.ts ending path).
+  launches the walk with captured screenshots (src/story/creditswalk.ts ← src/core/game.ts ending path)
+  — RESOLVED ✅ (2026-08-24, two-part): the mount itself was already live
+  since F100 (triggerEnding → beginCreditsWalk/raiseCreditsOverlay/
+  tickCreditsWalk; screenshots flow metadata-only from the wired
+  EndCapture→gallery); the genuine residual debt was player-facing and is
+  now closed — the auto-scrolling column gained a motion-safety gate
+  (reduced-motion players keep the static ending overlay, mirroring the F91
+  wake-cinematic posture), any key/click skips a running walk straight into
+  the natural-finish title hand-off (`finishCreditsWalk` + public
+  `skipCreditsWalk` / `__BMB__.skipCreditsWalk`), and the RETURN TO TITLE
+  button exit now lands state on 'menu' like every other hand-off.
+  Evidence: test/creditswalk-safety-test.mjs 7/7 ALL PASS (scroll mounts,
+  scrolls, key-skip, motion-safety suppression, inert keys, button exit);
+  creditswalk-test 34/0, wakemount-test 34/0, endcapture-test green;
+  pnpm typecheck + build green; playthrough PLAYTHROUGH_PASS PAGE_ERRORS=0.
 - Photoreveal capture site: silhouette reveals exist but nothing feeds them —
   awaits the camcorder capture event routing photos into the reveal pipeline
   (src/gfx/photoreveal.ts ← camcorder/photo capture path, src/ui/photocatalog.ts).

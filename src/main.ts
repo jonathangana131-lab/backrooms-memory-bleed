@@ -27,6 +27,9 @@ async function boot(): Promise<void> {
       // F91 v1.1: harness escape hatch — end the waking sequence instantly,
       // exactly as a player's first press does.
       dismissWakeCinematic(): void { game.dismissWakeCinematic(); },
+      // F100 motion-safety follow-up: harness escape hatch — end the credits
+      // walk instantly with the natural-finish hand-off to the title.
+      skipCreditsWalk(): void { game.skipCreditsWalk(); },
       saveNow(): void { void game.saveNow(); },
     };
   } catch (e) {

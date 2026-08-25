@@ -1092,6 +1092,13 @@ export class Game {
         this.dismissWakeCinematic();
         return;
       }
+      // F100 motion-safety follow-up: the credits walk overlay is
+      // pointer-events:none, so a click lands here — any click skips the
+      // scroll straight to the title (same hand-off as its natural finish).
+      if (this.state === 'credits' && this.creditsWalker) {
+        this.finishCreditsWalk();
+        return;
+      }
       if (this.state === 'playing') this.input.requestLock();
     });
     this.input.onLockChange = (locked) => {
@@ -1110,6 +1117,13 @@ export class Game {
       if (this.wakePlaying() && e.code !== 'F3') {
         e.preventDefault();
         this.dismissWakeCinematic();
+        return;
+      }
+      // F100 motion-safety follow-up: any press skips the auto-scrolling
+      // credits column straight to the title (same hand-off as its natural
+      // finish). F3 stays live so debug overlays keep working.
+      if (this.state === 'credits' && e.code !== 'F3' && this.finishCreditsWalk()) {
+        e.preventDefault();
         return;
       }
       if (e.code === 'F3') {
@@ -4380,6 +4394,9 @@ export class Game {
       this.beginCreditsWalk();
       this.ui.showEnding(lines.filter((l) => l.length > 0), () => {
         this.cancelCreditsWalk();
+        // Same terminal state the walk's natural finish lands on — the
+        // button exit used to leave state parked at 'credits'.
+        this.setState('menu');
         // Wave A (A-3a): expedition debrief over the title screen.
         if (this.endstats) {
           try { this.endstats.show(this.buildExpeditionStats()); }
@@ -4404,6 +4421,11 @@ export class Game {
    */
   private beginCreditsWalk(): void {
     if (this.creditsWalker) return;
+    // Motion-safety keeps the static ending overlay: the auto-scrolling
+    // column is generated motion, so reduced-motion players skip it the
+    // same way the wake cinematic collapses to the plain rise. The ending
+    // overlay's RETURN TO TITLE button remains the exit.
+    if (this.motionSafetyOn()) return;
     const loadShots = async (): Promise<ScreenshotRef[]> => {
       try {
         const photos: StoredPhoto[] = (await this.gallery?.getAll()) ?? [];
@@ -4494,13 +4516,36 @@ export class Game {
         this.creditsScrollerEl.style.transform = 'translateY(-' + y.toFixed(1) + 'px)';
       }
       if (this.creditsWalker.finished) {
-        this.cancelCreditsWalk();
-        this.setState('menu');
-        this.ui.showTitle(true);
+        this.finishCreditsWalk();
       }
     } catch (e) {
       console.warn('[bmb] credits walk tick failed', e);
     }
+  }
+
+  /**
+   * End the walk the way its natural finish does — tear down the overlay
+   * and hand off to the title — used by the walker clock running out and a
+   * player's skip press/click.
+   *
+   * @returns True when a live walk was finished; false when nothing was
+   *   playing (motion-safety runs never mount one).
+   */
+  private finishCreditsWalk(): boolean {
+    if (!this.creditsWalker) return false;
+    this.cancelCreditsWalk();
+    this.setState('menu');
+    this.ui.showTitle(true);
+    return true;
+  }
+
+  /**
+   * Public skip used by input handlers and the __BMB__ harness hook: end
+   * the credits walk right now with the natural-finish hand-off to the
+   * title. No-op when nothing is playing.
+   */
+  skipCreditsWalk(): boolean {
+    return this.finishCreditsWalk();
   }
 
   /** Tear down the credits overlay + cursor (cancel or natural finish). */
