@@ -60,3 +60,45 @@ WebGL has no per-stage UBO limit → unaffected.
   staging game.ts! Consider `git add -p` hunk selection.)
 - After commits: push origin+github (fetch/rebase-retry ≤5x), rebuild dist, re-smoke :4178.
 - Probe files test/gpu-probe*.mjs + gpu-parity.mjs are working notes, not committed.
+
+## ADDENDUM — v1.0.1 regression hunt (2026-08-25)
+
+Report: "c8bdc82 measures 5.4 GOOD; current main measures 1.9 BLACK-ish; bisect
+it." Findings from the automated bisect (c8bdc82..bc003c2, production builds,
+title-click probe) plus instrumented probes:
+
+### The bisect signal was a metric artifact, not a render change
+- First bad commit: **1074d8d** (F2 central mounts). Parent e8e1f9a = B=5.3;
+  1074d8d = B=1.6. Reproduced three times.
+- Mechanism: applyRenderClarity() defaults film grain OFF and hides the
+  #bmb-grain-overlay CSS node. That overlay is opacity-0.04 ~50%-gray noise
+  and contributes ≈ +3.7 to whole-frame average luminance over an empty
+  clear-color canvas. Every commit BEFORE 1074d8d measured "bright" only
+  because the grain overlay sat on top of a black world.
+- Proof: e8e1f9a with the overlay hidden pre-start reads B=1.6 — identical to
+  post-1074d8d "black" readings. Disabling every scene mutation inside
+  applyRenderClarity individually and together changed nothing; removing the
+  call restored 5.3 (the overlay stayed visible).
+
+### The real black screen predates c8bdc82 and is already fixed on main
+- At c8bdc82 AND its parent, WebGPU throws 23-27x
+  `GPUValidationError: number of uniform buffers (19) in the Vertex stage
+  exceeds the maximum per-stage limit (12)` (materials at
+  maxSimultaneousLights=16 + 3 fixed bindings) — pipelines rejected, world
+  draws clear-color only. This is DEFECT 2 above; it simply predates the
+  reported "good" commit.
+- Fixed mid-wave by **8b2a903** (enforceWebGPULightBudget clamp to 8).
+  Current main (bc003c2): 0 validation errors, WebGPU engine active, 200+
+  streamed meshes. Backend parity confirmed against the WebGL control on the
+  same build (WebGPU mean 2.8-3.9 vs WebGL 3.3).
+
+### Why the gate no longer uses a brightness threshold
+Composite-screenshot luminance cannot distinguish broken from healthy here:
+the dark-by-design scene plus DOM overlays dominate it. Measured on fixed
+seed 'gate': healthy build B=2.8/p99=54; broken build B=5.3/p99=64 (grain-era
+overlay over black world); broken-with-hidden-overlay B=1.6. Load also skews
+streaming (quiet-window readings run brighter than load-35 windows).
+test/webgpu-gate.mjs therefore asserts the failure class directly:
+WebGPU engine active + ZERO GPUValidationErrors during boot/play + >100
+active meshes; brightness is printed as information only. Verified PASS x2 on
+main and FAIL (exit 1, errors=26) against the pre-fix build.
