@@ -2406,7 +2406,13 @@ export class Game {
     if (this.audioModulesReady || !this.audio.started || !this.audio.ctx) return;
     const ctx = this.audio.ctx;
     const dest = ctx.destination;
-    try { this.humAudio = new PositionalHum(ctx, dest); }
+    // Whisper spatial authority: the two world-spatialized voices (fixture
+    // hum, binaural whispers) ride the adrenaline hearing-gain ambience bus
+    // so setHearingMul boosts them with the rest of the ambience pack;
+    // master.gain stays DreadSilence's alone. Falls back to the destination
+    // if the bus has not been unlocked yet.
+    const spatialBus = this.audio.ambienceBus ?? dest;
+    try { this.humAudio = new PositionalHum(ctx, spatialBus); }
     catch (e) { console.warn('[bmb] PositionalHum unavailable', e); this.humAudio = null; }
     try { this.watcherSteps = new WatcherSteps(ctx, dest); }
     catch (e) { console.warn('[bmb] WatcherSteps unavailable', e); this.watcherSteps = null; }
@@ -2472,7 +2478,7 @@ export class Game {
       this.whispers = new WhisperField(
         ctx,
         () => ({ x: this.player.body.x, z: this.player.body.z, yaw: this.player.yaw }),
-        { seed: (this.seed ^ 0x57686973) >>> 0 },
+        { seed: (this.seed ^ 0x57686973) >>> 0, destination: spatialBus },
       );
     } catch (e) { console.warn('[bmb] WhisperField unavailable', e); this.whispers = null; }
     // ---- F6: dread-silence duck over the total mix ----

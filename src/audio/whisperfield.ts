@@ -117,6 +117,14 @@ export const VOICE_LEVEL = 0.085;
 export const SMOOTH_TAU = 0.12;
 /** Default seed for voice placement when none is injected. */
 export const DEFAULT_FIELD_SEED = 0x57686973; // 'whis'
+/**
+ * Per-voice master trim applied at each voiceGain node. Must stay OPEN:
+ * the level/undulation solve lives downstream on the ear gains, so this
+ * node is pure structure. It used to be initialized to 0 and never
+ * retargeted anywhere, silently muting the entire field in-game
+ * (defect fixed 2026-08-25).
+ */
+export const VOICE_TRIM = 1;
 
 /** Rough vowel formant targets (Hz) that make filtered noise read as speech. */
 const VOWELS: readonly { f1: number; f2: number }[] = [
@@ -193,6 +201,12 @@ export interface WhisperFieldOptions {
   seed?: number;
   radius?: number;
   voiceCount?: number;
+  /**
+   * Output bus every voice merges into. Defaults to the context
+   * destination; the game injects the audio engine's ambience bus so
+   * whispers ride the adrenaline hearing-gain envelope.
+   */
+  destination?: AudioNodeLike;
 }
 
 /**
@@ -205,6 +219,8 @@ export class WhisperField {
   private readonly pose: PoseProvider;
   private readonly voices: FieldVoice[] = [];
   private readonly rnd: RNG;
+  /** Output bus every voice merges into (ambience bus when injected). */
+  private readonly out: AudioNodeLike;
   private clock = 0;
   private stopped = false;
   private noiseBuf: AudioBufferLike | null = null;
@@ -212,6 +228,7 @@ export class WhisperField {
   constructor(ctx: WhisperContext, pose: PoseProvider, options: WhisperFieldOptions = {}) {
     this.ctx = ctx;
     this.pose = pose;
+    this.out = options.destination ?? ctx.destination;
     this.rnd = new RNG(options.seed ?? DEFAULT_FIELD_SEED);
     const radius = options.radius ?? FIELD_RADIUS;
     const count = Math.max(4, options.voiceCount ?? VOICE_COUNT);
@@ -283,6 +300,19 @@ export class WhisperField {
     return { x: v.wx, z: v.wz };
   }
 
+  /**
+   * Diagnostics/test snapshot: each voice's master trim. Every entry must
+   * equal VOICE_TRIM — a 0 here means the field is structurally muted.
+   */
+  voiceTrims(): number[] {
+    return this.voices.map((v) => v.voiceGain.gain.value);
+  }
+
+  /** Output bus the voices merge into (bus-injection assertions). */
+  get destination(): AudioNodeLike {
+    return this.out;
+  }
+
   /** Smoothly silence every voice and stop the noise sources. */
   stop(): void {
     if (this.stopped) return;
@@ -319,7 +349,9 @@ export class WhisperField {
     if (vowelB === vowelA) vowelB = VOWELS[(VOWELS.indexOf(vowelA) + 2) % VOWELS.length];
     const filterHz: [number, number] = [vowelA.f1, vowelB.f2];
     const voiceGain = ctx.createGain();
-    voiceGain.gain.value = 0;
+    // Per-voice master trim: OPEN (VOICE_TRIM). Never a level envelope --
+    // the ear gains downstream carry the whole spatial + undulation solve.
+    voiceGain.gain.value = VOICE_TRIM;
     for (const hz of filterHz) {
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
@@ -343,7 +375,7 @@ export class WhisperField {
     panner.connect(earR);
     earL.connect(merger, 0, 0);
     earR.connect(merger, 0, 1);
-    merger.connect(ctx.destination);
+    merger.connect(this.out);
 
     src.start(ctx.currentTime + index * 0.07);
     return {

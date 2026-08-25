@@ -40,6 +40,7 @@ const {
   VOICE_LEVEL,
   WHISPER_REF_DIST,
   VOICE_COUNT,
+  VOICE_TRIM,
 } = await import('../src/audio/whisperfield.ts');
 
 // ---- minimal AudioContext stub --------------------------------------------
@@ -263,6 +264,41 @@ field.stop(); // double-stop safe
 field.update(0.016);
 check('stopped instance is inert',
   ctx.nodes.reduce((a, n) => a + n._stops.length, 0) === stopsBefore);
+
+// ---- 5. regression: the per-voice master trim must never be muted -----------
+// The 2026-08-25 defect: voiceGain.gain was initialized to 0 at build and
+// retargeted nowhere, structurally muting every whisper in-game while all
+// graph-level spatial assertions still passed. The trims are now provable.
+const trims = field.voiceTrims();
+check('trim: every voice master trim is open (VOICE_TRIM)',
+  trims.length === VOICE_COUNT && trims.every((t) => t === VOICE_TRIM),
+  JSON.stringify(trims));
+check('trim: VOICE_TRIM is unity', VOICE_TRIM === 1);
+
+// ---- 6. bus injection: voices merge into an injected output bus -------------
+const bus = new Node(ctx);
+bus._kind = 'bus';
+const field2 = new WhisperField(ctx, () => pose, { destination: bus, seed: 99 });
+field2.update(0.016);
+const mergerKinds = (dest) => ctx.nodes
+  .filter((n) => n._kind === 'merger' && n.conns.some((c) => c.dest === dest));
+check('bus: injected destination receives every voice merger',
+  mergerKinds(bus).length === VOICE_COUNT,
+  String(mergerKinds(bus).length));
+check('bus: default field merges into ctx.destination',
+  mergerKinds(ctx.destination).length >= VOICE_COUNT &&
+  field2.destination === bus,
+  `default mergers=${mergerKinds(ctx.destination).length}`);
+
+// ---- 7. game.ts wiring greps: both spatial voices ride the ambience bus -----
+import { readFileSync } from 'node:fs';
+const gameSrc = readFileSync(new URL('../src/core/game.ts', import.meta.url), 'utf8');
+check('wiring: game.ts derives a spatialBus from the audio engine',
+  /const spatialBus = this\.audio\.ambienceBus \?\? dest;/.test(gameSrc));
+check('wiring: PositionalHum is constructed on the spatial bus',
+  /new PositionalHum\(ctx, spatialBus\)/.test(gameSrc));
+check('wiring: WhisperField is constructed with destination: spatialBus',
+  /destination: spatialBus/.test(gameSrc));
 
 console.log(failures.length === 0
   ? '\nALL PASS'
