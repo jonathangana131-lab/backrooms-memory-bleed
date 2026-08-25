@@ -597,6 +597,8 @@ export class Game {
   private watcherIntro: WatcherIntroController | null = null;
   /** one-shot guard so markShown() persists exactly once */
   private watcherIntroMarked = false;
+  /** guard so the reveal subtitle fires once, at the visibility moment */
+  private watcherIntroLineShown = false;
   private gallery: PhotoGallery | null = null;
   // extended debrief telemetry (C-8)
   private torchLitSec = 0;
@@ -1661,6 +1663,11 @@ export class Game {
     // Wave A: per-run resets for pure-logic state machines
     try { this.beats?.reset(); }
     catch (e) { console.warn('[bmb] beats reset failed', e); }
+    // Wave C (C-6): the first-watcher moment re-arms per run; the once-ever
+    // flag lives in storage, so it plays on exactly one expedition ever.
+    this.watcherIntro = new WatcherIntroController();
+    this.watcherIntroMarked = false;
+    this.watcherIntroLineShown = false;
     this.prevStageChunk = null;
     // Wave B: per-run resets for scene/audio integrations
     try { this.gaze?.dispose(); }
@@ -2039,6 +2046,7 @@ export class Game {
         })();
         const f = this.humans.spawn(type, wx, wz, hash2i(Math.floor(wx), Math.floor(wz), this.seed ^ (revisited ? 0x5ec : 0x417d)));
         f.vanishAt = f.life + (revisited ? 60 : 90);
+        if (type === 'watcher') this.noteWatcherSpawn();
         break;
       }
     }
@@ -2064,6 +2072,7 @@ export class Game {
       const fz = this.player.body.z - Math.cos(yaw) * d;
       const f = this.humans.spawn('watcher', fx, fz, hash2i(Math.floor(fx), Math.floor(fz), this.seed ^ 0xfa7));
       f.vanishAt = f.life + 120;
+      this.noteWatcherSpawn();
     }
     // misleading safety: during long calms a figure stands far off in the fog
     if (this.director.phase === 'calm' && this.humans.count < 4 && rng.chance(0.14)) {
@@ -2073,6 +2082,7 @@ export class Game {
       const fz = this.player.body.z - Math.cos(yaw) * d;
       const f = this.humans.spawn('watcher', fx, fz, hash2i(Math.floor(fx), Math.floor(fz), this.seed ^ 0xfa7));
       f.vanishAt = f.life + 120;
+      this.noteWatcherSpawn();
     }
     // believers still work here
     if ((this.director.phase === 'calm' || this.director.phase === 'build') && this.humans.count < 4 && rng.chance(0.12)) {
@@ -2282,10 +2292,22 @@ export class Game {
     }
   }
 
+  /**
+   * Wave C (C-6): a watcher just spawned — if the once-ever first-watcher
+   * moment has never played, open its 2-second prelude now. Idempotent:
+   * begin() no-ops unless shouldPlay() holds, so later watchers in the
+   * same run (and every run after the flag persists) stay incidental.
+   */
+  private noteWatcherSpawn(): void {
+    try { this.watcherIntro?.begin(); }
+    catch { /* intro is cosmetic; the spawn itself must never fail */ }
+  }
+
   private spawnWatcherAt(wx: number, wz: number): void {
     if (this.humans.count >= 4) return;
     const f = this.humans.spawn('watcher', wx, wz, hash2i(Math.floor(wx), Math.floor(wz), this.seed ^ 0xca9a));
     f.vanishAt = f.life + 60;
+    this.noteWatcherSpawn();
   }
 
   private spawnEntity(kind: 'watcher' | 'wanderer'): void {
@@ -2310,6 +2332,7 @@ export class Game {
         if (s > bs) { bs = s; bx = cxw; bz = czw; if (s >= 5) break; }
       }
       this.humans.spawn('watcher', bx, bz, hash2i(Math.floor(bx), Math.floor(bz), this.seed));
+      this.noteWatcherSpawn();
       // faint approaching knocks give the sighting an audio anchor
       for (let i = 0; i < 3; i++) {
         setTimeout(() => this.audio.footstep(false, 0.35 - i * 0.08), 500 + i * 420);
@@ -3404,6 +3427,43 @@ export class Game {
         this.humAudio.update(focus.x, focus.z, focus.yaw);
       } catch (e) {
         console.warn('[bmb] positional hum update failed', e);
+      }
+    }
+
+    // Wave C (C-6): the first-watcher introduction timeline. Pure logic in
+    // WatcherIntroController; game.ts applies its effects to the real
+    // consumers — hum duck onto the fixture voices, string swell onto the
+    // score, strobe pressure onto lighting stress, and the reveal subtitle.
+    if (this.watcherIntro) {
+      try {
+        this.watcherIntro.update(dt);
+        // Effects apply only while the moment is on screen / in your ears.
+        // Feeding the idle identity every frame would defeat DynamicScore's
+        // lazy swell build (runs that never meet the first watcher must
+        // never pay for its oscillators) — and after 'done' the consumers
+        // are already easing home at their own targets, so silence here is
+        // exactly the resting state.
+        if (this.watcherIntro.isActive()) {
+          const wfx = this.watcherIntro.getEffects();
+          this.humAudio?.setLevelMul(wfx.humDuck);
+          this.score?.setIntroSwell(wfx.stringSwell);
+          if (wfx.flickerFixture) {
+            // director authority resumes next frame; during the prelude the
+            // nearest fixtures strobe instead of sitting at their base level
+            this.lighting.stressLevel = Math.max(this.lighting.stressLevel, 0.85);
+          }
+          const introLine = this.watcherIntro.getText();
+          if (introLine && !this.watcherIntroLineShown) {
+            this.ui.say(introLine, 4);
+            this.watcherIntroLineShown = true;
+          }
+        }
+        if (this.watcherIntro.phase === 'done' && !this.watcherIntroMarked) {
+          this.watcherIntro.markShown();
+          this.watcherIntroMarked = true;
+        }
+      } catch (e) {
+        console.warn('[bmb] watcher intro failed', e);
       }
     }
 

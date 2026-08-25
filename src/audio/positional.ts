@@ -33,6 +33,8 @@ export const REF_DIST = 5;
 export const VOICE_LEVEL = 0.12;
 /** Smoothing time constant for pan/gain motion, seconds. */
 export const SMOOTH_TAU = 0.1;
+/** Smoothing time constant for the master level multiplier, seconds. */
+export const LEVEL_MUL_TAU_S = 0.15;
 /** Combined loudness ceiling across all voices: -12 dB, linear. */
 export const COMBINED_CAP_LINEAR = Math.pow(10, -12 / 20);
 
@@ -64,6 +66,10 @@ interface HumVoice {
 export class PositionalHum {
   private readonly ctx: AudioContext;
   private readonly out: AudioNode;
+  /** Owned level stage between the voices and `out` (drives setLevelMul). */
+  private readonly bus: GainNode;
+  /** Current master level multiplier (1 = untouched legacy behaviour). */
+  private levelMul = 1;
   private readonly voices: HumVoice[] = [];
   private fixtures: FixturePos[] = [];
   private stopped = false;
@@ -71,6 +77,9 @@ export class PositionalHum {
   constructor(ctx: AudioContext, destination?: AudioNode) {
     this.ctx = ctx;
     this.out = destination ?? ctx.destination;
+    this.bus = ctx.createGain();
+    this.bus.gain.value = 1;
+    this.bus.connect(this.out);
     for (let i = 0; i < MAX_VOICES; i++) this.voices.push(this.buildVoice(i));
   }
 
@@ -81,7 +90,7 @@ export class PositionalHum {
     gain.gain.value = 0;
     const panner = ctx.createStereoPanner();
     panner.pan.value = 0;
-    gain.connect(panner).connect(this.out);
+    gain.connect(panner).connect(this.bus);
 
     // Per-voice detune spreads identical fixtures apart in phase so two
     // voices near each other produce a slow beat, not cancellation.
@@ -110,6 +119,24 @@ export class PositionalHum {
     this.fixtures = fixtures.filter(
       (f) => Number.isFinite(f.x) && Number.isFinite(f.z),
     );
+  }
+
+  /**
+   * Master duck over every fixture voice at once (first-watcher prelude).
+   * Clamped to [0, 1] — this is a duck, never a boost — and junk input
+   * (NaN/Infinity) falls back to identity. Smoothed so the duck reads as
+   * the lights dimming, not a mute.
+   */
+  setLevelMul(mul: number): void {
+    if (this.stopped || !this.ctx) return;
+    const m = Number.isFinite(mul) ? Math.min(1, Math.max(0, mul)) : 1;
+    this.levelMul = m;
+    this.bus.gain.setTargetAtTime(m, this.ctx.currentTime, LEVEL_MUL_TAU_S);
+  }
+
+  /** Current master level multiplier (diagnostics). */
+  get level(): number {
+    return this.levelMul;
   }
 
   /**

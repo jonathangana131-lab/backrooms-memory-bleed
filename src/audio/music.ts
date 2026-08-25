@@ -25,6 +25,10 @@ import { RNG } from '../core/rng';
 const SCORE_SALT = 0x35c03e;
 /** Default stream seed used when no run seed reaches the constructor. */
 const DEFAULT_SCORE_SEED = 0x6d55231c;
+/** Peak linear level of the first-watcher string swell at full ramp. */
+export const SWELL_TRIM = 0.05;
+/** Smoothing time constant for swell motion, seconds (slow = strings). */
+export const SWELL_TAU_S = 0.4;
 
 export class DynamicScore {
   private ctx: AudioContext;
@@ -35,6 +39,8 @@ export class DynamicScore {
   private tension = 0;
   private melodyNextIn = 5;
   private cluster: ClusterLayer | null = null;
+  /** First-watcher prelude: low-string swell layer, built on first use. */
+  private swell: ClusterLayer | null = null;
   private stopped = false;
   /** Seeded stream driving melody pacing and per-pluck rolls (determinism law). */
   private readonly rng: RNG;
@@ -78,6 +84,20 @@ export class DynamicScore {
     this.cluster!.gain.gain.setTargetAtTime(this.tension * 0.035, t, 1.2);
   }
 
+  /**
+   * First-watcher prelude: a low string swell ramping in from silence.
+   * Level clamps to [0, 1]; junk input (NaN/Infinity) reads as silence.
+   * Built lazily so runs that never meet the first watcher never pay for
+   * the oscillators. The layer eases home on the same slow tau, so the
+   * reveal exhales instead of cutting.
+   */
+  setIntroSwell(level: number): void {
+    if (this.stopped || !this.ctx) return;
+    const l = Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
+    if (!this.swell) this.buildSwell();
+    this.swell!.gain.gain.setTargetAtTime(l * SWELL_TRIM, this.ctx.currentTime, SWELL_TAU_S);
+  }
+
   /** Per-frame tick: schedules the sparse melodic fragments. */
   update(dt: number): void {
     if (this.stopped || !this.ctx) return;
@@ -103,6 +123,7 @@ export class DynamicScore {
     const dying: OscillatorNode[] = [];
     for (const layer of this.drones.values()) dying.push(...layer.oscs);
     if (this.cluster) dying.push(...this.cluster.oscs);
+    if (this.swell) dying.push(...this.swell.oscs);
     for (const o of dying) {
       try { o.stop(t + 1.8); } catch { /* already stopped */ }
     }
@@ -200,6 +221,34 @@ export class DynamicScore {
       oscs.push(o);
     }
     this.cluster = { gain, oscs };
+  }
+
+  /** Low-string swell: two detuned sawtooths a fifth apart, heavily lowpassed. */
+  private buildSwell(): void {
+    const ctx = this.ctx;
+    const gain = ctx.createGain();
+    gain.gain.value = 0; // silent until the first setIntroSwell ramps it
+    gain.connect(this.out);
+
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 260;
+    lp.Q.value = 0.5;
+    lp.connect(gain);
+
+    const oscs: OscillatorNode[] = [];
+    for (const [freq, cents] of [[55, 0], [82.41, 7]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = freq;
+      o.detune.value = cents;
+      const og = ctx.createGain();
+      og.gain.value = 0.5;
+      o.connect(og).connect(lp);
+      o.start();
+      oscs.push(o);
+    }
+    this.swell = { gain, oscs };
   }
 
   /** Glide the cluster onto the new zone's root without stepping a frequency. */
