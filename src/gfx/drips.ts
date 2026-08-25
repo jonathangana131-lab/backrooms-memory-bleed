@@ -40,6 +40,51 @@ export const FALL_SPEED = 7;
 export const INTERVAL_MIN = 3;
 export const INTERVAL_MAX = 8;
 
+/**
+ * Salt separating this system's interval draw stream from every other seeded
+ * consumer of a run seed (mirrors the XOR-salt pattern of HumHarmonics'
+ * HUM_SEED_SALT / EntityVocals' ctor seed).
+ */
+export const DRIP_SEED_SALT = 0x64726970; // 'drip'
+
+// --- mirrored deterministic helpers (tiledisplace.ts precedent: local copies
+// --- of src/core/rng.ts so the module stays dependency-free under direct
+// --- node strip-types test imports; algorithms identical to the RNG law) ----
+
+function hash2i(x: number, y: number, salt = 0): number {
+  let h = salt | 0;
+  const hl = (v: number): number => {
+    v |= 0;
+    v = Math.imul(v ^ (v >>> 16), 0x85ebca6b);
+    v = Math.imul(v ^ (v >>> 13), 0xc2b2ae35);
+    return (v ^ (v >>> 16)) >>> 0;
+  };
+  h = Math.imul(h ^ hl(x | 0), 0x9e3779b1);
+  h = Math.imul(h ^ hl(y | 0), 0x85ebca6b);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2545f491);
+  h ^= h >>> 13;
+  return h >>> 0;
+}
+
+/** Sequential draw stream, algorithm-identical to src/core/rng.ts RNG. */
+class RngStream {
+  private s: number;
+  constructor(seed: number) {
+    this.s = seed >>> 0 || 0x9e3779b9;
+  }
+  next(): number {
+    this.s = (this.s + 0x6d2b79f5) | 0;
+    let t = this.s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  range(min: number, max: number): number {
+    return min + this.next() * (max - min);
+  }
+}
+
 interface DripPoint {
   x: number;
   z: number;
@@ -62,7 +107,7 @@ function rolloff(dist: number): number {
   return r * r;
 }
 
-const randInterval = (): number => INTERVAL_MIN + Math.random() * (INTERVAL_MAX - INTERVAL_MIN);
+const seedFor = (runSeed: number): number => ((runSeed | 0) ^ DRIP_SEED_SALT) >>> 0;
 
 export class CeilingDrips {
   private points: DripPoint[] = [];
@@ -73,9 +118,23 @@ export class CeilingDrips {
   private active = 0;
   private stopped = false;
   private ctx: AudioContext | null;
+  /** Node plink voices terminate into; null = the ctx's own destination. */
+  private destination: AudioNode | null = null;
 
-  constructor(scene: Scene, ctx?: AudioContext) {
+  /**
+   * Deterministic draw stream for drip intervals. The legacy module drew
+   * from Math.random (both call sites: initial registration and post-spawn
+   * re-roll), which broke the repo's determinism law; both now draw here.
+   * seed=0 keeps direct-constructed instances on a fixed, documented stream.
+   */
+  private rng: RngStream;
+  /** Construction seed, reused by reset() when it gets no usable runSeed. */
+  private readonly baseSeed: number;
+
+  constructor(scene: Scene, ctx?: AudioContext, seed = 0) {
     this.ctx = ctx ?? null;
+    this.baseSeed = seed | 0;
+    this.rng = new RngStream(seedFor(this.baseSeed));
 
     // ---- shared materials ----
     const dropMat = new StandardMaterial('dripDropMat', scene);
@@ -126,6 +185,22 @@ export class CeilingDrips {
     return this.active;
   }
 
+  /** Seeded uniform interval draw — both former Math.random sites use it. */
+  private randInterval(): number {
+    return this.rng.range(INTERVAL_MIN, INTERVAL_MAX);
+  }
+
+  /**
+   * Bind (or rebind) the plink voice output. Called once audio is live so
+   * the splash sound rides the caller's bus instead of being hardwired to
+   * ctx.destination (ambience-bus authority rule). Passing no destination
+   * falls back to the ctx's own destination.
+   */
+  attachAudio(ctx: AudioContext, destination?: AudioNode): void {
+    this.ctx = ctx;
+    this.destination = destination ?? ctx.destination;
+  }
+
   /** Registered ceiling stain points. */
   get pointCount(): number {
     return this.points.length;
@@ -138,7 +213,7 @@ export class CeilingDrips {
    */
   registerStain(x: number, z: number): void {
     if (this.points.length >= 96) return;
-    this.points.push({ x, z, nextIn: randInterval() });
+    this.points.push({ x, z, nextIn: this.randInterval() });
   }
 
   /**
@@ -160,7 +235,7 @@ export class CeilingDrips {
       anyNear = true;
       p.nextIn -= dt;
       if (p.nextIn <= 0 && this.active < MAX_ACTIVE) {
-        p.nextIn = randInterval();
+        p.nextIn = this.randInterval();
         this.spawn(p.x, p.z);
       }
     }
@@ -262,9 +337,33 @@ export class CeilingDrips {
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
     const p = ctx.createStereoPanner();
     p.pan.value = pan;
-    o.connect(g).connect(p).connect(ctx.destination);
+    o.connect(g).connect(p).connect(this.destination ?? ctx.destination);
     o.start(t);
     o.stop(t + 0.14);
+  }
+
+  /**
+   * Re-arm the system for a fresh expedition. Unlike stop() (terminal by
+   * contract), reset() un-stops: every timer, splash and registered point is
+   * cleared, the pooled meshes hide, and — when a usable runSeed arrives —
+   * the interval stream reseeds off (runSeed ^ DRIP_SEED_SALT) so a run
+   * replays its drip cadence byte-identically. Non-finite runSeeds fall back
+   * to the construction seed (junk falls safe).
+   */
+  reset(runSeed?: number): void {
+    this.stopped = false;
+    this.active = 0;
+    this.points.length = 0;
+    for (let i = 0; i < MAX_ACTIVE; i++) {
+      const mesh = this.dropMeshes[i];
+      if (mesh) mesh.isVisible = false;
+      const sm = this.splashMeshes[i];
+      if (sm) sm.isVisible = false;
+      this.slots[i].t = -1;
+      this.splashes[i].t = -1;
+    }
+    const s = Number.isFinite(runSeed) ? (runSeed as number) : this.baseSeed;
+    this.rng = new RngStream(seedFor(s));
   }
 
   /**

@@ -23,6 +23,8 @@ import { PlayerController } from '../player/controller';
 import { Flashlight } from '../player/flashlight';
 import { DustMotes } from '../gfx/dust';
 import { SeasonBleedParticles, spawnPlan } from '../gfx/seasonbleed';
+import { CeilingDrips } from '../gfx/drips';
+import { DripWiring } from '../world/drip-wiring';
 import { attachClipboardProp, HumanFigure, type HumanType } from '../entities/humans';
 import { AudioEngine } from '../audio/audio';
 import { SelfRadio, type FeedEntry } from '../audio/selfradio';
@@ -309,6 +311,10 @@ export class Game {
   flashlight!: Flashlight;
   dust!: DustMotes;
   seasonBleed!: SeasonBleedParticles;
+  /** Wet-room ceiling drips; failure island, null when construction failed. */
+  drips: CeilingDrips | null = null;
+  /** Lazy stain->drip bridge; formed on the first built wet chunk. */
+  private dripWiring: DripWiring | null = null;
   audio = new AudioEngine();
   ui!: UI;
   mem!: MemoryField;
@@ -842,6 +848,11 @@ export class Game {
     // v1.1 debt payoff: the F57 seasonal-bleed particle descriptor's
     // consumer — parked until the player stands in the elected bleed room
     this.seasonBleed = new SeasonBleedParticles(this.scene);
+    // wet-room ceiling drips: visuals boot here, the plink voice binds to
+    // the ambience bus later in ensureAudioIntegrations(); stain sources
+    // arrive per built chunk through dripWiring (see noteBuiltChunks)
+    try { this.drips = new CeilingDrips(this.scene); }
+    catch (e) { console.warn('[bmb] ceiling drips unavailable', e); this.drips = null; }
     this.humans = new HumanManager(this.scene);
     this.humans.onWatcherVanish = () => {
       this.audio.lightCrack();
@@ -1664,6 +1675,11 @@ export class Game {
     // seasonal-bleed particles park until the new run's room is stood in
     try { this.seasonBleed.configure(null); }
     catch (e) { console.warn('[bmb] season bleed reset failed', e); }
+    // wet-room drips re-arm on the fresh run seed; the stain bridge reforms
+    // lazily against the first newly-built wet chunk
+    try { this.drips?.reset(this.seed); }
+    catch (e) { console.warn('[bmb] ceiling drip reset failed', e); }
+    this.dripWiring = null;
     this.blackoutUntil = 0;
     this.mem.seed = this.seed;
     this.weather = new MemoryWeather(this.seed ^ 0x5179);
@@ -2402,8 +2418,19 @@ export class Game {
         const cz = pcz + dz;
         const key = cx + ':' + cz;
         if (this.knownChunkKeys.has(key)) continue;
-        if (!this.chunks.layoutAt(cx, cz)) continue;
+        const builtLayout = this.chunks.layoutAt(cx, cz);
+        if (!builtLayout) continue;
         this.knownChunkKeys.add(key);
+        // wet-room drip sources: the bridge forms lazily against the live
+        // drips system, then every newly-built layout feeds its ceiling
+        // stains through (puddle-gated inside DripWiring per CeilingDrips'
+        // no-puddle-no-splash contract)
+        if (!this.dripWiring && this.drips) {
+          try { this.dripWiring = new DripWiring(this.drips); }
+          catch (e) { console.warn('[bmb] drip wiring unavailable', e); }
+        }
+        try { this.dripWiring?.onLayoutBuilt(builtLayout); }
+        catch (e) { console.warn('[bmb] drip registration failed', e); }
         if (!this.fauna) continue;
         const district = this.chunks.districtAtPos(
           cx * CHUNK_SIZE + CHUNK_SIZE / 2, cz * CHUNK_SIZE + CHUNK_SIZE / 2,
@@ -2482,6 +2509,11 @@ export class Game {
     // ---- Entity vocals: figure voices ride the same spatial authority ----
     try { this.entityVocals = new EntityVocals(ctx, spatialBus, (this.seed ^ 0x65766f63) >>> 0); }
     catch (e) { console.warn('[bmb] EntityVocals unavailable', e); this.entityVocals = null; }
+    // ---- Wet-room drip plinks: splash voices ride the same spatial      ----
+    // ---- authority as the ambience they punctuate (attach may be late;  ----
+    // ---- visuals run silent until audio unlocks, per the module contract) ----
+    try { this.drips?.attachAudio(ctx, spatialBus); }
+    catch (e) { console.warn('[bmb] drip audio unavailable', e); }
     try { this.watcherSteps = new WatcherSteps(ctx, dest); }
     catch (e) { console.warn('[bmb] WatcherSteps unavailable', e); this.watcherSteps = null; }
     try { this.surfaceFootsteps = new SurfaceFootsteps(ctx, dest); }
@@ -2878,8 +2910,16 @@ export class Game {
         const stageChunk = Math.floor(this.player.body.x / CHUNK_SIZE) + ':' + Math.floor(this.player.body.z / CHUNK_SIZE);
         if (stageChunk !== this.prevStageChunk) {
           this.prevStageChunk = stageChunk;
-          try { this.stainGrowth?.noteChunkEntry(stageChunk); }
+          let stainsBloomed = false;
+          try { stainsBloomed = this.stainGrowth?.noteChunkEntry(stageChunk) ?? false; }
           catch (e) { console.warn('[bmb] stain growth failed', e); }
+          // a bloomed chunk's ceiling leaks harder: relay the advance into
+          // the drip system (DripWiring normalizes this ':' key onto the
+          // sync's ',' spelling)
+          if (stainsBloomed && this.dripWiring) {
+            try { this.dripWiring.onStageAdvance(stageChunk); }
+            catch (e) { console.warn('[bmb] drip growth relay failed', e); }
+          }
           try { this.graffitiEvolution?.noteChunkEntry(stageChunk); }
           catch (e) { console.warn('[bmb] graffiti evolution failed', e); }
         }
@@ -3714,6 +3754,10 @@ export class Game {
     const fx2 = this.state === 'menu' ? this.attract.x : this.player.body.x;
     const fz2 = this.state === 'menu' ? this.attract.z : this.player.body.z;
     this.dust.update(dt, fx2, fz2);
+    // wet-room ceiling drips: the sim idles on its own when no registered
+    // stain point is within earshot/eyesight
+    try { this.drips?.update(dt, fx2, fz2); }
+    catch (e) { console.warn('[bmb] ceiling drips failed', e); }
     // v1.1 debt payoff: the F57 seasonal-bleed particle descriptor finally
     // has its consumer — while the player stands inside the session's
     // elected bleed room, the ambient cloud renders that season's

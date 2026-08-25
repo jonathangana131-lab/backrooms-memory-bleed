@@ -69,6 +69,9 @@ const chunkKeyOf = (x, z) => Math.floor(x / CHUNK_SIZE) + ',' + Math.floor(z / C
   // deliberately bogus cx/cz: grouping must follow stain WORLD positions
   w.onLayoutBuilt({
     cx: 9, cz: 9,
+    // wet floor: CeilingDrips' contract gates registration on non-empty
+    // puddles, so every fixture meant to register must carry them
+    puddles: [{ x: 6, z: 7, r: 0.8 }],
     stains: [
       { x: 5, z: 7, r: 1.3 },
       { x: 25, z: 8, r: 0.9 },
@@ -96,14 +99,14 @@ const chunkKeyOf = (x, z) => Math.floor(x / CHUNK_SIZE) + ',' + Math.floor(z / C
   // --- dedup within and across layouts -------------------------------------
   const api = makeMockApi();
   const w = new DripWiring(api);
-  w.onLayoutBuilt({ stains: [{ x: 10, z: 10 }, { x: 10.6, z: 10.2 }] });
+  w.onLayoutBuilt({ puddles: [{ x: 10, z: 10, r: 0.5 }], stains: [{ x: 10, z: 10 }, { x: 10.6, z: 10.2 }] });
   check('stains within MERGE_DIST share ONE drip point',
     api.calls.length === 1 && api.calls[0][0] === 10 && api.calls[0][1] === 10,
     JSON.stringify(api.calls));
 
   // re-entering/rebuilding the same chunk must not stack emitters
   const before = api.calls.length;
-  w.onLayoutBuilt({ stains: [{ x: 10.4, z: 9.8 }, { x: 25, z: 25 }] });
+  w.onLayoutBuilt({ puddles: [{ x: 10, z: 10, r: 0.5 }], stains: [{ x: 10.4, z: 9.8 }, { x: 25, z: 25 }] });
   check('rebuild of overlapping stain merges away', api.calls.length === before + 1);
   check('only the genuinely new stain registers again',
     api.lastCall()[0] === 25 && api.lastCall()[1] === 25,
@@ -120,7 +123,12 @@ const chunkKeyOf = (x, z) => Math.floor(x / CHUNK_SIZE) + ',' + Math.floor(z / C
   w.onLayoutBuilt(undefined);
   w.onLayoutBuilt({ stains: null });
   check('missing/null stains list is a no-op', api.calls.length === 0);
-  w.onLayoutBuilt({ stains: [{ x: NaN, z: 3 }, { x: 3, z: Infinity }, null] });
+  // puddle gate: stained ceilings over dry floor shed nothing
+  w.onLayoutBuilt({ stains: [{ x: 1, z: 1 }] });
+  w.onLayoutBuilt({ stains: [{ x: 1, z: 1 }], puddles: [] });
+  w.onLayoutBuilt({ stains: [{ x: 1, z: 1 }], puddles: null });
+  check('missing/empty/null puddles list gates registration off', api.calls.length === 0);
+  w.onLayoutBuilt({ stains: [{ x: NaN, z: 3 }, { x: 3, z: Infinity }, null], puddles: [{ x: 2, z: 3, r: 0.4 }] });
   check('non-finite and malformed entries are skipped', api.calls.length === 0);
 }
 
@@ -129,7 +137,7 @@ const chunkKeyOf = (x, z) => Math.floor(x / CHUNK_SIZE) + ',' + Math.floor(z / C
   const api = makeMockApi();
   const w = new DripWiring(api);
   const keyA = 'a-chunk';
-  w.onLayoutBuilt({ stains: [{ x: 40, z: 40 }, { x: 44, z: 41 }] }); // same 30 m chunk -> key '1,1'
+  w.onLayoutBuilt({ puddles: [{ x: 40, z: 40, r: 0.6 }], stains: [{ x: 40, z: 40 }, { x: 44, z: 41 }] }); // same 30 m chunk -> key '1,1'
   const key11 = chunkKeyOf(40, 40);
   check('test fixture puts both points in one chunk', key11 === '1,1');
   const afterSync = api.calls.length;

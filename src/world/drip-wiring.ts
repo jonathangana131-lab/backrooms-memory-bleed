@@ -29,6 +29,23 @@ export interface LayoutWithStains {
   cz?: number;
   /** Ceiling stains produced by the layout builder, if any. */
   stains?: LayoutStain[] | null;
+  /**
+   * Floor puddles on the same layout. CeilingDrips' own contract is
+   * "no puddle, no audible splash": chunks without at least one puddle
+   * never register drip points, however stained their ceilings are.
+   */
+  puddles?: unknown[] | null;
+}
+
+/**
+ * Reconcile the two chunk-key spellings in this repo: game.ts stage
+ * bookkeeping (and stains-growth's storage) writes '<cx>:<cz>' while
+ * StainDripSync groups points as '<cx>,<cz>'. Without normalization every
+ * stage advance would miss its chunk and growth-driven drip doubling would
+ * silently never fire. Non-string junk passes through unchanged.
+ */
+export function normalizeChunkKey(chunkKey: string): string {
+  return typeof chunkKey === 'string' ? chunkKey.replace(/:/g, ',') : chunkKey;
 }
 
 /**
@@ -50,20 +67,24 @@ export class DripWiring {
   /**
    * Feed one built chunk layout's ceiling stains into the drip system.
    * Null/undefined layouts and missing/null/malformed stain lists are
-   * accepted no-ops; duplicate/near-overlapping stains merge away inside the
-   * sync, so rebuilding a chunk never stacks emitters.
+   * accepted no-ops, as are layouts with no floor puddles (CeilingDrips'
+   * own "no puddle, no audible splash" contract — a stained ceiling over
+   * dry floor sheds nothing); duplicate/near-overlapping stains merge away
+   * inside the sync, so rebuilding a chunk never stacks emitters.
    */
   onLayoutBuilt(layout: LayoutWithStains | null | undefined): void {
     if (!layout || !Array.isArray(layout.stains)) return;
+    if (!Array.isArray(layout.puddles) || layout.puddles.length === 0) return;
     this.sync.syncFromLayout(layout.stains);
   }
 
   /**
    * Relay a stain-growth stage advance for `chunkKey`: every live drip point
    * in that chunk registers once more (frequency doubling, capped by the
-   * sync's MAX_DOUBLINGS budget guard). Unknown chunk keys are inert.
+   * sync's MAX_DOUBLINGS budget guard). Unknown chunk keys are inert. The
+   * key is normalized first, so callers may use either repo spelling.
    */
   onStageAdvance(chunkKey: string): void {
-    this.sync.onStageAdvance(chunkKey);
+    this.sync.onStageAdvance(normalizeChunkKey(chunkKey));
   }
 }
